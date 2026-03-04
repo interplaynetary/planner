@@ -21,17 +21,17 @@
  */
 
 import { nanoid } from 'nanoid';
-import type { Intent, Plan, Process, Commitment, SpatialThing, Agent } from '../../schemas';
-import { ACTION_DEFINITIONS } from '../../schemas';
-import type { DemandSlot } from '../../indexes/independent-demand';
-import { RecipeStore } from '../../knowledge/recipes';
-import { Observer } from '../../observation/observer';
+import type { Intent, Plan, Process, Commitment, SpatialThing, Agent } from '../../src/lib/schemas';
+import { ACTION_DEFINITIONS } from '../../src/lib/schemas';
+import type { DemandSlot } from '../../src/lib/indexes/independent-demand';
+import { RecipeStore } from '../../src/lib/knowledge/recipes';
+import { Observer } from '../../src/lib/observation/observer';
 import {
     buildAgentIndex,
     queryAgentsBySpec,
     getTotalAgentHours,
     type AgentIndex,
-} from '../../indexes/agents';
+} from '../../src/lib/indexes/agents';
 import {
     type Scenario,
     type ScenarioIndex,
@@ -43,8 +43,8 @@ import {
     mergeFrontier,
     globalParetoFront,
     scenarioToPlan,
-} from '../../utils/space-time-scenario';
-import { PlanStore } from '../../planning/planning';
+} from '../../src/lib/utils/space-time-scenario';
+import { PlanStore } from '../../src/lib/planning/planning';
 
 // =============================================================================
 // INFRASTRUCTURE TAG
@@ -88,7 +88,7 @@ export const DEFAULT_CONFIG: IntegratedPlannerConfig = {
  * Replaces planner.ts `FeasibleStrategy` — computed entirely from VF types.
  */
 interface VfFeasibleRecipe {
-    recipe: import('../../schemas').Recipe;
+    recipe: import('../../src/lib/schemas').Recipe;
     /** ResourceSpecification ID produced as primary output. */
     outputSpecId: string;
     /** Per-execution output quantity. */
@@ -109,7 +109,7 @@ interface VfFeasibleRecipe {
  * A recipe selected for execution during the backward pass.
  */
 interface VfSelectedRecipe {
-    recipe: import('../../schemas').Recipe;
+    recipe: import('../../src/lib/schemas').Recipe;
     executions: number;
     /** Total quantity produced in this selection. */
     quantity: number;
