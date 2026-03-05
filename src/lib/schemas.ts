@@ -505,6 +505,9 @@ export const ResourceSpecificationSchema = z.object({
     defaultUnitOfEffort: z.string().optional(),
     substitutable: z.boolean().optional(),
     mediumOfExchange: z.boolean().optional(),
+    // DDMRP extensions
+    bufferProfileId: z.string().optional(),               // BufferProfile ID
+    replenishmentRequired: z.boolean().optional(),        // tag:plan:replenishment-required (Pass 2 trigger)
 });
 export type ResourceSpecification = z.infer<typeof ResourceSpecificationSchema>;
 
@@ -518,6 +521,9 @@ export const ProcessSpecificationSchema = z.object({
     name: z.string(),
     note: z.string().optional(),
     image: z.string().optional(),
+    // DDMRP extensions
+    isDecouplingPoint: z.boolean().optional(),            // design-time strategic buffer placement marker
+    isControlPoint: z.boolean().optional(),               // design-time scheduling pacemaker marker
 });
 export type ProcessSpecification = z.infer<typeof ProcessSpecificationSchema>;
 
@@ -998,3 +1004,250 @@ export const ProposalListSchema = z.object({
     lists: z.array(z.string()).optional(),                 // Proposal IDs
 });
 export type ProposalList = z.infer<typeof ProposalListSchema>;
+
+// =============================================================================
+// DDMRP BUFFER MANAGEMENT
+// =============================================================================
+
+/**
+ * BufferProfile — DDS&OP master settings for a category of buffered items.
+ *
+ * One profile per (itemType × leadTimeBand × variabilityBand) combination.
+ * Multiple ResourceSpecifications share the same profile when they have the
+ * same operational characteristics.
+ *
+ * DDMRP ref: Ptak & Smith Ch 8 — Buffer Profiles and Levels.
+ */
+export const BufferProfileSchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    /** P = Purchased externally; M = Manufactured in-house; I = Intermediate (both) */
+    itemType: z.enum(['Purchased', 'Manufactured', 'Intermediate']),
+    /**
+     * Lead Time Factor — multiplier applied to ADU × DLT to size the red zone base.
+     * Typical values: 0.5 (short LT), 1.0 (medium LT), 1.5 (long LT).
+     */
+    leadTimeFactor: z.number().positive(),
+    /**
+     * Variability Factor — fraction of the red base added as a safety buffer.
+     * TOR = ADU × DLT × LTF × (1 + VF). Typical values: 0.1 (low), 0.5 (medium), 1.0 (high).
+     */
+    variabilityFactor: z.number().nonnegative(),
+    /**
+     * Order cycle days — drives the green zone upper bound.
+     * Green zone ≥ max(ADU × orderCycleDays, MOQ).
+     * Omit when MOQ always dominates or for one-off items.
+     */
+    orderCycleDays: z.number().positive().optional(),
+    /**
+     * Order Spike Threshold multiplier (k). A demand order is considered a spike —
+     * and excluded from qualified demand — when its quantity > ADU × ostMultiplier.
+     * Typical range: 1–3. When absent, no spike filtering is applied.
+     */
+    ostMultiplier: z.number().positive().optional(),
+    /**
+     * Scheduled zone-recalculation cadence for items in this profile.
+     * Used by the zone-recalculation scheduler to determine when to recompute
+     * ADU, DLT, and zone boundaries.
+     */
+    recalculationCadence: z.enum(['daily', 'weekly', 'monthly']).optional(),
+    note: z.string().optional(),
+});
+export type BufferProfile = z.infer<typeof BufferProfileSchema>;
+
+/**
+ * BufferZone — per-ResourceSpecification computed DDMRP buffer parameters.
+ *
+ * Stores the computed TOR/TOY/TOG zone boundaries for a specific item at a
+ * specific location (or globally when atLocation is absent).
+ *
+ * Zone boundaries (all in `aduUnit` units):
+ *   red base   = ADU × DLT × LTF
+ *   red safety = red base × VF
+ *   TOR        = red base + red safety = ADU × DLT × LTF × (1 + VF)
+ *   TOY        = TOR + ADU × DLT
+ *   TOG        = TOY + max(ADU × orderCycleDays, MOQ)
+ *
+ * Note: the formula ADU × DLT × (LTF + VF) found in some documents is only
+ * equivalent when LTF = 1.0. The correct Ptak & Smith formula is LTF × (1 + VF).
+ *
+ * DDMRP ref: Ptak & Smith Ch 8 — Buffer Profiles and Levels, Ch 9 — DDMRP.
+ */
+export const BufferZoneSchema = z.object({
+    id: z.string(),
+    /** ResourceSpecification ID this zone applies to */
+    specId: z.string(),
+    /** BufferProfile ID used to compute this zone */
+    profileId: z.string(),
+    /** SpatialThing ID — if absent, applies to all locations */
+    atLocation: z.string().optional(),
+
+    // --- ADU inputs ---
+    /** Average Daily Usage quantity (result of the rolling-window calculation) */
+    adu: z.number().nonnegative(),
+    /** Unit label or URI matching the ResourceSpecification's defaultUnitOfResource */
+    aduUnit: z.string(),
+    /**
+     * Blending ratio for ADU computation: proportion of past ADU in blended result.
+     * 0 = forward-only, 1 = past-only, 0.5 = equal blend.
+     * When absent, either pure-past or pure-forward ADU is used.
+     */
+    aduBlendRatio: z.number().min(0).max(1).optional(),
+    /**
+     * Rolling window length used to compute the past component of ADU.
+     * Standard DDMRP practice: 28–90 days. When absent, assumed from profile defaults.
+     */
+    aduWindowDays: z.number().positive().optional(),
+    /**
+     * ISO date of the earliest EconomicEvent included in the ADU calculation.
+     * Together with lastComputedAt, pins the exact historical window used.
+     */
+    aduComputedFrom: z.string().optional(),
+    /**
+     * Order Spike Threshold horizon in days. Demand orders further out than
+     * this horizon are exempt from spike filtering (they are future, not spikes).
+     * Typical DDMRP practice: 50% of DLT. Overrides BufferProfile.ostMultiplier
+     * horizon for this specific zone when present.
+     */
+    ostHorizonDays: z.number().positive().optional(),
+
+    // --- Decoupled Lead Time ---
+    /** DLT in calendar days (from recipe template or criticalPath() on instantiated Plan) */
+    dltDays: z.number().nonnegative(),
+
+    // --- MOQ (mirrored for quick access) ---
+    /** Minimum order/batch quantity — mirrors RecipeProcess.minimumBatchQuantity */
+    moq: z.number().nonnegative(),
+    /** Unit label for MOQ */
+    moqUnit: z.string(),
+
+    // --- Computed zone boundaries (all in aduUnit) ---
+    /** Top of Red = red zone upper boundary */
+    tor: z.number().nonnegative(),
+    /** Top of Yellow = red + yellow zone boundary */
+    toy: z.number().nonnegative(),
+    /** Top of Green = full buffer ceiling */
+    tog: z.number().nonnegative(),
+
+    // --- Dynamic adjustment factors ---
+    /** DAF: multiplier on ADU (Demand Adjustment Factor). Default 1.0. */
+    demandAdjFactor: z.number().positive().optional(),
+    /** ZAF: direct zone size multiplier. Default 1.0. */
+    zoneAdjFactor: z.number().positive().optional(),
+    /** LTAF: DLT multiplier. Default 1.0. */
+    leadTimeAdjFactor: z.number().positive().optional(),
+    /** Supply timing offset in days (shifts order due date). */
+    supplyOffsetDays: z.number().optional(),
+
+    /**
+     * DemandAdjustmentFactor IDs whose validFrom ≤ lastComputedAt ≤ validTo
+     * were combined to produce the current demandAdjFactor/zoneAdjFactor/leadTimeAdjFactor
+     * values. Lets the recalculation engine expire stale adjustments without a full scan.
+     */
+    activeAdjustmentIds: z.array(z.string()).optional(),
+
+    /** ISO datetime of last zone recalculation */
+    lastComputedAt: z.string().datetime(),
+});
+export type BufferZone = z.infer<typeof BufferZoneSchema>;
+
+/**
+ * ReplenishmentSignal — an NFP-triggered supply order proposal.
+ *
+ * Created when NFP ≤ TOY (Net Flow Position at or below Top of Yellow).
+ * Carries all inputs to the replenishment decision plus the recommended order
+ * quantity and its approval status.
+ *
+ * On approval, `approvedCommitmentId` is set by `promoteToCommitment()`.
+ *
+ * DDMRP ref: Ptak & Smith Ch 9 — Supply Order Generation.
+ */
+export const ReplenishmentSignalSchema = z.object({
+    id: z.string(),
+    /** ResourceSpecification ID */
+    specId: z.string(),
+    /** SpatialThing ID — if absent, signal applies to all locations */
+    atLocation: z.string().optional(),
+    /** BufferZone ID that provided TOR/TOY/TOG and DLT */
+    bufferZoneId: z.string(),
+
+    // --- NFP components (all in BufferZone.aduUnit) ---
+    /** Physical on-hand quantity at signal time (onhandQuantity, custody-based) */
+    onhand: z.number(),
+    /** Sum of open supply Commitments (approved orders only, not Intents) */
+    onorder: z.number().nonnegative(),
+    /** OST-filtered qualified demand due today */
+    qualifiedDemand: z.number().nonnegative(),
+    /**
+     * Net Flow Position = onhand + onorder − qualifiedDemand.
+     * CAN BE NEGATIVE (negative = stockout zone, below red).
+     */
+    nfp: z.number(),
+
+    // --- Zone assessment ---
+    /** Planning priority = NFP / TOG. Values < 0 indicate stockout. */
+    priority: z.number(),
+    /**
+     * Buffer zone at signal time.
+     * 'excess' = NFP > TOG (overstocked; signal is informational, not a replenishment request).
+     */
+    zone: z.enum(['red', 'yellow', 'green', 'excess']),
+
+    // --- Order recommendation ---
+    /** TOG − NFP, rounded up to nearest MOQ/multiple. */
+    recommendedQty: z.number().positive(),
+    /** ISO date: today + DLT (when the order should arrive) */
+    dueDate: z.string(),
+
+    // --- Lifecycle ---
+    status: z.enum(['open', 'approved', 'rejected']),
+    /** Set by promoteToCommitment() when signal is approved */
+    approvedCommitmentId: z.string().optional(),
+    /** ISO datetime when this signal was generated */
+    createdAt: z.string().datetime(),
+});
+export type ReplenishmentSignal = z.infer<typeof ReplenishmentSignalSchema>;
+
+/**
+ * DemandAdjustmentFactor — DDS&OP planned multipliers for buffer zone recalculation.
+ *
+ * Applied during scheduled zone recalculations to account for known future
+ * demand changes (seasonality, promotions, ramp-up/down) that ADU history
+ * does not yet reflect.
+ *
+ * Three types:
+ *   'demand'   — multiplies ADU (affects yellow + red zone sizing)
+ *   'zone'     — multiplies the entire zone size directly
+ *   'leadTime' — multiplies DLT (affects red + yellow zone sizing)
+ *
+ * DDMRP ref: Ptak & Smith Ch 8 — Dynamic Adjustments.
+ */
+export const DemandAdjustmentFactorSchema = z.object({
+    id: z.string(),
+    /** ResourceSpecification ID this adjustment applies to */
+    specId: z.string(),
+    /**
+     * SpatialThing ID — scopes this adjustment to a specific location's BufferZone.
+     * When absent, applies to all locations for the given specId.
+     */
+    atLocation: z.string().optional(),
+    /** Which component of the buffer zone formula this factor adjusts */
+    type: z.enum(['demand', 'zone', 'leadTime']),
+    /**
+     * Multiplier applied to the target component.
+     * 1.0 = no change; 1.2 = 20% increase; 0.8 = 20% decrease.
+     */
+    factor: z.number().positive(),
+    /** ISO date (inclusive) — start of the adjustment window */
+    validFrom: z.string(),
+    /** ISO date (inclusive) — end of the adjustment window */
+    validTo: z.string(),
+    /**
+     * Supply timing offset in days — for 'demand' type only.
+     * Shifts the ADU computation window forward by this many days
+     * (used to pre-position supply for a known ramp-up).
+     */
+    supplyOffsetDays: z.number().optional(),
+    note: z.string().optional(),
+});
+export type DemandAdjustmentFactor = z.infer<typeof DemandAdjustmentFactorSchema>;

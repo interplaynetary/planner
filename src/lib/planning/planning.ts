@@ -42,6 +42,8 @@ import type {
     RecipeExchange,
     Scenario,
     ScenarioDefinition,
+    ReplenishmentSignal,
+    VfAction,
 } from '../schemas';
 import { ACTION_DEFINITIONS } from '../schemas';
 import type { TemporalExpression } from '../utils/time';
@@ -311,6 +313,63 @@ export class PlanStore {
                 intent.availableQuantity.hasNumericalValue <= 0;
             if (depleted) intent.finished = true;
         }
+
+        return commitment;
+    }
+
+    /**
+     * Promote a ReplenishmentSignal to an approved supply Commitment.
+     *
+     * Creates a Commitment with the signal's recommended quantity and due date,
+     * then stamps `signal.status = 'approved'` and `signal.approvedCommitmentId`.
+     *
+     * VF supply order types by sourcing strategy:
+     *   MO (manufactured in-house) → action: 'produce', outputOf: processId
+     *   PO (purchased externally)  → action: 'transferAllRights' or 'transfer'
+     *   TO (transfer from depot)   → action: 'transferCustody' or 'transfer'
+     *
+     * @param signal    Open ReplenishmentSignal to approve (mutated in place)
+     * @param aduUnit   Unit string for the recommended quantity (from BufferZone.aduUnit)
+     * @param provider  Agent ID providing the supply
+     * @param receiver  Agent ID receiving the supply
+     * @param opts      Optional: action (default 'produce'), outputOf, plannedWithin
+     */
+    promoteSignalToCommitment(
+        signal: ReplenishmentSignal,
+        aduUnit: string,
+        provider: string,
+        receiver: string,
+        opts?: {
+            action?: VfAction;
+            outputOf?: string;
+            plannedWithin?: string;
+        },
+    ): Commitment {
+        if (signal.status !== 'open') {
+            throw new Error(
+                `ReplenishmentSignal ${signal.id} cannot be promoted: status is '${signal.status}'`,
+            );
+        }
+
+        const commitment = this.addCommitment({
+            action: opts?.action ?? 'produce',
+            resourceConformsTo: signal.specId,
+            resourceQuantity: {
+                hasNumericalValue: signal.recommendedQty,
+                hasUnit: aduUnit,
+            },
+            // ReplenishmentSignal.dueDate is YYYY-MM-DD; Commitment.due is ISO datetime
+            due: `${signal.dueDate}T00:00:00.000Z`,
+            ...(signal.atLocation ? { atLocation: signal.atLocation } : {}),
+            provider,
+            receiver,
+            ...(opts?.outputOf ? { outputOf: opts.outputOf } : {}),
+            ...(opts?.plannedWithin ? { plannedWithin: opts.plannedWithin } : {}),
+            finished: false,
+        });
+
+        signal.status = 'approved';
+        signal.approvedCommitmentId = commitment.id;
 
         return commitment;
     }
