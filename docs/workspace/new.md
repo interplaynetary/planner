@@ -51,7 +51,7 @@
 
 `The way these coordination bodies are composed should allow for global constraints to be satisfied and for planners to find solutions quickly and effectively, staying responsive to local information.`
 
-`A federation structure with disjoint membership (no entity can be part of more than one other entity), ensures minimal conflict resolution requirement, and has the least stress on planners with local/global inversion. A strict disjoint federation is not the only possible structure, but is the most efficient structure for achieving planner objectives/constraints with local/global inversion.`
+`A federation structure with disjoint membership (no entity can be part of more than one other entity), ensures minimal conflict resolution requirement, and has the least stress on planners with local/global inversion. A strict disjoint federation is not the only possible structure, but is the most efficient structure for achieving planner objectives/constraints with local/global inversion. Moreover, generally speaking, spatial continuity of the members of a coordination-body aligns well with the aforementioned design goals for the planner.`
 
 `Participants in these coordination-bodies must remain embedded in and responsible to their communities — they must feel in their own lives the consequences of the decisions they make during plan merging. Otherwise, we create a professional planning class, and with it, the division between mental and physical labor reasserts itself in a new form.`
 
@@ -355,4 +355,3 @@ _`Negotiated Coordination`_`, Pat Devine`
 _`Towards a New Socialism`_`, Paul Cockshott`  
 _`People's Republic of Walmart,`_ `Leigh Phillips and Michael Rozworski`  
 `Project Cybersyn, Revolutionary Chile`
-

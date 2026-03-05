@@ -1,0 +1,80 @@
+import { ProcessRegistry } from '$lib/process-registry';
+import { RecipeStore }     from '$lib/knowledge/recipes';
+import { BufferZoneStore } from '$lib/knowledge/buffer-zones';
+import { AgentStore }      from '$lib/agents';
+import { PlanStore }       from '$lib/planning/planning';
+import { Observer }        from '$lib/observation/observer';
+import type {
+    ResourceSpecification,
+    ProcessSpecification,
+    Recipe,
+    Plan,
+    Process,
+    Commitment,
+    Intent,
+    EconomicResource,
+    EconomicEvent,
+    Agent,
+    BufferZone,
+} from '$lib/schemas';
+
+// ── Underlying class instances (module-level singletons) ──────────────────
+// These are plain let exports (not $state) — can be reassigned in resetStores()
+export let registry    = new ProcessRegistry();
+export let recipes     = new RecipeStore();
+export let bufferZones = new BufferZoneStore();
+export let agents      = new AgentStore();
+export let planner     = new PlanStore(registry);
+export let observer    = new Observer(registry);
+
+// ── Reactive $state arrays (Svelte 5) ────────────────────────────────────
+// Declared as const to satisfy Svelte's "no reassignment of exported state" rule.
+// Updated in-place via splice(), which Svelte's reactive proxy tracks.
+// Knowledge layer
+export const resourceSpecs  = $state<ResourceSpecification[]>([]);
+export const processSpecs   = $state<ProcessSpecification[]>([]);
+export const recipeList     = $state<Recipe[]>([]);
+// Plan layer
+export const planList       = $state<Plan[]>([]);
+export const processList    = $state<Process[]>([]);
+export const commitmentList = $state<Commitment[]>([]);
+export const intentList     = $state<Intent[]>([]);
+// Observation layer
+export const resourceList   = $state<EconomicResource[]>([]);
+export const eventList      = $state<EconomicEvent[]>([]);
+export const agentList      = $state<Agent[]>([]);
+export const bufferZoneList = $state<BufferZone[]>([]);
+
+// ── refresh() — sync all $state arrays from the current store instances ──
+function syncArr<T>(target: T[], items: T[]): void {
+    target.splice(0, target.length, ...items);
+}
+
+export function refresh() {
+    syncArr(resourceSpecs,  recipes.allResourceSpecs());
+    syncArr(processSpecs,   recipes.allProcessSpecs());
+    syncArr(recipeList,     recipes.allRecipes());
+    syncArr(planList,       planner.allPlans());
+    syncArr(processList,    planner.allProcesses());
+    syncArr(commitmentList, planner.allCommitments());
+    syncArr(intentList,     planner.allIntents());
+    syncArr(resourceList,   observer.allResources());
+    syncArr(eventList,      observer.allEvents());
+    syncArr(agentList,      agents.allAgents());
+    syncArr(bufferZoneList, bufferZones.allBufferZones());
+}
+
+// Auto-refresh on any Observer event
+observer.subscribe(() => refresh());
+
+// ── resetStores() — replace all instances with fresh empty ones ───────────
+export function resetStores() {
+    registry    = new ProcessRegistry();
+    recipes     = new RecipeStore();
+    bufferZones = new BufferZoneStore();
+    agents      = new AgentStore();
+    planner     = new PlanStore(registry);
+    observer    = new Observer(registry);
+    observer.subscribe(() => refresh());
+    refresh();
+}

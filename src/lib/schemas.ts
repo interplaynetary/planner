@@ -524,6 +524,13 @@ export const ProcessSpecificationSchema = z.object({
     // DDMRP extensions
     isDecouplingPoint: z.boolean().optional(),            // design-time strategic buffer placement marker
     isControlPoint: z.boolean().optional(),               // design-time scheduling pacemaker marker
+    /**
+     * Buffer type at this design point (set after positioning analysis):
+     *   'stock'    — stock buffer (decoupling point; manufactured/purchased item)
+     *   'time'     — time buffer (control point; timing-critical pre-CP coverage)
+     *   'capacity' — capacity buffer (drum resource; sprint headroom)
+     */
+    bufferType: z.enum(['stock', 'time', 'capacity']).optional(),
 });
 export type ProcessSpecification = z.infer<typeof ProcessSpecificationSchema>;
 
@@ -566,6 +573,13 @@ export const RecipeProcessSchema = z.object({
     processConformsTo: z.string().optional(),              // ProcessSpecification ID
     processClassifiedAs: z.array(z.string()).optional(),
     hasDuration: DurationSchema.optional(),
+    /**
+     * Allergen / regulatory sequence group for priority-sorted scheduling.
+     * Processes with lower sequenceGroup are scheduled before higher groups.
+     * Within a group, DDMRP planning priority % (NFP/TOG) determines order.
+     * Resolves M5 partial: replaces unstructured processClassifiedAs tags for ordering.
+     */
+    sequenceGroup: z.number().int().optional(),
     /**
      * Minimum lot size per run, in output units.
      * When specified, a single run must produce at least this quantity.

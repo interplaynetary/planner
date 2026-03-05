@@ -318,6 +318,73 @@ export function blendADU(pastADU: number, forwardADU: number, blendRatio?: numbe
 }
 
 // =============================================================================
+// INTERNAL: buildRecipePredecessors
+// =============================================================================
+
+/**
+ * Shared predecessor + successor maps for a RecipeProcess chain.
+ * Extracted so recipeLeadTime() and legLeadTime() share the same logic.
+ * @internal
+ */
+function buildRecipePredecessors(
+    chain: RecipeProcess[],
+    recipeStore: RecipeStore,
+): { predecessors: Map<string, string[]>; successors: Map<string, string[]> } {
+    const processIds  = new Set(chain.map(rp => rp.id));
+    const predecessors = new Map<string, string[]>();
+    for (const rp of chain) predecessors.set(rp.id, []);
+
+    const outputsBySpec = new Map<string, string[]>();
+    const inputsBySpec  = new Map<string, string[]>();
+
+    function specKey(specId: string, stage: string | undefined): string {
+        return stage ? `${specId}::${stage}` : specId;
+    }
+
+    for (const rp of chain) {
+        const { inputs, outputs } = recipeStore.flowsForProcess(rp.id);
+        for (const f of outputs) {
+            if (!f.resourceConformsTo) continue;
+            const k = specKey(f.resourceConformsTo, f.stage);
+            const list = outputsBySpec.get(k) ?? [];
+            if (!list.includes(rp.id)) list.push(rp.id);
+            outputsBySpec.set(k, list);
+        }
+        for (const f of inputs) {
+            if (!f.resourceConformsTo) continue;
+            const k = specKey(f.resourceConformsTo, f.stage);
+            const list = inputsBySpec.get(k) ?? [];
+            if (!list.includes(rp.id)) list.push(rp.id);
+            inputsBySpec.set(k, list);
+        }
+    }
+
+    for (const [k, consumers] of inputsBySpec) {
+        const prods = outputsBySpec.get(k) ?? [];
+        for (const producer of prods) {
+            for (const consumer of consumers) {
+                if (producer === consumer) continue;
+                if (!processIds.has(producer) || !processIds.has(consumer)) continue;
+                const preds = predecessors.get(consumer)!;
+                if (!preds.includes(producer)) preds.push(producer);
+            }
+        }
+    }
+
+    // Derive successors from predecessors
+    const successors = new Map<string, string[]>();
+    for (const rp of chain) successors.set(rp.id, []);
+    for (const [id, preds] of predecessors) {
+        for (const pred of preds) {
+            const list = successors.get(pred);
+            if (list && !list.includes(id)) list.push(id);
+        }
+    }
+
+    return { predecessors, successors };
+}
+
+// =============================================================================
 // 5. recipeLeadTime
 // =============================================================================
 
@@ -1086,4 +1153,692 @@ export function signalIntegrityReport(
 
         return { signal, commitment, fulfillmentState, deviation: { qtyDiff, late } };
     });
+}
+
+// =============================================================================
+// 19. averageOnHandTarget — working capital reference level
+// =============================================================================
+
+/**
+ * Average on-hand target for working capital and DDS&OP calibration.
+ *
+ * DDMRP formula (Ptak & Smith Ch 8):
+ *   average target = TOR + green/2  =  TOR + (TOG − TOY) / 2
+ *
+ * This is the EXPECTED average inventory level over many replenishment cycles,
+ * not an operating setpoint. Used for investment planning and D2 analysis.
+ */
+export function averageOnHandTarget(bz: BufferZone): number {
+    return bz.tor + (bz.tog - bz.toy) / 2;
+}
+
+// =============================================================================
+// 20. onHandAlert — configurable threshold execution alert
+// =============================================================================
+
+export interface OnHandAlertResult {
+    onhand: number;
+    bufferStatus: BufferStatusResult;
+    /**
+     * Severity:
+     *   'critical' — on-hand is at or below zero (stockout)
+     *   'warning'  — on-hand penetrated the configurable alert threshold
+     *   null       — on-hand is above the alert threshold (no alert)
+     */
+    alertLevel: 'critical' | 'warning' | null;
+    alertThreshold: number;  // fraction of TOR (0–1)
+    thresholdQty: number;    // TOR × alertThreshold (absolute quantity)
+}
+
+/**
+ * On-hand execution alert (DDMRP C5 alert type (a)).
+ *
+ * Fires when physical on-hand (custody-based `onhandQuantity`) penetrates a
+ * configurable fraction of TOR. Typical DDMRP practice: 50 % of TOR.
+ *
+ * @param onhand          Sum of EconomicResource.onhandQuantity for the spec
+ * @param bz              BufferZone providing TOR/TOY/TOG boundaries
+ * @param alertThreshold  Fraction of TOR that triggers the warning (default 0.5)
+ */
+export function onHandAlert(
+    onhand: number,
+    bz: BufferZone,
+    alertThreshold: number = 0.5,
+): OnHandAlertResult {
+    const status       = bufferStatus(onhand, bz);
+    const thresholdQty = bz.tor * alertThreshold;
+
+    const alertLevel: OnHandAlertResult['alertLevel'] =
+        onhand <= 0           ? 'critical'
+        : onhand <= thresholdQty ? 'warning'
+        : null;
+
+    return { onhand, bufferStatus: status, alertLevel, alertThreshold, thresholdQty };
+}
+
+// =============================================================================
+// 21. legLeadTime — DLT for one decoupled routing leg
+// =============================================================================
+
+/**
+ * Critical-path length in days for ONE decoupled routing leg.
+ *
+ * A routing leg is the sub-sequence of RecipeProcesses between two decoupling
+ * points in a recipe DAG:
+ *   - Starts at processes that CONSUME from `upstreamStageId`
+ *     (RecipeFlow input with stage = upstreamStageId)
+ *   - Ends at the process that PRODUCES INTO `downstreamStageId`
+ *     (RecipeFlow output with stage = downstreamStageId)
+ *
+ * Uses the same forward-pass critical-path logic as recipeLeadTime(), restricted
+ * to the reachable sub-DAG between the two stage markers.
+ *
+ * Pass `undefined` for either bound to use the natural recipe start/end:
+ *   legLeadTime(id, undefined, 'stageB', …) → start of recipe to stageB
+ *   legLeadTime(id, 'stageA', undefined, …) → stageA to end of recipe
+ *   Both undefined                           → identical to recipeLeadTime()
+ *
+ * @returns Critical-path length in calendar days (0 if leg is empty)
+ */
+export function legLeadTime(
+    recipeId: string,
+    upstreamStageId: string | undefined,
+    downstreamStageId: string | undefined,
+    recipeStore: RecipeStore,
+): number {
+    if (!upstreamStageId && !downstreamStageId) {
+        return recipeLeadTime(recipeId, recipeStore);
+    }
+
+    const chain = recipeStore.getProcessChain(recipeId);
+    if (chain.length === 0) return 0;
+
+    const { predecessors, successors } = buildRecipePredecessors(chain, recipeStore);
+
+    // Identify start processes (consume from upstreamStageId) and
+    // end processes (produce into downstreamStageId) via their flows.
+    const startIds = new Set<string>();
+    const endIds   = new Set<string>();
+
+    for (const rp of chain) {
+        const { inputs, outputs } = recipeStore.flowsForProcess(rp.id);
+        if (upstreamStageId && inputs.some(f => f.stage === upstreamStageId)) {
+            startIds.add(rp.id);
+        }
+        if (downstreamStageId && outputs.some(f => f.stage === downstreamStageId)) {
+            endIds.add(rp.id);
+        }
+    }
+
+    if (upstreamStageId   && startIds.size === 0) return 0;
+    if (downstreamStageId && endIds.size   === 0) return 0;
+
+    // Forward reachability from the start set (topological order → single scan).
+    const forwardReach = new Set<string>();
+    const naturalStarts = !upstreamStageId
+        ? new Set(chain.filter(rp => (predecessors.get(rp.id)?.length ?? 0) === 0).map(rp => rp.id))
+        : startIds;
+
+    for (const rp of chain) {
+        if (
+            naturalStarts.has(rp.id) ||
+            (predecessors.get(rp.id) ?? []).some(p => forwardReach.has(p))
+        ) {
+            forwardReach.add(rp.id);
+        }
+    }
+
+    // Backward reachability from the end set (reverse topological order → single scan).
+    const backwardReach = new Set<string>();
+    const naturalEnds = !downstreamStageId
+        ? new Set(chain.filter(rp => (successors.get(rp.id)?.length ?? 0) === 0).map(rp => rp.id))
+        : endIds;
+
+    for (let i = chain.length - 1; i >= 0; i--) {
+        const rp = chain[i];
+        if (
+            naturalEnds.has(rp.id) ||
+            (successors.get(rp.id) ?? []).some(s => backwardReach.has(s))
+        ) {
+            backwardReach.add(rp.id);
+        }
+    }
+
+    // Leg = intersection: reachable both from start and back from end.
+    const legChain = chain.filter(rp => forwardReach.has(rp.id) && backwardReach.has(rp.id));
+    const legIds   = new Set(legChain.map(rp => rp.id));
+
+    // Forward pass on leg sub-chain (already in topological order).
+    const EF = new Map<string, number>();
+    for (const rp of legChain) {
+        const preds = (predecessors.get(rp.id) ?? []).filter(p => legIds.has(p));
+        const latestPredEF = preds.length === 0 ? 0 : Math.max(...preds.map(p => EF.get(p) ?? 0));
+        EF.set(rp.id, latestPredEF + (rp.hasDuration ? durationToDays(rp.hasDuration) : 0));
+    }
+
+    return Math.max(0, ...Array.from(EF.values()));
+}
+
+// =============================================================================
+// 22. bufferHealthHistory — time-series buffer health reconstruction
+// =============================================================================
+
+export interface BufferHealthEntry {
+    /** YYYY-MM-DD */
+    date: string;
+    onhand: number;
+    zone: 'red' | 'yellow' | 'green' | 'excess';
+    /** onhand / TOG × 100 */
+    pct: number;
+}
+
+/**
+ * Reconstruct daily on-hand buffer status over a historical date range.
+ *
+ * Starting from `initialOnHand` at the beginning of `fromDate`, replays all
+ * qualifying EconomicEvents in [fromDate, toDate] to produce a day-by-day
+ * buffer zone classification.
+ *
+ * Used for DDS&OP calibration: identifies chronic red-zone penetrations,
+ * excess inventory trends, and seasonal patterns (resolves M10).
+ *
+ * Event filtering: `resourceConformsTo === specId`; applies only
+ *   onhandEffect: 'increment' (produce, pickup, accept, …) and
+ *   onhandEffect: 'decrement' (consume, lower, combine, …) events.
+ *
+ * @param specId         ResourceSpecification ID
+ * @param events         Caller-supplied EconomicEvents (any date range)
+ * @param initialOnHand  Physical on-hand at the START of fromDate (from Observer)
+ * @param bz             BufferZone providing TOR/TOY/TOG
+ * @param fromDate       Start date (YYYY-MM-DD, inclusive)
+ * @param toDate         End date (YYYY-MM-DD, inclusive)
+ */
+export function bufferHealthHistory(
+    specId: string,
+    events: EconomicEvent[],
+    initialOnHand: number,
+    bz: BufferZone,
+    fromDate: string,
+    toDate: string,
+): BufferHealthEntry[] {
+    // Bucket net OH delta per calendar day within the window
+    const dailyNet = new Map<string, number>();
+
+    for (const e of events) {
+        if (e.resourceConformsTo !== specId) continue;
+        const tStr = e.hasPointInTime ?? e.hasBeginning ?? e.created;
+        if (!tStr) continue;
+        const d = tStr.slice(0, 10);
+        if (d < fromDate || d > toDate) continue;
+        const qty = e.resourceQuantity?.hasNumericalValue ?? 0;
+        const def = ACTION_DEFINITIONS[e.action];
+        if (!def) continue;
+        const delta =
+            def.onhandEffect === 'increment' ?  qty :
+            def.onhandEffect === 'decrement' ? -qty : 0;
+        if (delta !== 0) dailyNet.set(d, (dailyNet.get(d) ?? 0) + delta);
+    }
+
+    const result: BufferHealthEntry[] = [];
+    let oh = initialOnHand;
+
+    const from = new Date(fromDate);
+    const to   = new Date(toDate);
+    for (
+        let cur = new Date(from.getTime());
+        cur <= to;
+        cur = new Date(cur.getTime() + 86_400_000)
+    ) {
+        const d = cur.toISOString().slice(0, 10);
+        oh += dailyNet.get(d) ?? 0;
+
+        const zone: BufferHealthEntry['zone'] =
+            oh <= bz.tor ? 'red'
+            : oh <= bz.toy ? 'yellow'
+            : oh <= bz.tog ? 'green'
+            : 'excess';
+
+        result.push({ date: d, onhand: oh, zone, pct: bz.tog > 0 ? (oh / bz.tog) * 100 : 0 });
+    }
+
+    return result;
+}
+
+// =============================================================================
+// 23. materialSyncShortfall — non-decoupled component supply shortfall
+// =============================================================================
+
+export interface SyncShortfallEntry {
+    specId: string;
+    /** Total demand quantity (Commitments + Intents) within the planning horizon */
+    demand: number;
+    /** Physical on-hand (custody-based) */
+    onhand: number;
+    /** Confirmed supply (outputOf Commitments) within the planning horizon */
+    supply: number;
+    /** max(0, demand − onhand − supply) */
+    shortfall: number;
+    /**
+     * Buffer status of the PARENT decoupled item this component feeds —
+     * conveys urgency: a shortfall feeding a red-zone parent is most critical.
+     * Provided only when `parentZoneBySpec` is supplied by the caller.
+     */
+    parentBufferStatus?: BufferStatusResult;
+}
+
+/**
+ * Material synchronization shortfall for non-decoupled items (DDMRP C5 alert (c)).
+ *
+ * Identifies sub-assembly components whose supply is insufficient to meet
+ * known demand allocations within the planning horizon.
+ *
+ * Unlike buffer status (which applies to decoupled items with a BufferZone),
+ * this alert is for DEPENDENT components that have no independent buffer.
+ *
+ * Shortfall = max(0, demand − onhand − supply)
+ *
+ * Demand: consuming Commitments + Intents (inputOf set, not NON_CONSUMING_ACTIONS)
+ *         with `due ≤ today + planHorizonDays`.
+ * Supply: supply Commitments (outputOf set) with `due ≤ today + planHorizonDays`.
+ *
+ * @param specIds          Non-decoupled ResourceSpecification IDs to evaluate
+ * @param planStore        Source of Commitments and Intents
+ * @param observer         Source of on-hand inventory
+ * @param today            Reference date
+ * @param planHorizonDays  Planning horizon in days (default 30)
+ * @param parentZoneBySpec Optional: caller-supplied parent BufferZone per specId
+ *                         (derived from BOM structure; conveys urgency context)
+ */
+export function materialSyncShortfall(
+    specIds: string[],
+    planStore: PlanStore,
+    observer: Observer,
+    today: Date,
+    planHorizonDays: number = 30,
+    parentZoneBySpec?: Map<string, BufferZone>,
+): SyncShortfallEntry[] {
+    const cutoff = new Date(today.getTime() + planHorizonDays * 86_400_000);
+
+    return specIds.map(specId => {
+        // Physical on-hand (custody-based)
+        const onhand = observer
+            .conformingResources(specId)
+            .reduce((sum, r) => sum + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+
+        // Demand: consuming Commitments + Intents due within horizon
+        let demand = 0;
+        for (const c of planStore.allCommitments()) {
+            if (
+                c.resourceConformsTo === specId &&
+                c.inputOf !== undefined &&
+                !NON_CONSUMING_ACTIONS.has(c.action) &&
+                !c.finished &&
+                c.due && new Date(c.due) <= cutoff
+            ) {
+                demand += c.resourceQuantity?.hasNumericalValue ?? 0;
+            }
+        }
+        for (const i of planStore.allIntents()) {
+            if (
+                i.resourceConformsTo === specId &&
+                i.inputOf !== undefined &&
+                !NON_CONSUMING_ACTIONS.has(i.action) &&
+                !i.finished &&
+                i.due && new Date(i.due) <= cutoff
+            ) {
+                demand += i.resourceQuantity?.hasNumericalValue ?? 0;
+            }
+        }
+
+        // Supply: outputOf Commitments due within horizon
+        let supply = 0;
+        for (const c of planStore.allCommitments()) {
+            if (
+                c.resourceConformsTo === specId &&
+                c.outputOf !== undefined &&
+                !NON_CONSUMING_ACTIONS.has(c.action) &&
+                !c.finished &&
+                c.due && new Date(c.due) <= cutoff
+            ) {
+                supply += c.resourceQuantity?.hasNumericalValue ?? 0;
+            }
+        }
+
+        const shortfall = Math.max(0, demand - onhand - supply);
+
+        // Parent buffer status for urgency context (caller-supplied)
+        let parentBufferStatus: BufferStatusResult | undefined;
+        const parentZone = parentZoneBySpec?.get(specId);
+        if (parentZone) {
+            const parentOnHand = observer
+                .conformingResources(parentZone.specId)
+                .reduce((sum, r) => sum + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+            parentBufferStatus = bufferStatus(parentOnHand, parentZone);
+        }
+
+        return { specId, demand, onhand, supply, shortfall, parentBufferStatus };
+    });
+}
+
+// =============================================================================
+// 24. orderActivitySummary — unified execution dashboard
+// =============================================================================
+
+export interface OrderActivityEntry {
+    commitment: Commitment;
+    /**
+     * DDMRP order type derived from Commitment.action:
+     *   'MO' — Manufacturing Order (produce)
+     *   'PO' — Purchase Order (transferAllRights | transfer)
+     *   'TO' — Transfer Order (transferCustody | move)
+     *   'other' — any other supply action
+     */
+    orderType: 'MO' | 'PO' | 'TO' | 'other';
+    /**
+     * Buffer status for this commitment's ResourceSpecification.
+     * Undefined when no BufferZone is configured for the spec.
+     */
+    bufferStatus?: BufferStatusResult;
+    /** Observer fulfillment state for this commitment */
+    fulfillmentState?: FulfillmentState;
+}
+
+/**
+ * Unified execution summary: all open supply Commitments with order type
+ * classification, buffer status %, and fulfillment progress.
+ *
+ * Covers DDMRP §4.3 "Order Activity Summary Screen":
+ *   Columns: Order#, Part#, Order Type, Due Date, Qty, Buffer Status %, Progress
+ *
+ * Filters to supply-side only: `outputOf` set + `!finished`.
+ * Buffer status uses physical `onhandQuantity` (custody-based), not accounting.
+ *
+ * @param planStore  Source of open Commitments
+ * @param observer   Source of on-hand inventory and fulfillment state
+ * @param zoneStore  Source of BufferZone records for buffer status lookup
+ */
+export function orderActivitySummary(
+    planStore: PlanStore,
+    observer: Observer,
+    zoneStore: BufferZoneStore,
+): OrderActivityEntry[] {
+    function classifyOrderType(action: string): OrderActivityEntry['orderType'] {
+        switch (action) {
+            case 'produce':          return 'MO';
+            case 'transferAllRights':
+            case 'transfer':         return 'PO';
+            case 'transferCustody':
+            case 'move':             return 'TO';
+            default:                 return 'other';
+        }
+    }
+
+    return planStore
+        .allCommitments()
+        .filter(c => c.outputOf !== undefined && !c.finished)
+        .map(c => {
+            const orderType        = classifyOrderType(c.action);
+            const fulfillmentState = observer.getFulfillment(c.id);
+
+            let bs: BufferStatusResult | undefined;
+            if (c.resourceConformsTo) {
+                const zone = zoneStore.findZone(c.resourceConformsTo, c.atLocation);
+                if (zone) {
+                    const onhand = observer
+                        .conformingResources(c.resourceConformsTo)
+                        .reduce((sum, r) => sum + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+                    bs = bufferStatus(onhand, zone);
+                }
+            }
+
+            return { commitment: c, orderType, bufferStatus: bs, fulfillmentState };
+        });
+}
+
+// =============================================================================
+// 25. ltmAlertZoneFull — 5-zone LTM alert (Early / Green / Yellow / Red / Late)
+// =============================================================================
+
+/**
+ * Full 5-zone Lead Time Managed alert for an open supply order.
+ *
+ * Extends `ltmAlertZone()` to distinguish the two edge cases the DDI image
+ * material (yet-to-be-received.jpg, time-buffers-2.jpg) treats as distinct:
+ *
+ *   'early' — order is outside the LTM alert horizon (tracking not yet started)
+ *   'green' — entered the alert horizon; on track
+ *   'yellow' — second third of alert horizon; expediting attention needed
+ *   'red'   — final third of alert horizon; immediate action required
+ *   'late'  — past due (daysRemaining < 0); escalate immediately
+ *   null    — commitment has no due date; not applicable
+ *
+ * Alert horizon = last third of DLT (= dltDays / 3).
+ * Sub-zones within the alert horizon = equal thirds of that horizon.
+ *
+ * @param commitment  Open supply Commitment to assess
+ * @param dltDays     Decoupled Lead Time for this item in calendar days
+ * @param today       Reference date
+ */
+export function ltmAlertZoneFull(
+    commitment: Commitment,
+    dltDays: number,
+    today: Date,
+): 'early' | 'green' | 'yellow' | 'red' | 'late' | null {
+    if (!commitment.due) return null;
+
+    const daysRemaining = (new Date(commitment.due).getTime() - today.getTime()) / 86_400_000;
+
+    if (daysRemaining < 0) return 'late';
+
+    const alertHorizon = dltDays / 3;
+    if (daysRemaining > alertHorizon) return 'early';
+
+    const third = alertHorizon / 3;
+    if (daysRemaining > third * 2) return 'green';
+    if (daysRemaining > third)     return 'yellow';
+    return 'red';
+}
+
+// =============================================================================
+// 26. timeBufferState — two-state WO tracking for DDOM stability column
+// =============================================================================
+
+/**
+ * Two-state Work Order position for the DDOM "Yet to Be Received" / "Received"
+ * stability board (time-buffers-2.jpg).
+ *
+ * States:
+ *   'yet-to-be-received' — no fulfilling EconomicEvents recorded yet
+ *   'in-process'         — partially fulfilled (totalFulfilled > 0 but not finished)
+ *   'completed'          — fulfillment is finished (totalFulfilled >= totalCommitted)
+ *
+ * Combine with `ltmAlertZoneFull()` to produce the full DDOM stability column entry.
+ *
+ * @param fulfillmentState  From Observer.getFulfillment(commitment.id); undefined
+ *                          when no events have been recorded yet (→ 'yet-to-be-received')
+ */
+export function timeBufferState(
+    fulfillmentState: FulfillmentState | undefined,
+): 'yet-to-be-received' | 'in-process' | 'completed' {
+    if (!fulfillmentState || fulfillmentState.totalFulfilled.hasNumericalValue <= 0) {
+        return 'yet-to-be-received';
+    }
+    return fulfillmentState.finished ? 'completed' : 'in-process';
+}
+
+// =============================================================================
+// 27. capacityBufferStatus — work center load G/Y/R zone
+// =============================================================================
+
+export interface CapacityBufferResult {
+    load: number;
+    totalCapacity: number;
+    /** load / totalCapacity × 100 */
+    utilizationPct: number;
+    /**
+     * Flow-centric capacity buffer zone (capacity-buffers.jpg):
+     *   'green'  — load within normal operating band (below greenThreshold)
+     *   'yellow' — load entering sprint headroom (greenThreshold → yellowThreshold)
+     *   'red'    — sprint capacity being consumed (yellowThreshold → totalCapacity)
+     *   'excess' — over-capacity; cannot absorb further variability
+     */
+    zone: 'green' | 'yellow' | 'red' | 'excess';
+}
+
+/**
+ * Capacity buffer zone status for a work center (DDOM Stability column).
+ *
+ * The DDOM flow-centric capacity model (flow-centric.jpg) places G/Y/R buffer
+ * zones at the TOP of the capacity range, not the bottom. Normal load occupies
+ * the green zone; variability spikes absorb into yellow → red → excess.
+ *
+ * This is the OPPOSITE of stock buffers (where red is the danger zone at the
+ * bottom representing low stock). For capacity, the danger is HIGH load.
+ *
+ * Default thresholds reflect typical DDI practice (20 % sprint headroom):
+ *   greenThreshold  = 0.80  (up to 80 % utilisation → normal operating band)
+ *   yellowThreshold = 0.95  (80–95 % → using sprint headroom; investigate)
+ *   above 95 %  → 'red' (full sprint; act); above 100 % → 'excess' (over-capacity)
+ *
+ * @param load             Current committed load (minutes, hours, or any unit)
+ * @param totalCapacity    Total available capacity in the same unit
+ * @param greenThreshold   Fraction of totalCapacity that defines green/yellow boundary (default 0.80)
+ * @param yellowThreshold  Fraction of totalCapacity that defines yellow/red boundary (default 0.95)
+ */
+export function capacityBufferStatus(
+    load: number,
+    totalCapacity: number,
+    greenThreshold: number  = 0.80,
+    yellowThreshold: number = 0.95,
+): CapacityBufferResult {
+    const utilizationPct = totalCapacity > 0 ? (load / totalCapacity) * 100 : 0;
+
+    const zone: CapacityBufferResult['zone'] =
+        load > totalCapacity                  ? 'excess'
+        : load > totalCapacity * yellowThreshold ? 'red'
+        : load > totalCapacity * greenThreshold  ? 'yellow'
+        : 'green';
+
+    return { load, totalCapacity, utilizationPct, zone };
+}
+
+// =============================================================================
+// 28. materialReleaseDate — synchronized WO release gate
+// =============================================================================
+
+/**
+ * Latest acceptable work order release date for synchronized material release
+ * (sync-material-release.jpg, Ptak & Smith Ch 11).
+ *
+ * Rule: release at the LATEST acceptable date — not as early as possible.
+ *   - Early release ← raises WIP levels unnecessarily
+ *   - Late  release → jeopardizes control point schedule
+ *
+ * Formula: latestRelease = controlPointDueDate − legDays
+ *
+ * `legDays` should come from `legLeadTime()` for the routing leg from this
+ * work order's current stage to the upstream control point.
+ *
+ * @param controlPointDueDate  ISO date (YYYY-MM-DD) of the target control point
+ * @param legDays              Lead time in days from this WO's stage to the CP
+ * @returns ISO date string (YYYY-MM-DD) — latest acceptable release date
+ */
+export function materialReleaseDate(controlPointDueDate: string, legDays: number): string {
+    const releaseMs = new Date(controlPointDueDate).getTime() - legDays * 86_400_000;
+    return new Date(releaseMs).toISOString().slice(0, 10);
+}
+
+// =============================================================================
+// 29. signalComplianceHistory — DDOM reliability dashboard compliance grid
+// =============================================================================
+
+export interface ComplianceCell {
+    /** YYYY-MM-DD */
+    date: string;
+    specId: string;
+    /**
+     * Compliance status of signals generated on this date for this spec:
+     *   'compliant' — signal was approved and commitment was not late
+     *   'late'      — signal was approved but commitment due > signal.dueDate
+     *   'rejected'  — signal was rejected
+     *   'open'      — signal is still open (not yet acted on)
+     *   'none'      — no signal was generated on this date for this spec
+     */
+    status: 'compliant' | 'late' | 'rejected' | 'open' | 'none';
+    signalCount: number;
+}
+
+/**
+ * Time-series signal compliance grid for the DDOM Reliability dashboard
+ * (DDOM-Dashboard.jpg Column 1 — "Signal Integrity" grid).
+ *
+ * For each (date, specId) cell in [fromDate, toDate]:
+ *   - 'compliant': all signals approved without due-date overrun
+ *   - 'late':      any approved signal has commitment.due > signal.dueDate
+ *   - 'rejected':  any signal was rejected (and none compliant)
+ *   - 'open':      signal exists but still awaiting approval
+ *   - 'none':      no signal was generated on this date for this spec
+ *
+ * Cell priority when multiple signals exist on the same date:
+ *   compliant < late < rejected < open  (most concerning wins)
+ *
+ * @param signals   ReplenishmentSignals to evaluate (caller filters by spec/location)
+ * @param planStore Source of approved Commitments (for due-date comparison)
+ * @param fromDate  Start date (YYYY-MM-DD, inclusive)
+ * @param toDate    End date (YYYY-MM-DD, inclusive)
+ */
+export function signalComplianceHistory(
+    signals: ReplenishmentSignal[],
+    planStore: PlanStore,
+    fromDate: string,
+    toDate: string,
+): ComplianceCell[] {
+    // Group signals by (date, specId)
+    const buckets = new Map<string, ReplenishmentSignal[]>();
+
+    for (const s of signals) {
+        const d = s.createdAt.slice(0, 10);
+        if (d < fromDate || d > toDate) continue;
+        const key = `${d}::${s.specId}`;
+        const list = buckets.get(key) ?? [];
+        list.push(s);
+        buckets.set(key, list);
+    }
+
+    // Enumerate every (date, specId) combination that had a signal
+    const cells: ComplianceCell[] = [];
+
+    for (const [key, signalList] of buckets) {
+        const [date, specId] = key.split('::');
+
+        // Priority order (most concerning wins): open > rejected > late > compliant
+        let worstStatus: ComplianceCell['status'] = 'compliant';
+
+        for (const s of signalList) {
+            let cellStatus: ComplianceCell['status'];
+            if (s.status === 'open') {
+                cellStatus = 'open';
+            } else if (s.status === 'rejected') {
+                cellStatus = 'rejected';
+            } else if (s.approvedCommitmentId) {
+                const commitment = planStore.getCommitment(s.approvedCommitmentId);
+                const commitmentDue = commitment?.due?.slice(0, 10);
+                cellStatus = (commitmentDue && commitmentDue > s.dueDate) ? 'late' : 'compliant';
+            } else {
+                cellStatus = 'open';  // approved but no commitmentId yet
+            }
+
+            // Escalate to worse status
+            const priority: Record<ComplianceCell['status'], number> = {
+                compliant: 0, late: 1, rejected: 2, open: 3, none: -1,
+            };
+            if (priority[cellStatus] > priority[worstStatus]) {
+                worstStatus = cellStatus;
+            }
+        }
+
+        cells.push({ date, specId, status: worstStatus, signalCount: signalList.length });
+    }
+
+    return cells.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.specId < b.specId ? -1 : 1);
 }

@@ -1,0 +1,38 @@
+/* DDMRP Design Tokens
+   Minimal, transparent-friendly. No opaque backgrounds.
+   All colours are CSS custom properties so map overlays can inherit. */
+
+:root {
+  /* Zone colours */
+  --zone-red: #e53e3e;
+  --zone-yellow: #d69e2e;
+  --zone-green: #38a169;
+  --zone-excess: #3182ce;
+  --zone-stockout: #742a2a;
+  --zone-early: #4299e1;
+  --zone-late: #742a2a;
+
+  /* Zone fill — semi-transparent for map overlay use */
+  --zone-red-fill: rgba(229, 62, 62, 0.18);
+  --zone-yellow-fill: rgba(214, 158, 46, 0.18);
+  --zone-green-fill: rgba(56, 161, 105, 0.18);
+  --zone-excess-fill: rgba(49, 130, 206, 0.18);
+  --zone-stockout-fill: rgba(116, 42, 42, 0.25);
+
+  /* Typography */
+  --font-mono: "JetBrains Mono", "Fira Mono", ui-monospace, monospace;
+  --font-sans: "Inter", system-ui, sans-serif;
+
+  --text-xs: 0.7rem;
+  --text-sm: 0.8rem;
+  --text-base: 0.9rem;
+
+  /* Spacing */
+  --gap-xs: 2px;
+  --gap-sm: 4px;
+  --gap-md: 8px;
+  --gap-lg: 16px;
+
+  /* Zone label opacity for secondary text */
+  --muted: 0.45;
+}
