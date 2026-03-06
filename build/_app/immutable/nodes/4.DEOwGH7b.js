@@ -1,0 +1,1 @@
+import{a,f as p}from"../chunks/BZQE8Uem.js";import"../chunks/DAFAeQsB.js";var e=p('<p style="opacity:0.5;font-size:var(--text-xs)">No buffer zones loaded.</p>');function n(o){var t=e();a(o,t)}export{n as component};
