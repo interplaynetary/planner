@@ -13,7 +13,7 @@
   const urgencyZone = $derived(
     slot.remaining_quantity <= 0
       ? "green"
-      : slot.remaining_quantity >= slot.quantity
+      : slot.remaining_quantity >= slot.required_quantity
         ? "red"
         : "yellow",
   );
@@ -21,7 +21,7 @@
 
 <div class="dsc {cls}">
   <div class="top">
-    <span class="spec">{slot.specId.slice(0, 14)}</span>
+    <span class="spec">{(slot.spec_id ?? "").slice(0, 14)}</span>
     <span class="action">{slot.action}</span>
     {#if slot.classification}
       <ZoneBadge zone="excess" label={slot.classification} />
@@ -29,8 +29,8 @@
   </div>
 
   <QuantityBar
-    value={slot.quantity - slot.remaining_quantity}
-    max={slot.quantity}
+    value={slot.required_quantity - slot.remaining_quantity}
+    max={slot.required_quantity}
     label="fulfilled"
     zone={urgencyZone}
   />
@@ -40,7 +40,7 @@
       <span>due {new Date(slot.due).toLocaleDateString()}</span>
     {/if}
     {#if slot.atLocation}
-      <span>{slot.atLocation}</span>
+      <span class="loc">{slot.atLocation}</span>
     {/if}
     <span class="rem">{slot.remaining_quantity.toFixed(1)} remaining</span>
   </div>

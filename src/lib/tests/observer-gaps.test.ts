@@ -104,7 +104,7 @@ describe('I1 — over-fulfillment detection', () => {
 
     test('over-fulfillment sets overFulfilled flag and emits event', () => {
         const emitted: ObserverEvent[] = [];
-        observer.subscribe(e => emitted.push(e));
+        observer.subscribe(e => { emitted.push(e); });
 
         observer.registerCommitment({
             id: 'c1',
@@ -163,7 +163,7 @@ describe('H1 — correction of non-existent event emits error', () => {
 
     test('emits error when correction target not found', () => {
         const emitted: ObserverEvent[] = [];
-        observer.subscribe(e => emitted.push(e));
+        observer.subscribe(e => { emitted.push(e); });
 
         observer.record({
             id: 'e2',
@@ -254,7 +254,7 @@ describe('J3 — auto-created resource without conformsTo emits warning', () => 
 
     test('emits error when event has no resourceConformsTo', () => {
         const emitted: ObserverEvent[] = [];
-        observer.subscribe(e => emitted.push(e));
+        observer.subscribe(e => { emitted.push(e); });
 
         observer.record({
             id: 'e1',
@@ -273,7 +273,7 @@ describe('J3 — auto-created resource without conformsTo emits warning', () => 
 
     test('does not warn when resourceConformsTo is provided', () => {
         const emitted: ObserverEvent[] = [];
-        observer.subscribe(e => emitted.push(e));
+        observer.subscribe(e => { emitted.push(e); });
 
         observer.record({
             id: 'e1',
@@ -298,7 +298,7 @@ describe('J2 — same resource ID validation', () => {
 
     test('emits error when from and to resource are the same', () => {
         const emitted: ObserverEvent[] = [];
-        observer.subscribe(e => emitted.push(e));
+        observer.subscribe(e => { emitted.push(e); });
 
         observer.seedResource({
             id: 'res-a',
@@ -414,7 +414,7 @@ describe('K2 — process_completed event emitted', () => {
 
     test('emits process_completed when all tracked output commitments are fulfilled', () => {
         const emitted: ObserverEvent[] = [];
-        observer.subscribe(e => emitted.push(e));
+        observer.subscribe(e => { emitted.push(e); });
 
         const proc = observer.registerProcess({ name: 'Bake' });
         observer.registerCommitment({
@@ -446,7 +446,7 @@ describe('K2 — process_completed event emitted', () => {
 
     test('does not emit process_completed when commitment only partially fulfilled', () => {
         const emitted: ObserverEvent[] = [];
-        observer.subscribe(e => emitted.push(e));
+        observer.subscribe(e => { emitted.push(e); });
 
         const proc = observer.registerProcess({ name: 'Bake' });
         observer.registerCommitment({

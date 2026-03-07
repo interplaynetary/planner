@@ -70,7 +70,7 @@ describe("ScenarioIndex and Scenario Logic", () => {
             processes: new Map(),
             commitments: new Map([["c1", c1], ["c2", c2]]),
             deficits: [
-                { intent_id: "i1", spec_id: "specA", action: "consume", required_quantity: 10, required_hours: 0, remaining_quantity: 10, remaining_hours: 0, h3_cell: "node1", due: "2024-01-01" },
+                { intent_id: "i1", spec_id: "specA", action: "consume", fulfilled_quantity: 0, fulfilled_hours: 0, required_quantity: 10, required_hours: 0, remaining_quantity: 10, remaining_hours: 0, h3_cell: "node1", due: "2024-01-01" },
             ],
             surpluses: [
                 { spec_id: "specC", quantity: 50 }
@@ -111,7 +111,7 @@ describe("ScenarioIndex and Scenario Logic", () => {
             processes: new Map([["pA", pA]]),
             commitments: new Map(),
             deficits: [
-                { intent_id: "i_bread", spec_id: "spec:bread", action: "consume", required_quantity: 10, required_hours: 0, remaining_quantity: 10, remaining_hours: 0, h3_cell: "89283082803ffff", due: "2024-01-01" },
+                { intent_id: "i_bread", spec_id: "spec:bread", action: "consume", fulfilled_quantity: 0, fulfilled_hours: 0, required_quantity: 10, required_hours: 0, remaining_quantity: 10, remaining_hours: 0, h3_cell: "89283082803ffff", due: "2024-01-01" },
             ],
             surpluses: [],
             score: { coverage: 0, intents_satisfied: 0, intents_total: 0, total_effort_hours: 0, deficit_specs: [], h3_depth: 1 },

@@ -245,8 +245,8 @@ export class VfQueries {
         if (process?.inScopeOf) process.inScopeOf.forEach(a => agents.add(a));
 
         for (const e of this.observer.eventsForProcess(processId)) {
-            agents.add(e.provider);
-            agents.add(e.receiver);
+            if (e.provider) agents.add(e.provider);
+            if (e.receiver) agents.add(e.receiver);
         }
         for (const c of this.planStore.commitmentsForProcess(processId)) {
             if (c.provider) agents.add(c.provider);
@@ -263,8 +263,8 @@ export class VfQueries {
     workingAgents(processId: string): string[] {
         return [...new Set(
             this.observer.eventsForProcess(processId)
-                .filter(e => e.inputOf === processId && e.action === 'work')
-                .map(e => e.provider),
+                .filter(e => e.inputOf === processId && e.action === 'work' && e.provider)
+                .map(e => e.provider!),
         )];
     }
 
@@ -476,8 +476,8 @@ export class VfQueries {
             if (c.receiver) agents.add(c.receiver);
         }
         for (const e of this.agreementEvents(agreementId)) {
-            agents.add(e.provider);
-            agents.add(e.receiver);
+            if (e.provider) agents.add(e.provider);
+            if (e.receiver) agents.add(e.receiver);
         }
         return [...agents];
     }

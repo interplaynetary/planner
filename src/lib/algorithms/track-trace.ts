@@ -30,6 +30,15 @@ export interface FlowNode {
     parent?: string;
     /** The actual data — one of Event, Process, or Resource */
     data: EconomicEvent | Process | EconomicResource;
+
+    // Display-friendly fields for tree-view components.
+    // Populate these when building a display tree from the flat traversal result.
+    label?: string;
+    action?: string;
+    quantity?: number;
+    date?: string;
+    /** Pre-built children for recursive tree-view components. */
+    children?: FlowNode[];
 }
 
 // =============================================================================

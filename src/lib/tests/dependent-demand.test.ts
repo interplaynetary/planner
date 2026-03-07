@@ -23,7 +23,7 @@ describe('Dependent Demand (MRP)', () => {
         const recipe = recipes.addRecipe({ name: 'Table', primaryOutput: 'spec:table', recipeProcesses: [] });
         
         const woodProcess = recipes.addRecipeProcess({ name: 'Cut Wood', hasDuration: { hasNumericalValue: 1, hasUnit: 'hours' } });
-        recipe.recipeProcesses.push(woodProcess.id);
+        (recipe.recipeProcesses ??= []).push(woodProcess.id);
         
         // Output from woodProcess: 1 wood
         recipes.addRecipeFlow({
@@ -35,7 +35,7 @@ describe('Dependent Demand (MRP)', () => {
         
         // Input to buildProcess: 1 wood
         const buildProcess = recipes.addRecipeProcess({ name: 'Build Table', hasDuration: { hasNumericalValue: 3, hasUnit: 'hours' } });
-        recipe.recipeProcesses.push(buildProcess.id);
+        (recipe.recipeProcesses ??= []).push(buildProcess.id);
 
         recipes.addRecipeFlow({
             action: 'consume',
@@ -111,7 +111,7 @@ describe('Dependent Demand (MRP)', () => {
         // Setup simple recipe demanding 'spec:wood'
         const recipe = recipes.addRecipe({ name: 'Carve', primaryOutput: 'spec:carving', recipeProcesses: [] });
         const process = recipes.addRecipeProcess({ name: 'Carve Wood' });
-        recipe.recipeProcesses.push(process.id);
+        (recipe.recipeProcesses ??= []).push(process.id);
 
         recipes.addRecipeFlow({ action: 'consume', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'wood' }, recipeInputOf: process.id, resourceConformsTo: 'spec:wood' });
         recipes.addRecipeFlow({ action: 'produce', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'carving' }, recipeOutputOf: process.id, resourceConformsTo: 'spec:carving' });
@@ -319,7 +319,7 @@ describe('Dependent Demand (MRP)', () => {
         // Recipe requires input flour that has been through 'milling' stage.
         const recipe = recipes.addRecipe({ name: 'Bread', primaryOutput: 'spec:bread', recipeProcesses: [] });
         const bakeProc = recipes.addRecipeProcess({ name: 'Bake', hasDuration: { hasNumericalValue: 1, hasUnit: 'hours' } });
-        recipe.recipeProcesses.push(bakeProc.id);
+        (recipe.recipeProcesses ??= []).push(bakeProc.id);
         recipes.addRecipeFlow({
             action: 'consume',
             resourceConformsTo: 'spec:flour',
@@ -365,7 +365,7 @@ describe('Dependent Demand (MRP)', () => {
     test('inventory netting: correct-stage resource IS allocated', () => {
         const recipe = recipes.addRecipe({ name: 'Bread', primaryOutput: 'spec:bread2', recipeProcesses: [] });
         const bakeProc = recipes.addRecipeProcess({ name: 'Bake', hasDuration: { hasNumericalValue: 1, hasUnit: 'hours' } });
-        recipe.recipeProcesses.push(bakeProc.id);
+        (recipe.recipeProcesses ??= []).push(bakeProc.id);
         recipes.addRecipeFlow({
             action: 'consume',
             resourceConformsTo: 'spec:flour2',
@@ -411,7 +411,7 @@ describe('Dependent Demand (MRP)', () => {
     test('inventory netting: wrong-state resource is NOT allocated', () => {
         const recipe = recipes.addRecipe({ name: 'Certified Widget', primaryOutput: 'spec:widget', recipeProcesses: [] });
         const assembleProc = recipes.addRecipeProcess({ name: 'Assemble', hasDuration: { hasNumericalValue: 1, hasUnit: 'hours' } });
-        recipe.recipeProcesses.push(assembleProc.id);
+        (recipe.recipeProcesses ??= []).push(assembleProc.id);
         recipes.addRecipeFlow({
             action: 'consume',
             resourceConformsTo: 'spec:component',

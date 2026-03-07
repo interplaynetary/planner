@@ -710,6 +710,7 @@ export const RecipeSchema = z.object({
     id: z.string(),
     name: z.string(),
     note: z.string().optional(),
+    basedOn: z.string().optional(),                        // ResourceSpecification ID (the output spec)
     primaryOutput: z.string().optional(),                  // ResourceSpecification ID
     recipeProcesses: z.array(z.string()).optional(),       // RecipeProcess IDs
     recipeExchanges: z.array(z.string()).optional(),       // RecipeExchange IDs
@@ -850,6 +851,15 @@ export const EconomicEventSchema = z.object({
 
     // Track/trace breadcrumb (set by Observer)
     previousEvent: z.string().optional(),                  // EconomicEvent ID
+
+    /**
+     * When true, this event is treated as anomalous and excluded from ADU calculation.
+     * Use for one-off demand spikes (e.g., a single large promotional pull) that are
+     * not representative of ongoing usage patterns and are expected to revert.
+     * Events excluded here still count toward NFP and on-hand tracking.
+     * DDMRP ref: Ptak & Smith Ch 7 §"ADU Exceptions".
+     */
+    excludeFromADU: z.boolean().optional(),
 });
 export type EconomicEvent = z.infer<typeof EconomicEventSchema>;
 
@@ -873,7 +883,7 @@ export const ProcessSchema = z.object({
     inScopeOf: z.array(z.string()).optional(),             // Agent IDs
     hasBeginning: z.string().datetime().optional(),
     hasEnd: z.string().datetime().optional(),
-    finished: z.boolean().default(false),
+    finished: z.boolean().optional(),
 });
 export type Process = z.infer<typeof ProcessSchema>;
 
@@ -925,7 +935,10 @@ export const IntentSchema = z.object({
     // Plan
     plannedWithin: z.string().optional(),
 
-    finished: z.boolean().default(false),
+    // Scope
+    inScopeOf: z.array(z.string()).optional(),             // Agent IDs
+
+    finished: z.boolean().optional(),
 
     // Matching-layer extension — temporal expression.
     // Not in the VF core spec; covers both recurring patterns (AvailabilityWindow)
@@ -983,7 +996,7 @@ export const CommitmentSchema = z.object({
     independentDemandOf: z.string().optional(),            // Plan ID (marks this as a deliverable)
     plannedWithin: z.string().optional(),                  // Plan ID
 
-    finished: z.boolean().default(false),
+    finished: z.boolean().optional(),
 
     // Matching-layer extension — temporal expression.
     // Inherited from a recurring Intent when the Commitment satisfies one;
@@ -999,9 +1012,9 @@ export type Commitment = z.infer<typeof CommitmentSchema>;
 export const ClaimSchema = z.object({
     id: z.string(),
     action: VfAction,
-    provider: z.string(),
-    receiver: z.string(),
-    triggeredBy: z.string(),                               // EconomicEvent ID
+    provider: z.string().optional(),
+    receiver: z.string().optional(),
+    triggeredBy: z.string().optional(),                    // EconomicEvent ID
     resourceQuantity: MeasureSchema.optional(),
     effortQuantity: MeasureSchema.optional(),
     resourceConformsTo: z.string().optional(),
@@ -1009,7 +1022,7 @@ export const ClaimSchema = z.object({
     due: z.string().datetime().optional(),
     created: z.string().datetime().optional(),
     note: z.string().optional(),
-    finished: z.boolean().default(false),
+    finished: z.boolean().optional(),
 });
 export type Claim = z.infer<typeof ClaimSchema>;
 
@@ -1261,6 +1274,42 @@ export const BufferZoneSchema = z.object({
      * Together with lastComputedAt, pins the exact historical window used.
      */
     aduComputedFrom: z.string().optional(),
+
+    // --- N-1: ADU Exception Alert thresholds ---
+    /**
+     * ADU exception alert — high threshold (0–1 fraction).
+     * Fires when recomputed ADU exceeds previous ADU × (1 + aduAlertHighPct).
+     * DDMRP ref: Ptak & Smith Ch 7 §"ADU Exceptions".
+     */
+    aduAlertHighPct: z.number().positive().optional(),
+    /**
+     * ADU exception alert — low threshold (0–1 fraction).
+     * Fires when recomputed ADU falls below previous ADU × (1 − aduAlertLowPct).
+     * DDMRP ref: Ptak & Smith Ch 7 §"ADU Exceptions".
+     */
+    aduAlertLowPct: z.number().positive().optional(),
+    /**
+     * Rolling window in days over which ADU change is measured for alert evaluation.
+     * Defaults to aduWindowDays when absent.
+     */
+    aduAlertWindowDays: z.number().positive().optional(),
+
+    // --- N-2: Bootstrap ADU for items with no demand history ---
+    /**
+     * Management-estimated ADU for items with no demand history.
+     * Used as the "estimated" component when blending with actual demand during
+     * the no-history bootstrap period. Once aduWindowDays of real history exists,
+     * this field should be cleared (set to undefined).
+     * DDMRP ref: Ptak & Smith Ch 7 §"Establishing ADU with No History".
+     */
+    estimatedADU: z.number().nonnegative().optional(),
+    /**
+     * Number of periods (days) of real demand history accumulated so far.
+     * During bootstrap: bootstrapDaysAccumulated < aduWindowDays.
+     * Used by bootstrapADU() to compute the correct blend ratio automatically.
+     */
+    bootstrapDaysAccumulated: z.number().nonnegative().optional(),
+
     /**
      * Order Spike Threshold horizon in days. Demand orders further out than
      * this horizon are exempt from spike filtering (they are future, not spikes).
@@ -1279,6 +1328,44 @@ export const BufferZoneSchema = z.object({
     /** Unit label for MOQ */
     moqUnit: z.string(),
 
+    // --- N-5: Per-part Desired/Imposed Order Cycle (DOC) ---
+    /**
+     * Desired or imposed order cycle in days — individual part override of the
+     * profile-level orderCycleDays. When present, drives Green zone option 1
+     * (ADU × orderCycleDays) in preference to the profile default.
+     * Examples: supplier minimum order frequency, production scheduling wheel slot.
+     * DDMRP ref: Ptak & Smith Ch 7 §"The Green Zone — Option 1".
+     */
+    orderCycleDays: z.number().positive().optional(),
+
+    // --- N-3: Override reason capture ---
+    /**
+     * Reason the buffer was set to replenished_override.
+     * 'space'       — physical space constraint (bin, shelf, warehouse capacity)
+     * 'cash'        — capital/cash-flow constraint limiting how much inventory is acceptable
+     * 'contractual' — customer-imposed or supplier-imposed min/max levels
+     * 'other'       — any other business reason (see overrideNote)
+     * Only meaningful when bufferClassification === 'replenished_override'.
+     * DDMRP ref: Ptak & Smith Ch 7 §"Replenished Override Buffers".
+     */
+    overrideReason: z.enum(['space', 'cash', 'contractual', 'other']).optional(),
+    /** Free-text explanation when overrideReason === 'other'. */
+    overrideNote: z.string().optional(),
+
+    // --- N-4: Distributed item lead time breakdown ---
+    /**
+     * For distributed items: transportation transit days (part of dltDays).
+     * dltDays = transportDays + stagingDays (when both are provided).
+     * Informational — does not change zone math; dltDays is always the authoritative total.
+     * DDMRP ref: Ptak & Smith Ch 7 §"Part Lead Time — Distributed".
+     */
+    transportDays: z.number().nonnegative().optional(),
+    /**
+     * For distributed items: staging, receiving, and QA inspection days at destination.
+     * DDMRP ref: Ptak & Smith Ch 7 §"Part Lead Time — Distributed".
+     */
+    stagingDays: z.number().nonnegative().optional(),
+
     // --- Computed zone boundaries (all in aduUnit) ---
     /** Top of Red = red zone upper boundary */
     tor: z.number().nonnegative(),
@@ -1286,6 +1373,22 @@ export const BufferZoneSchema = z.object({
     toy: z.number().nonnegative(),
     /** Top of Green = full buffer ceiling */
     tog: z.number().nonnegative(),
+
+    // --- N-6: Red zone decomposition (informational) ---
+    /**
+     * Red base = ADU × DLT × LTF.
+     * The lead-time-driven component of safety embedded in the red zone.
+     * Informational — tor is always the authoritative zone boundary.
+     * DDMRP ref: Ptak & Smith Ch 7 §"The Red Zone — Step 1".
+     */
+    redBase: z.number().nonnegative().optional(),
+    /**
+     * Red safety = red base × VF.
+     * The variability-driven component of safety embedded in the red zone.
+     * Informational — tor is always the authoritative zone boundary.
+     * DDMRP ref: Ptak & Smith Ch 7 §"The Red Zone — Step 2".
+     */
+    redSafety: z.number().nonnegative().optional(),
 
     // --- Dynamic adjustment factors ---
     /** DAF: multiplier on ADU (Demand Adjustment Factor). Default 1.0. */
@@ -1407,5 +1510,7 @@ export const DemandAdjustmentFactorSchema = z.object({
      */
     supplyOffsetDays: z.number().optional(),
     note: z.string().optional(),
+    /** When false, the factor is inactive and should be excluded from display/calculation. */
+    isActive: z.boolean().optional(),
 });
 export type DemandAdjustmentFactor = z.infer<typeof DemandAdjustmentFactorSchema>;

@@ -35,10 +35,10 @@
 
 <ul class="bom {cls}" style="--depth:{depth}">
   {#each processes as p}
+    {@const childFlows = flows.filter(f => f.recipeInputOf === p.id)}
     <li>
       <span class="proc">{p.name}</span>
       {#if p.hasDuration}<span class="muted">{p.hasDuration.hasNumericalValue}{p.hasDuration.hasUnit}</span>{/if}
-      {@const childFlows = flows.filter(f => f.recipeInputOf === p.id)}
       {#if childFlows.length}
         <ul class="bom" style="--depth:{depth + 1}">
           {#each childFlows as f}

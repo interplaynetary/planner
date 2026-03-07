@@ -542,6 +542,8 @@ factors.supplyOffsetDays
 
 ## Summary Scorecard
 
+### Round 1 — Original 13-gap audit
+
 | Ch 7 Section | A | P | G | M | Total Concepts |
 |---|---|---|---|---|---|
 | §1 Strategic Positioning (6 factors) | 14 | 0 | 0 | 0 | 14 |
@@ -558,13 +560,27 @@ factors.supplyOffsetDays
 | §12 DDS&OP Governance | 5 | 0 | 0 | 0 | 5 |
 | **Total** | **106** | **2** | **0** | **0** | **108** |
 
-**Overall: 106/108 aligned (98%), 2 partial (time-buffer sizing formula + scheduler engine), 0 gaps, 0 misalignments**
+**Round 1: 106/108 aligned (98%), 2 partial, 0 gaps, 0 misalignments**
+
+### Round 2 — Deep review (N-1 through N-4)
+
+| Gap | Area | Resolution |
+|---|---|---|
+| N-1 | ADU exception alert system (high/low threshold, rolling window) | **A** — `aduAlertHighPct`, `aduAlertLowPct`, `aduAlertWindowDays` on `BufferZone`; `aduDriftAlert()` in `ddmrp.ts` |
+| N-2 | ADU no-history bootstrap (estimated ADU + actualization blend) | **A** — `estimatedADU`, `bootstrapDaysAccumulated` on `BufferZone`; `bootstrapADU()` in `ddmrp.ts` |
+| N-3 | Override reason capture (space/cash/contractual) | **A** — `overrideReason`, `overrideNote` on `BufferZone` |
+| N-4 | Distributed item DLT breakdown (transport + staging/QA) | **A** — `transportDays`, `stagingDays` on `BufferZone` (informational; `dltDays` remains authoritative) |
+| N-5 | Per-part DOC (`orderCycleDays`) — individual part attribute per Fig 7-19 | **A** — `orderCycleDays` on `BufferZone`; `docDays` opt in `computeBufferZone()`; `recalibrateBufferZone` passes it through |
+| N-6 | Red base / red safety stored separately (planner worksheet visibility) | **A** — `redBase`, `redSafety` on `BufferZone` (informational; `tor` remains authoritative); persisted by `recalibrateBufferZone` |
+| N-7 | ADU anomaly exclusion — individual events flagged as non-representative excluded from ADU average | **A** — `excludeFromADU` on `EconomicEventSchema`; `computeADU()` skips flagged events |
+
+**Round 2: All 7 new gaps resolved. No regressions.**
 
 ---
 
 ## Remaining Partial Items
 
-All 13 gaps (G-1 through G-13) are now implemented. Two concepts remain **P** (partial):
+All 20 gaps (G-1 through G-13, N-1 through N-7) are now implemented. Two concepts remain **P** (partial):
 
 | Section | Concept | Reason | Notes |
 |---|---|---|---|

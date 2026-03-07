@@ -11,7 +11,7 @@
 
   let selected = $state<BufferProfile | null>(null);
   let name = $state('');
-  let itemType = $state<'Purchased' | 'Manufactured' | 'Intermediate'>('Purchased');
+  let itemType = $state<'Purchased' | 'Manufactured' | 'Intermediate' | 'Distributed'>('Purchased');
   let leadTimeFactor = $state(1.0);
   let variabilityFactor = $state(0.5);
   let orderCycleDays = $state<number | undefined>(undefined);

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import type { PrioritizedSupplyEntry } from "$lib/algorithms/ddmrp";
   import ZoneBadge from "$lib/components/ui/ZoneBadge.svelte";
   import PriorityCell from "$lib/components/ui/PriorityCell.svelte";
 

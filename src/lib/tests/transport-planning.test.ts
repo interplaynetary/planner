@@ -25,7 +25,7 @@ function makeTransportRecipe(recipes: RecipeStore, specId: string, truckSpecId?:
         recipeProcesses: [],
     });
     const rp = recipes.addRecipeProcess({ name: 'Truck leg', hasDuration: { hasNumericalValue: 2, hasUnit: 'hours' } });
-    recipe.recipeProcesses.push(rp.id);
+    (recipe.recipeProcesses ??= []).push(rp.id);
 
     recipes.addRecipeFlow({
         action: 'pickup',
@@ -83,7 +83,7 @@ describe('recipesForTransport', () => {
     test('does NOT return a production recipe (produce/consume) for the spec', () => {
         const recipe = recipes.addRecipe({ name: 'Produce wool', primaryOutput: 'spec:wool', recipeProcesses: [] });
         const rp = recipes.addRecipeProcess({ name: 'Spin', hasDuration: { hasNumericalValue: 1, hasUnit: 'hours' } });
-        recipe.recipeProcesses.push(rp.id);
+        (recipe.recipeProcesses ??= []).push(rp.id);
         recipes.addRecipeFlow({ action: 'consume', resourceConformsTo: 'spec:raw', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeInputOf: rp.id });
         recipes.addRecipeFlow({ action: 'produce', resourceConformsTo: 'spec:wool', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeOutputOf: rp.id });
 
@@ -93,7 +93,7 @@ describe('recipesForTransport', () => {
     test('does NOT return a recipe that only has pickup but no dropoff', () => {
         const recipe = recipes.addRecipe({ name: 'Pickup only', primaryOutput: 'spec:wool', recipeProcesses: [] });
         const rp = recipes.addRecipeProcess({ name: 'Load', hasDuration: { hasNumericalValue: 1, hasUnit: 'hours' } });
-        recipe.recipeProcesses.push(rp.id);
+        (recipe.recipeProcesses ??= []).push(rp.id);
         recipes.addRecipeFlow({ action: 'pickup', resourceConformsTo: 'spec:wool', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeInputOf: rp.id });
 
         expect(recipes.recipesForTransport('spec:wool')).toHaveLength(0);
@@ -103,7 +103,7 @@ describe('recipesForTransport', () => {
         const recipe = recipes.addRecipe({ name: 'Multi-leg', recipeProcesses: [] });
         const rp1 = recipes.addRecipeProcess({ name: 'Leg 1', hasDuration: { hasNumericalValue: 2, hasUnit: 'hours' } });
         const rp2 = recipes.addRecipeProcess({ name: 'Leg 2', hasDuration: { hasNumericalValue: 2, hasUnit: 'hours' } });
-        recipe.recipeProcesses.push(rp1.id, rp2.id);
+        (recipe.recipeProcesses ??= []).push(rp1.id, rp2.id);
         recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'spec:wool', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeInputOf:  rp1.id });
         recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'spec:wool', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeOutputOf: rp1.id });
         recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'spec:wool', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeInputOf:  rp2.id });
@@ -404,7 +404,7 @@ describe('transport — SNLT ranking', () => {
         // Direct route: 6h total, no work inputs → SNLT=0 but we compare by duration
         const direct = recipes.addRecipe({ name: 'Direct Route', primaryOutput: 'spec:wool', recipeProcesses: [] });
         const rpDirect = recipes.addRecipeProcess({ name: 'Direct Truck leg', hasDuration: { hasNumericalValue: 6, hasUnit: 'hours' } });
-        direct.recipeProcesses.push(rpDirect.id);
+        (direct.recipeProcesses ??= []).push(rpDirect.id);
         recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'spec:wool', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeInputOf:  rpDirect.id });
         recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'spec:wool', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeOutputOf: rpDirect.id });
         // Work input on direct → SNLT > 0
@@ -413,7 +413,7 @@ describe('transport — SNLT ranking', () => {
         // Relay route: no work inputs → SNLT=0 (picked first)
         const relay = recipes.addRecipe({ name: 'Relay Route', primaryOutput: 'spec:wool', recipeProcesses: [] });
         const rpRelay = recipes.addRecipeProcess({ name: 'Relay Truck leg', hasDuration: { hasNumericalValue: 4, hasUnit: 'hours' } });
-        relay.recipeProcesses.push(rpRelay.id);
+        (relay.recipeProcesses ??= []).push(rpRelay.id);
         recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'spec:wool', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeInputOf:  rpRelay.id });
         recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'spec:wool', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeOutputOf: rpRelay.id });
         // No work flows → SNLT=0

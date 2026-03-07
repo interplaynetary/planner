@@ -19,8 +19,8 @@
       <ZoneBadge zone={s.zone ?? "yellow"} />
       <span class="qty">×{s.recommendedQty?.toFixed(1) ?? "?"}</span>
       <span class="due"
-        >{s.recommendedDueDate
-          ? new Date(s.recommendedDueDate).toLocaleDateString()
+        >{s.dueDate
+          ? new Date(s.dueDate).toLocaleDateString()
           : "—"}</span
       >
       <span class="pct"

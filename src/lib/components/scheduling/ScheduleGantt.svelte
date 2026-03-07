@@ -39,7 +39,7 @@
   const lanes = $derived(() => {
     const map = new Map<string, ScheduleBlock[]>();
     for (const b of blocks) {
-      const key = b.agentId ?? b.resourceId ?? "unknown";
+      const key = b.provider ?? b.resourceInventoriedAs ?? "unknown";
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(b);
     }
@@ -59,11 +59,11 @@
         {@const committed = b.type === "commitment"}
         <div
           class="block {committed ? 'committed' : 'intent'}"
-          style="left:{toX(b.hasBeginning)}%; width:{width(
-            b.hasBeginning,
-            b.hasEnd,
+          style="left:{toX(b.hasBeginning ?? b.due ?? windowStart)}%; width:{width(
+            b.hasBeginning ?? b.due ?? windowStart,
+            b.hasEnd ?? b.due ?? windowEnd,
           )}%; top:20%; height:60%;"
-          title="{b.action} · {b.quantity?.toFixed(1) ?? ''}"
+          title="{b.action} · {b.resourceQuantity?.hasNumericalValue?.toFixed(1) ?? ''}"
         ></div>
       {/each}
     </div>

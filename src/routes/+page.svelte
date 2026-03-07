@@ -13,14 +13,42 @@
     resourceSpecs, processSpecs, recipeList,
     planList, processList, commitmentList, intentList,
     resourceList, eventList, agentList, bufferZoneList,
+    capacityBufferList, bufferZones, refresh,
   } from '$lib/vf-stores.svelte';
   import { seedExample } from '$lib/vf-seed';
   import { resetStores } from '$lib/vf-stores.svelte';
+  import { bufferHealthHistory } from '$lib/algorithms/ddmrp';
+  import BufferHealthRunChart   from '$lib/components/execution/BufferHealthRunChart.svelte';
+  import CapacityLoadingView    from '$lib/components/execution/CapacityLoadingView.svelte';
+  import BufferOutlierPanel     from '$lib/components/execution/BufferOutlierPanel.svelte';
+  import ScenarioComparisonView from '$lib/components/planning/ScenarioComparisonView.svelte';
 
   // Build specName lookup for row components
   const specNameMap = $derived(
     new Map(resourceSpecs.map(s => [s.id, s.name]))
   );
+
+  // ── DDMRP inspection state ─────────────────────────────────────────────────
+  const processSpecNameMap = $derived(new Map(processSpecs.map(s => [s.id, s.name])));
+
+  let selectedBzId = $state<string | null>(null);
+  const selectedBz = $derived(bufferZoneList.find(bz => bz.id === selectedBzId) ?? null);
+
+  const selectedBzOnhand = $derived.by(() => {
+    if (!selectedBz) return 0;
+    const pool = selectedBz.atLocation
+      ? resourceList.filter(r => r.conformsTo === selectedBz.specId && r.currentLocation === selectedBz.atLocation)
+      : resourceList.filter(r => r.conformsTo === selectedBz.specId);
+    return pool.reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+  });
+
+  const _today = new Date().toISOString().slice(0, 10);
+  const _from30 = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+
+  const healthEntries = $derived.by(() => {
+    if (!selectedBz) return [];
+    return bufferHealthHistory(selectedBz.specId, eventList, selectedBzOnhand, selectedBz, _from30, _today);
+  });
 
   // All recipe processes and flows for the Knowledge band
   const allRecipeProcesses = $derived(
@@ -50,10 +78,77 @@
       </span>
     </div>
     <div class="diagram-wrap">
-      <NetworkDiagram />
+      <NetworkDiagram
+        onbufferselect={(id) => { selectedBzId = id; }}
+        selectedBzId={selectedBzId ?? undefined}
+      />
     </div>
   </section>
 
+  <!-- ── DDMRP INSPECTION BAND ──────────────────────────────────────────────── -->
+  <section class="band ddmrp">
+    <div class="band-header">
+      <span class="band-title" style="color: var(--zone-red)">DDMRP INSPECTION</span>
+      {#if selectedBz}
+        <span class="counts">
+          <span class="count">
+            {specNameMap.get(selectedBz.specId) ?? selectedBz.specId.slice(0, 12)}
+            · TOR {selectedBz.tor.toFixed(1)} / TOY {selectedBz.toy.toFixed(1)} / TOG {selectedBz.tog.toFixed(1)}
+          </span>
+        </span>
+        <div class="actions">
+          <button onclick={() => { selectedBzId = null; }}>✕ Clear</button>
+        </div>
+      {:else}
+        <span class="count" style="opacity:0.4">↑ click a buffer funnel in the network diagram to inspect</span>
+      {/if}
+    </div>
+
+    <div class="ddmrp-body">
+      <!-- Capacity loading: always shown when data exists -->
+      {#if capacityBufferList.length > 0}
+        <div class="ddmrp-cap">
+          <div class="col-header">Capacity Loading — All Resources</div>
+          <CapacityLoadingView buffers={capacityBufferList} specNames={processSpecNameMap} />
+        </div>
+      {:else if !selectedBz}
+        <span class="empty" style="padding:var(--gap-md)">No data. Load example to populate.</span>
+      {/if}
+
+      <!-- Buffer detail: shown only when a funnel is selected -->
+      {#if selectedBz}
+        <div class="ddmrp-bz">
+          <div class="col-header">
+            Buffer Health · {specNameMap.get(selectedBz.specId) ?? selectedBz.specId}
+            <span class="muted"> · last 30d</span>
+          </div>
+          {#if healthEntries.length > 0}
+            <BufferHealthRunChart entries={healthEntries} bufferZone={selectedBz} />
+          {:else}
+            <span class="empty">No event history in this window — showing current position only</span>
+            <BufferHealthRunChart
+              entries={[{ date: _today, onhand: selectedBzOnhand, pct: selectedBz.tog > 0 ? (selectedBzOnhand / selectedBz.tog) * 100 : 0, zone: selectedBzOnhand <= selectedBz.tor ? 'red' : selectedBzOnhand <= selectedBz.toy ? 'yellow' : selectedBzOnhand <= selectedBz.tog ? 'green' : 'excess' }]}
+              bufferZone={selectedBz}
+            />
+          {/if}
+          <div class="col-header" style="margin-top:var(--gap-lg)">Flag Outlier</div>
+          <BufferOutlierPanel
+            bufferZone={selectedBz}
+            onhand={selectedBzOnhand}
+            onSave={(reason, note) => {
+              if (selectedBzId) {
+                bufferZones.updateZone(selectedBzId, {
+                  overrideReason: reason,
+                  overrideNote: note || undefined,
+                });
+                refresh();
+              }
+            }}
+          />
+        </div>
+      {/if}
+    </div>
+  </section>
 
   <!-- ── KNOWLEDGE BAND ───────────────────────────────────────────────────── -->
   <section class="band knowledge">
@@ -220,6 +315,12 @@
             <IntentRow {intent} specName={specNameMap.get(intent.resourceConformsTo ?? '')} />
           {/each}
         {/if}
+      </div>
+
+      <!-- Scenarios column -->
+      <div class="column wide">
+        <div class="col-header">Scenarios</div>
+        <ScenarioComparisonView scenarios={[]} bufferZones={bufferZoneList} />
       </div>
     </div>
   </section>
@@ -428,5 +529,37 @@
   .diagram-wrap {
     overflow-x: auto;
     padding: var(--gap-md);
+  }
+
+  /* DDMRP Inspection band */
+  .ddmrp-body {
+    display: flex;
+    gap: var(--gap-lg);
+    padding: var(--gap-md);
+    overflow-x: auto;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .ddmrp-cap {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-sm);
+    min-width: 480px;
+  }
+
+  .ddmrp-bz {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-sm);
+    min-width: 340px;
+    max-width: 420px;
+  }
+
+  .column.wide {
+    min-width: 320px;
+    max-height: none;
   }
 </style>

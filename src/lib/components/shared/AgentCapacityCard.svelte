@@ -9,38 +9,31 @@
 
   let { capacity, agentName, class: cls = "" }: Props = $props();
 
-  const usedPct = $derived(
-    capacity.total_hours > 0
-      ? (capacity.committed_hours / capacity.total_hours) * 100
-      : 0,
-  );
+
 </script>
 
 <div class="acc {cls}">
   <div class="top">
-    <span class="name">{agentName ?? capacity.agentId.slice(0, 12)}</span>
-    <span class="window">{capacity.spaceTimeKey ?? ""}</span>
+    <span class="name">{agentName ?? capacity.agent_id.slice(0, 12)}</span>
+    <span class="window">{capacity.space_time_signature ?? ""}</span>
   </div>
 
-  <!-- Capacity bar: committed / total -->
+  <!-- Capacity bar: total available hours -->
   <div class="bar-wrap">
     <div class="bar">
       <div
         class="fill"
-        class:warn={usedPct > 80}
-        style="width:{Math.min(100, usedPct)}%"
+        style="width:100%"
       ></div>
     </div>
     <span class="hrs">
-      {capacity.committed_hours.toFixed(1)}h / {capacity.total_hours.toFixed(
-        1,
-      )}h
+      {capacity.total_hours.toFixed(1)}h avail.
     </span>
   </div>
 
-  {#if capacity.specs?.length}
+  {#if capacity.resource_specs?.length}
     <div class="skills">
-      {#each capacity.specs as s}
+      {#each capacity.resource_specs as s}
         <span class="skill">{s.slice(0, 10)}</span>
       {/each}
     </div>

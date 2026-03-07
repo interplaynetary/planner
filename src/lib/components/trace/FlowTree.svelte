@@ -20,8 +20,8 @@
 <ul class="ft {cls}" style="--depth:{depth}">
   {#each nodes as n}
     <li>
-      <span class="icon {n.type}">{icon[n.type] ?? "·"}</span>
-      <span class="label {n.type}">
+      <span class="icon {n.kind}">{icon[n.kind] ?? "·"}</span>
+      <span class="label {n.kind}">
         {n.label ?? n.id.slice(0, 12)}
       </span>
       {#if n.action}

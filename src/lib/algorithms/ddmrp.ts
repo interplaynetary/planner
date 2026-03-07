@@ -178,7 +178,8 @@ function durationToDays(d: Duration): number {
  * ADU = total consumed / windowDays.
  * Days with no consumption count as zero (not excluded from the denominator).
  *
- * @param events     Caller-supplied event slice (decoupled from Observer)
+ * @param events     Caller-supplied event slice (decoupled from Observer); events with
+ *                   `excludeFromADU: true` are skipped (anomalous / non-recurring demand)
  * @param specId     ResourceSpecification ID to filter on
  * @param windowDays Rolling window length in calendar days
  * @param asOf       Reference date (window spans [asOf − windowDays, asOf])
@@ -195,6 +196,7 @@ export function computeADU(
         if (e.resourceConformsTo !== specId) return false;
         const def = ACTION_DEFINITIONS[e.action];
         if (!def || def.onhandEffect !== 'decrement') return false;
+        if (e.excludeFromADU) return false;
         const tStr = e.hasPointInTime ?? e.hasBeginning ?? e.created;
         if (!tStr) return false;
         return new Date(tStr).getTime() >= windowStartMs;
@@ -650,7 +652,7 @@ export function computeNFP(
  * @param dltDays         Decoupled Lead Time in calendar days
  * @param moq             Minimum order quantity in aduUnit
  * @param moqUnit         Unit label for MOQ (informational only)
- * @param opts            Optional dynamic adjustment factors
+ * @param opts            Optional dynamic adjustment factors and per-part DOC override
  */
 export function computeBufferZone(
     profile: BufferProfile,
@@ -663,6 +665,8 @@ export function computeBufferZone(
         demandAdjFactor?: number;
         leadTimeAdjFactor?: number;
         zoneAdjFactor?: number;
+        /** Per-part Desired/Imposed Order Cycle override (N-5). Preferred over profile.orderCycleDays. */
+        docDays?: number;
     },
 ): BufferZoneComputation {
     const effectiveADU = adu * (opts?.demandAdjFactor ?? 1);
@@ -673,12 +677,13 @@ export function computeBufferZone(
     const tor       = (redBase + redSafety) * (opts?.zoneAdjFactor ?? 1);
     const toy       = tor + effectiveADU * effectiveDLT;
 
-    // Three-way max per Ptak & Smith Ch 8:
-    //   order_cycle × ADU  (if cycle-based ordering)
+    // Three-way max per Ptak & Smith Ch 7/8:
+    //   order_cycle × ADU  (per-part docDays preferred over profile.orderCycleDays)
     //   DLT × ADU × LTF    (minimum DLT coverage = redBase)
     //   MOQ                (minimum batch size)
+    const effectiveDOC = opts?.docDays ?? profile.orderCycleDays;
     const greenBase = Math.max(
-        profile.orderCycleDays != null ? effectiveADU * profile.orderCycleDays : 0,
+        effectiveDOC != null ? effectiveADU * effectiveDOC : 0,
         redBase,
         moq,
     );
@@ -757,9 +762,11 @@ export function recalibrateBufferZone(
     );
 
     // Ch 7: min-max zones have no yellow zone (TOY = TOR); dispatch accordingly.
+    // Pass per-part DOC override (N-5) so green zone uses the item's own order cycle.
+    const optsWithDoc = { ...factors, docDays: existing.orderCycleDays };
     const comp = existing.bufferClassification === 'min_max'
-        ? computeMinMaxBuffer(profile, newADU, existing.aduUnit, newDLTDays, existing.moq, existing.moqUnit, factors)
-        : computeBufferZone(profile, newADU, existing.aduUnit, newDLTDays, existing.moq, existing.moqUnit, factors);
+        ? computeMinMaxBuffer(profile, newADU, existing.aduUnit, newDLTDays, existing.moq, existing.moqUnit, optsWithDoc)
+        : computeBufferZone(profile, newADU, existing.aduUnit, newDLTDays, existing.moq, existing.moqUnit, optsWithDoc);
 
     const asOfStr = asOf.toISOString().slice(0, 10);
     const activeAdjustmentIds = adjustments
@@ -778,6 +785,8 @@ export function recalibrateBufferZone(
         tor: comp.tor,
         toy: comp.toy,
         tog: comp.tog,
+        redBase: comp.redBase,       // N-6: persist decomposition for planner visibility
+        redSafety: comp.redSafety,   // N-6
         demandAdjFactor: factors.demandAdjFactor,
         zoneAdjFactor: factors.zoneAdjFactor,
         leadTimeAdjFactor: factors.leadTimeAdjFactor,
@@ -1219,6 +1228,20 @@ export function averageOnHandTarget(bz: BufferZone): number {
 // 20. onHandAlert — configurable threshold execution alert
 // =============================================================================
 
+/**
+ * Display-friendly entry for the OnHandAlert component.
+ * One entry per monitored ResourceSpecification.
+ */
+export interface OnhandAlertEntry {
+    specId: string;
+    /** Buffer zone the on-hand is currently in */
+    zone: 'red' | 'yellow' | 'green';
+    /** On-hand as a percentage of TOR (0–100) */
+    pct: number;
+    /** Optional location context for display */
+    location?: string;
+}
+
 export interface OnHandAlertResult {
     onhand: number;
     bufferStatus: BufferStatusResult;
@@ -1365,6 +1388,23 @@ export function legLeadTime(
 // =============================================================================
 // 22. bufferHealthHistory — time-series buffer health reconstruction
 // =============================================================================
+
+/**
+ * Display-friendly entry for the LTM (Lead Time Monitor) alert component.
+ * One entry per open supply Commitment that is inside the LTM alert horizon.
+ */
+export interface LTMAlertEntry {
+    /** Commitment / supply order ID */
+    orderId: string;
+    /** ResourceSpecification ID */
+    specId: string;
+    /** ISO datetime — due date of the commitment */
+    due?: string;
+    /** Calendar days remaining until due (can be negative if overdue) */
+    daysRemaining?: number;
+    /** LTM zone classification from ltmAlertZoneFull() */
+    ltmZone: 'early' | 'green' | 'yellow' | 'red' | 'late';
+}
 
 export interface BufferHealthEntry {
     /** YYYY-MM-DD */
@@ -2263,6 +2303,68 @@ export function adjustVFForCapacity(
         green:  0.85,  // healthy capacity — stock buffer can be leaner
     };
     return Math.min(1.0, baseVF * multiplier[capacityZone]);
+}
+
+// =============================================================================
+// 25h. N-1 — aduDriftAlert
+// =============================================================================
+
+/**
+ * Compares a freshly computed ADU against the zone's stored ADU and returns
+ * an alert level based on the zone's configured alert thresholds.
+ *
+ * @param previousADU   ADU stored on the BufferZone before this recalibration
+ * @param newADU        Freshly computed ADU value
+ * @param highThreshold Fraction (e.g. 0.20 = 20%) above which fires 'high' alert
+ * @param lowThreshold  Fraction (e.g. 0.20 = 20%) below which fires 'low' alert
+ * @returns 'high' | 'low' | null
+ * DDMRP ref: Ptak & Smith Ch 7 §"ADU Exceptions".
+ */
+export function aduDriftAlert(
+    previousADU: number,
+    newADU: number,
+    highThreshold: number,
+    lowThreshold: number,
+): 'high' | 'low' | null {
+    if (previousADU <= 0) return null;
+    const ratio = newADU / previousADU;
+    if (ratio > 1 + highThreshold) return 'high';
+    if (ratio < 1 - lowThreshold)  return 'low';
+    return null;
+}
+
+// =============================================================================
+// 25i. N-2 — bootstrapADU
+// =============================================================================
+
+/**
+ * Computes a blended ADU for items with incomplete demand history.
+ *
+ * Formula (Ptak & Smith Ch 7 Fig 7-16):
+ *   blended = (actualADU × daysActual + estimatedADU × daysEstimated) / windowDays
+ *
+ * Where daysEstimated = windowDays − daysActual.
+ * Once daysActual ≥ windowDays, returns actualADU unchanged (bootstrap complete).
+ *
+ * @param actualADU    ADU computed from real demand events so far
+ * @param daysActual   Number of days of real demand history accumulated
+ * @param estimatedADU Management-estimated ADU for the remaining window
+ * @param windowDays   Full ADU computation window (e.g. 30, 60, 90 days)
+ * @returns { blendedADU, bootstrapComplete, effectiveDaysActual }
+ * DDMRP ref: Ptak & Smith Ch 7 §"Establishing ADU with No History".
+ */
+export function bootstrapADU(
+    actualADU: number,
+    daysActual: number,
+    estimatedADU: number,
+    windowDays: number,
+): { blendedADU: number; bootstrapComplete: boolean; effectiveDaysActual: number } {
+    if (daysActual >= windowDays) {
+        return { blendedADU: actualADU, bootstrapComplete: true, effectiveDaysActual: windowDays };
+    }
+    const daysEstimated = windowDays - daysActual;
+    const blendedADU = (actualADU * daysActual + estimatedADU * daysEstimated) / windowDays;
+    return { blendedADU, bootstrapComplete: false, effectiveDaysActual: daysActual };
 }
 
 // =============================================================================

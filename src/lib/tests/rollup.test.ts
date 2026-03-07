@@ -29,7 +29,7 @@ describe('Value Rollup Algorithms', () => {
         const recipe = recipes.addRecipe({ name: 'Table', basedOn: 'spec:table', recipeProcesses: [] });
         
         const woodProcess = recipes.addRecipeProcess({ name: 'Cut Wood' });
-        recipe.recipeProcesses.push(woodProcess.id);
+        (recipe.recipeProcesses ??= []).push(woodProcess.id);
         
         recipes.addRecipeFlow({
             action: 'consume',
@@ -39,7 +39,7 @@ describe('Value Rollup Algorithms', () => {
         });
         
         const buildProcess = recipes.addRecipeProcess({ name: 'Build Table' });
-        recipe.recipeProcesses.push(buildProcess.id);
+        (recipe.recipeProcesses ??= []).push(buildProcess.id);
         
         recipes.addRecipeFlow({
             action: 'consume',

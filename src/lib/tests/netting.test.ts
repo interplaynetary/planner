@@ -18,7 +18,6 @@ function makeResource(overrides: Partial<EconomicResource> & { conformsTo: strin
     return {
         id: nextId(),
         name: overrides.name ?? overrides.conformsTo,
-        conformsTo: overrides.conformsTo,
         accountingQuantity: { hasNumericalValue: overrides.quantity, hasUnit: 'each' },
         onhandQuantity: { hasNumericalValue: overrides.quantity, hasUnit: 'each' },
         ...overrides,

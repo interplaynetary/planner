@@ -18,7 +18,7 @@
 </script>
 
 <div class="fb {cls}">
-  <QuantityBar value={fulfilled} max={committed} {unit} {zone} />
+  <QuantityBar value={fulfilled} max={committed} label={unit} {zone} />
   {#if state.overFulfilled}<span class="warn">over-fulfilled</span>{/if}
 </div>
 

@@ -11,7 +11,7 @@
   let { standard, actual, unit = "", class: cls = "" }: Props = $props();
 
   const variance = $derived(
-    standard && actual ? actual.total - standard.total : null,
+    standard && actual ? actual.totalValue - standard.totalValue : null,
   );
 </script>
 
@@ -20,13 +20,13 @@
     {#if standard}
       <div>
         <span class="lbl">Standard</span>
-        <span class="val">{standard.total.toFixed(2)} {unit}</span>
+        <span class="val">{standard.totalValue.toFixed(2)} {unit}</span>
       </div>
     {/if}
     {#if actual}
       <div>
         <span class="lbl">Actual</span>
-        <span class="val">{actual.total.toFixed(2)} {unit}</span>
+        <span class="val">{actual.totalValue.toFixed(2)} {unit}</span>
       </div>
     {/if}
     {#if variance !== null}
@@ -40,7 +40,7 @@
     {/if}
   </div>
 
-  {#if standard?.stages}
+  {#if standard?.stages?.length}
     <table class="stages">
       <thead>
         <tr
@@ -50,12 +50,12 @@
         >
       </thead>
       <tbody>
-        {#each Object.entries(standard.stages) as [stage, val]}
+        {#each standard.stages as stage, i}
           <tr>
-            <td>{stage}</td>
-            <td class="num">{(val as number).toFixed(2)}</td>
-            {#if actual?.stages?.[stage] !== undefined}
-              <td class="num">{(actual.stages[stage] as number).toFixed(2)}</td>
+            <td>{stage.processName}</td>
+            <td class="num">{stage.stageTotalValue.toFixed(2)}</td>
+            {#if actual?.stages?.[i] !== undefined}
+              <td class="num">{actual.stages[i].stageTotalValue.toFixed(2)}</td>
             {/if}
           </tr>
         {/each}

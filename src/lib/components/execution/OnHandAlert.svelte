@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { OnhandAlertEntry } from "$lib/algorithms/ddmrp";
+
   import ZoneBadge from "$lib/components/ui/ZoneBadge.svelte";
 
   interface Props {

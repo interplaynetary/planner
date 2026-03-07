@@ -73,6 +73,12 @@ export interface DemandSlot {
     /** Provider/receiver agents if specified on the Intent */
     provider?: string;
     receiver?: string;
+
+    /** SpatialThing ID — location of the demand (from Intent.atLocation) */
+    atLocation?: string;
+
+    /** Demand classification label (e.g. "intersite-transfer", "export") for display */
+    classification?: string;
 }
 
 export interface IndependentDemandIndex {

@@ -9,7 +9,7 @@ describe('Critical Path Method (CPM)', () => {
 
     beforeEach(() => {
         processReg = new ProcessRegistry();
-        planStore = new PlanStore();
+        planStore = new PlanStore(processReg);
     });
 
     test('computes critical path and floats for a series of dependent processes', () => {

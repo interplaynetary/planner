@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { SignalIntegrityEntry } from "$lib/algorithms/ddmrp";
+  import type { FulfillmentState } from "$lib/observation/observer";
   import ZoneBadge from "$lib/components/ui/ZoneBadge.svelte";
   import QuantityBar from "$lib/components/ui/QuantityBar.svelte";
 
@@ -10,10 +11,26 @@
 
   let { entries, class: cls = "" }: Props = $props();
 
+  function approvedQty(e: SignalIntegrityEntry): number {
+    return e.commitment?.resourceQuantity?.hasNumericalValue ?? 0;
+  }
+  function fulfilled(e: SignalIntegrityEntry): number {
+    return (e.fulfillmentState as FulfillmentState | undefined)
+      ?.totalFulfilled?.hasNumericalValue ?? 0;
+  }
+  function qtyDeviation(e: SignalIntegrityEntry): number {
+    return e.deviation?.qtyDiff ?? 0;
+  }
+  function isLate(e: SignalIntegrityEntry): boolean {
+    return e.deviation?.late ?? false;
+  }
+  function isOverFulfilled(e: SignalIntegrityEntry): boolean {
+    return (e.fulfillmentState as FulfillmentState | undefined)?.overFulfilled ?? false;
+  }
   function rowZone(e: SignalIntegrityEntry): "green" | "yellow" | "red" {
-    if (e.late || e.overFulfilled) return "red";
-    if (Math.abs(e.qtyDeviation) / (e.recommendedQty || 1) > 0.1)
-      return "yellow";
+    if (isLate(e) || isOverFulfilled(e)) return "red";
+    const dev = qtyDeviation(e);
+    if (Math.abs(dev) / (e.signal.recommendedQty || 1) > 0.1) return "yellow";
     return "green";
   }
 </script>
@@ -33,32 +50,30 @@
   <tbody>
     {#each entries as e}
       {@const zone = rowZone(e)}
+      {@const aqty = approvedQty(e)}
+      {@const dev = qtyDeviation(e)}
       <tr class={zone}>
-        <td class="id">{e.signalId.slice(0, 8)}</td>
-        <td>{e.specId.slice(0, 12)}</td>
-        <td class="num">{e.recommendedQty.toFixed(1)}</td>
-        <td class="num" class:dev={e.qtyDeviation !== 0}>
-          {e.approvedQty.toFixed(1)}
-          {#if e.qtyDeviation !== 0}
-            <span class="diff"
-              >({e.qtyDeviation > 0 ? "+" : ""}{e.qtyDeviation.toFixed(
-                1,
-              )})</span
-            >
+        <td class="id">{e.signal.id.slice(0, 8)}</td>
+        <td>{e.signal.specId.slice(0, 12)}</td>
+        <td class="num">{e.signal.recommendedQty.toFixed(1)}</td>
+        <td class="num" class:dev={dev !== 0}>
+          {aqty.toFixed(1)}
+          {#if dev !== 0}
+            <span class="diff">({dev > 0 ? "+" : ""}{dev.toFixed(1)})</span>
           {/if}
         </td>
         <td>
-          <QuantityBar value={e.fulfilled} max={e.approvedQty} {zone} />
+          <QuantityBar value={fulfilled(e)} max={aqty} {zone} />
         </td>
         <td class="num"
-          >{e.recommendedDue
-            ? new Date(e.recommendedDue).toLocaleDateString()
+          >{e.signal.dueDate
+            ? new Date(e.signal.dueDate).toLocaleDateString()
             : "—"}</td
         >
         <td
           ><ZoneBadge
             {zone}
-            label={e.late ? "LATE" : e.overFulfilled ? "OVER" : "OK"}
+            label={isLate(e) ? "LATE" : isOverFulfilled(e) ? "OVER" : "OK"}
           /></td
         >
       </tr>

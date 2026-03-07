@@ -461,6 +461,15 @@
     return lines;
   }
 
+  // ── External props ─────────────────────────────────────────────────────────
+  interface Props {
+    /** Called when a buffer funnel is clicked. Passes the BufferZone.id. */
+    onbufferselect?: (bzId: string) => void;
+    /** Highlights the funnel matching this BufferZone.id. */
+    selectedBzId?: string;
+  }
+  let { onbufferselect, selectedBzId }: Props = $props();
+
   // ── Selection state ────────────────────────────────────────────────────────
   let selected = $state<{ type: EntityType; id: string } | null>(null);
 
@@ -826,11 +835,14 @@
           {@const curHW = BUF_W / 2 - curF * BUF_W / 4}
           <g
             transform="translate({fx + BUF_W / 2},{fy})"
-            style="cursor:default"
-            role="img"
+            style="cursor:pointer"
+            role="button"
+            tabindex="0"
             onmouseenter={(ev) => showTip(ev, resLines(row, 'output'))}
             onmouseleave={hideTip}
             onmousemove={moveTip}
+            onclick={() => { onbufferselect?.(bz.id); }}
+            onkeydown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') onbufferselect?.(bz.id); }}
           >
             <path d={funSlice(0, gF)} fill="#276749" opacity="0.9" />
             <path d={funSlice(gF, yF)} fill="#b7791f" opacity="0.9" />
@@ -841,6 +853,15 @@
               x2={curHW + 2}  y2={curF * BUF_H}
               stroke="white" stroke-width="1.5" opacity="0.9"
             />
+            {#if bz.id === selectedBzId}
+              <rect
+                x={-BUF_W / 2 - 3} y={-3}
+                width={BUF_W + 6} height={BUF_H + 6}
+                rx="2" fill="none"
+                stroke="#90cdf4" stroke-width="1.5"
+                style="pointer-events:none"
+              />
+            {/if}
           </g>
         {/if}
       {/each}
@@ -907,7 +928,7 @@
           {@const curHW = BUF_W / 2 - curF * BUF_W / 4}
           <g
             transform="translate({fx},{fy})"
-            style="cursor:default" role="img"
+            style="cursor:pointer" role="button" tabindex="0"
             onmouseenter={(ev) => showTip(ev, [
               specName,
               `TOR ${bz.tor.toFixed(2)} · TOY ${bz.toy.toFixed(2)} · TOG ${bz.tog.toFixed(2)}`,
@@ -915,6 +936,8 @@
               onhand <= bz.tor ? '● RED zone' : onhand <= bz.toy ? '● YELLOW zone' : '● GREEN zone',
             ])}
             onmouseleave={hideTip} onmousemove={moveTip}
+            onclick={() => { onbufferselect?.(bz.id); }}
+            onkeydown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') onbufferselect?.(bz.id); }}
           >
             <path d={funSlice(0, gF)} fill="#276749" opacity="0.9" />
             <path d={funSlice(gF, yF)} fill="#b7791f" opacity="0.9" />
@@ -922,6 +945,15 @@
             <path d={funSlice(0, 1)} fill="none" stroke="rgba(226,232,240,0.4)" stroke-width="0.6" />
             <line x1={-curHW - 2} y1={curF * BUF_H} x2={curHW + 2} y2={curF * BUF_H}
               stroke="white" stroke-width="1.5" opacity="0.9" />
+            {#if bz.id === selectedBzId}
+              <rect
+                x={-BUF_W / 2 - 3} y={-3}
+                width={BUF_W + 6} height={BUF_H + 6}
+                rx="2" fill="none"
+                stroke="#90cdf4" stroke-width="1.5"
+                style="pointer-events:none"
+              />
+            {/if}
           </g>
           <text x={fx} y={fy + BUF_H + 10} text-anchor="middle" font-size="6.5"
             fill="rgba(226,232,240,0.35)" style="pointer-events:none">{trunc(specName, 10)}</text>

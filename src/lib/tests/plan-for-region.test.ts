@@ -77,7 +77,7 @@ function makeObserver() {
 
 function makeEmptyIndexes(locations: Map<string, SpatialThing> = new Map()) {
     const di = buildIndependentDemandIndex([], [], [], locations, 7);
-    const ai = buildAgentIndex([], [], 7);
+    const ai = buildAgentIndex([], [], new Map(), 7);
     const si = buildIndependentSupplyIndex([], [], [], ai, locations, 7);
     return { di, si };
 }
@@ -150,7 +150,7 @@ describe('classifySlot', () => {
             accountingQuantity: { hasNumericalValue: 20, hasUnit: 'kg' },
             currentLocation: 'loc:london',
         }];
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex(resources, [], [], ai, locations, 7);
 
         const slot = makeDemandSlot('spec:wheat');
@@ -169,7 +169,7 @@ describe('classifySlot', () => {
             accountingQuantity: { hasNumericalValue: 20, hasUnit: 'kg' },
             currentLocation: 'loc:paris',
         }];
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex(resources, [], [], ai, locations, 7);
 
         const slot = makeDemandSlot('spec:wheat');
@@ -284,7 +284,7 @@ describe('planForRegion — Pass 1 only', () => {
             ['loc:london', { id: 'loc:london', lat: 51.5074, long: -0.1278 }],
         ]);
         const di = buildIndependentDemandIndex(intents, [], [], locations, 7);
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex([], [], [], ai, locations, 7);
 
         const ctx: RegionPlanContext = {
@@ -364,7 +364,7 @@ describe('planForRegion — two-pass integration (Mode C)', () => {
             ['loc:london', { id: 'loc:london', lat: 51.5074, long: -0.1278 }],
         ]);
         const di = buildIndependentDemandIndex(intents, [], [], locations, 7);
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex([], [], [], ai, locations, 7);
 
         const ctx: RegionPlanContext = {
@@ -436,7 +436,7 @@ describe('planForRegion — metabolicDebt when replenishment recipe missing', ()
             ['loc:london', { id: 'loc:london', lat: 51.5074, long: -0.1278 }],
         ]);
         const di = buildIndependentDemandIndex(intents, [], [], locations, 7);
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex([], [], [], ai, locations, 7);
 
         const ctx: RegionPlanContext = {
@@ -484,7 +484,7 @@ describe('planForRegion — Phase B surplus supply', () => {
             currentLocation: 'loc:london',
         }];
         const di = buildIndependentDemandIndex([], [], [], locations, 7);
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex(resources, [], [], ai, locations, 7);
 
         const ctx: RegionPlanContext = {
@@ -567,7 +567,7 @@ describe('planForRegion — backtracking', () => {
             },
         ];
         const di = buildIndependentDemandIndex(intents, [], [], new Map(), 7);
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex([], [], [], ai, new Map(), 7);
 
         const ctx: RegionPlanContext = {
@@ -745,7 +745,7 @@ describe('planForRegion — Group A: surplus.plannedWithin', () => {
             currentLocation: 'loc:london',
         }];
         const di = buildIndependentDemandIndex([], [], [], locations, 7);
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex(resources, [], [], ai, locations, 7);
 
         const ctx: RegionPlanContext = {
@@ -809,7 +809,7 @@ describe('planForRegion — Group B: MetabolicDebt.plannedWithin', () => {
             ['loc:london', { id: 'loc:london', lat: 51.5074, long: -0.1278 }],
         ]);
         const di = buildIndependentDemandIndex(intents, [], [], locations, 7);
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex([], [], [], ai, locations, 7);
 
         const ctx: RegionPlanContext = {
@@ -894,7 +894,7 @@ describe('planForRegion — Group C: deficits from backtracking', () => {
             },
         ];
         const di = buildIndependentDemandIndex(intents, [], [], new Map(), 7);
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex([], [], [], ai, new Map(), 7);
 
         const ctx: RegionPlanContext = {
@@ -965,7 +965,7 @@ describe('planForRegion — Group D: deficits from metabolicDebt', () => {
             ['loc:london', { id: 'loc:london', lat: 51.5074, long: -0.1278 }],
         ]);
         const di = buildIndependentDemandIndex(intents, [], [], locations, 7);
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex([], [], [], ai, locations, 7);
 
         const ctx: RegionPlanContext = {
@@ -1020,7 +1020,7 @@ describe('planForRegion — Group E: child deficit resolved at parent', () => {
             ['loc:london', { id: 'loc:london', lat: 51.5074, long: -0.1278 }],
         ]);
         const childDi = buildIndependentDemandIndex(childIntents, [], [], locations, 7);
-        const childAi = buildAgentIndex([], [], 7);
+        const childAi = buildAgentIndex([], [], new Map(), 7);
         const childSi = buildIndependentSupplyIndex([], [], [], childAi, locations, 7);
 
         const childCtx: RegionPlanContext = {
@@ -1051,7 +1051,7 @@ describe('planForRegion — Group E: child deficit resolved at parent', () => {
         });
 
         const parentDi = buildIndependentDemandIndex([], [], [], new Map(), 7);
-        const parentAi = buildAgentIndex([], [], 7);
+        const parentAi = buildAgentIndex([], [], new Map(), 7);
         const parentSi = buildIndependentSupplyIndex([], [], [], parentAi, new Map(), 7);
 
         const parentCtx: RegionPlanContext = {
@@ -1109,7 +1109,7 @@ describe('planForRegion — Group F: child deficit propagates when parent cannot
             ['loc:london', { id: 'loc:london', lat: 51.5074, long: -0.1278 }],
         ]);
         const childDi = buildIndependentDemandIndex(childIntents, [], [], locations, 7);
-        const childAi = buildAgentIndex([], [], 7);
+        const childAi = buildAgentIndex([], [], new Map(), 7);
         const childSi = buildIndependentSupplyIndex([], [], [], childAi, locations, 7);
 
         const childCtx: RegionPlanContext = {
@@ -1133,7 +1133,7 @@ describe('planForRegion — Group F: child deficit propagates when parent cannot
         // Parent: also no recipe/inventory for spec:Y
         const parentObs = makeObserver();
         const parentDi = buildIndependentDemandIndex([], [], [], new Map(), 7);
-        const parentAi = buildAgentIndex([], [], 7);
+        const parentAi = buildAgentIndex([], [], new Map(), 7);
         const parentSi = buildIndependentSupplyIndex([], [], [], parentAi, new Map(), 7);
 
         const parentCtx: RegionPlanContext = {
@@ -1216,7 +1216,7 @@ describe('planForRegion — Group G: merge planner retractions in deficits', () 
             atLocation: 'loc:london',
         };
         const di = buildIndependentDemandIndex([woolIntent], [], [], locations, 7);
-        const ai = buildAgentIndex([], [], 7);
+        const ai = buildAgentIndex([], [], new Map(), 7);
         const si = buildIndependentSupplyIndex([], [], [], ai, locations, 7);
 
         const ctx: RegionPlanContext = {

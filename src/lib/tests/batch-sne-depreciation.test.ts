@@ -41,7 +41,7 @@ describe('Minimum batch sizes in dependent demand', () => {
                 ? { minimumBatchQuantity: { hasNumericalValue: minimumBatchQty, hasUnit: 'each' } }
                 : {}),
         });
-        recipe.recipeProcesses.push(proc.id);
+        (recipe.recipeProcesses ??= []).push(proc.id);
 
         // Output: 10 widgets per run
         recipes.addRecipeFlow({
@@ -133,7 +133,7 @@ describe('Minimum batch sizes in dependent demand', () => {
             hasDuration: { hasNumericalValue: 1, hasUnit: 'hours' },
             minimumBatchQuantity: { hasNumericalValue: 60, hasUnit: 'each' }, // 60 half-slabs/run minimum
         });
-        recipe.recipeProcesses.push(cutProc.id);
+        (recipe.recipeProcesses ??= []).push(cutProc.id);
 
         recipes.addRecipeFlow({
             action: 'produce',
@@ -153,7 +153,7 @@ describe('Minimum batch sizes in dependent demand', () => {
             name: 'Build Widget2',
             hasDuration: { hasNumericalValue: 2, hasUnit: 'hours' },
         });
-        recipe.recipeProcesses.push(buildProc.id);
+        (recipe.recipeProcesses ??= []).push(buildProc.id);
 
         recipes.addRecipeFlow({
             action: 'consume',

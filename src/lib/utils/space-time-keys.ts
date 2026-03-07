@@ -1,6 +1,6 @@
 import * as h3 from 'h3-js';
 import { computeH3Index, REMOTE_H3_INDEX, spatialThingToH3 } from './space';
-import type { AvailabilityWindow, TemporalExpression, TimeRange, DaySchedule, WeekSchedule, MonthSchedule } from './time';
+import type { AvailabilityWindow, TemporalExpression, TimeRange, DaySchedule, WeekSchedule, MonthSchedule, DayOfWeek } from './time';
 import { isSpecificDateWindow } from './time';
 import type { Intent, Commitment, EconomicEvent, SpatialThing } from '../schemas';
 
