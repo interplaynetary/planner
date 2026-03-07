@@ -491,6 +491,52 @@ export type AgentRelationship = z.infer<typeof AgentRelationshipSchema>;
 // =============================================================================
 
 /**
+ * PositioningAnalysis — DDMRP Chapter 6 strategic positioning factors.
+ *
+ * Captures the six positioning inputs per item that justify a decoupling-point
+ * decision. Stored inline on ResourceSpecification so the rationale travels
+ * with the item spec rather than living in a separate record.
+ *
+ * DDMRP ref: Ptak & Smith Ch 6 — Strategic Inventory Positioning.
+ */
+export const PositioningAnalysisSchema = z.object({
+    /**
+     * Customer Tolerance Time (CTT) — maximum wait time a customer will accept
+     * before going elsewhere, in calendar days.
+     */
+    customerToleranceTimeDays: z.number().nonnegative().optional(),
+    /**
+     * Market Potential Lead Time (MPLT) — shortest lead time any competitor
+     * currently offers, in calendar days.
+     */
+    marketPotentialLeadTimeDays: z.number().nonnegative().optional(),
+    /**
+     * Sales Order Visibility Horizon (SOVH) — how far ahead firm demand is
+     * visible (confirmed orders on the books), in calendar days.
+     */
+    salesOrderVisibilityHorizonDays: z.number().nonnegative().optional(),
+    /**
+     * Inventory Leverage & Flexibility (ILF) — whether stocking this item
+     * maximises flexibility for downstream use cases.
+     */
+    inventoryLeverageFlexibility: z.enum(['low', 'medium', 'high']).optional(),
+    /**
+     * Variable Rate of Demand (VRD) — how frequently and severely demand
+     * spikes within the customer tolerance time.
+     */
+    vrd: z.enum(['low', 'medium', 'high']).optional(),
+    /**
+     * Variable Rate of Supply (VRS) — how frequently and severely supply
+     * fails (late deliveries, short shipments, quality problems).
+     */
+    vrs: z.enum(['low', 'medium', 'high']).optional(),
+    /** Derived recommendation: should a decoupling point be placed here? */
+    decouplingRecommended: z.boolean().optional(),
+    note: z.string().optional(),
+});
+export type PositioningAnalysis = z.infer<typeof PositioningAnalysisSchema>;
+
+/**
  * ResourceSpecification — the catalog "type" of a resource.
  * One per kind of thing (e.g. "Bread", "Steel beam", "Translation service").
  * EconomicResources conformTo exactly one ResourceSpecification.
@@ -508,8 +554,11 @@ export const ResourceSpecificationSchema = z.object({
     // DDMRP extensions
     bufferProfileId: z.string().optional(),               // BufferProfile ID
     replenishmentRequired: z.boolean().optional(),        // tag:plan:replenishment-required (Pass 2 trigger)
+    /** DDMRP Ch 6 positioning factors — rationale for decoupling-point placement. */
+    positioningAnalysis: PositioningAnalysisSchema.optional(),
 });
 export type ResourceSpecification = z.infer<typeof ResourceSpecificationSchema>;
+
 
 /**
  * ProcessSpecification — the "type" of a process.
@@ -531,8 +580,32 @@ export const ProcessSpecificationSchema = z.object({
      *   'capacity' — capacity buffer (drum resource; sprint headroom)
      */
     bufferType: z.enum(['stock', 'time', 'capacity']).optional(),
+    /**
+     * Divergent point — this process produces output consumed by ≥2 downstream
+     * processes or end products. Ideal decoupling candidate (maximum flexibility).
+     * DDMRP ref: Ptak & Smith Ch 6 §"Advanced Inventory Positioning Considerations".
+     */
+    isDivergentPoint: z.boolean().optional(),
+    /**
+     * Convergent point — ≥2 distinct supply chains merge as inputs to this process.
+     * Inherently higher risk; often warrants a time or capacity buffer.
+     * DDMRP ref: Ptak & Smith Ch 6 §"Advanced Inventory Positioning Considerations".
+     */
+    isConvergentPoint: z.boolean().optional(),
 });
 export type ProcessSpecification = z.infer<typeof ProcessSpecificationSchema>;
+
+export const CapacityBufferSchema = z.object({
+    id: z.string(),
+    processSpecId: z.string(),                                 // ProcessSpecification ID (the work center)
+    totalCapacityHours: z.number().positive(),                 // available capacity hours per period
+    periodDays: z.number().positive(),                         // period length (1 = daily)
+    currentLoadHours: z.number().nonnegative(),                // scheduled load hours (computed at seed/refresh)
+    greenThreshold: z.number().min(0).max(1).optional(),       // default 0.80
+    yellowThreshold: z.number().min(0).max(1).optional(),      // default 0.95
+    note: z.string().optional(),
+});
+export type CapacityBuffer = z.infer<typeof CapacityBufferSchema>;
 
 // =============================================================================
 // KNOWLEDGE LAYER — Recipes
@@ -1035,16 +1108,31 @@ export type ProposalList = z.infer<typeof ProposalListSchema>;
 export const BufferProfileSchema = z.object({
     id: z.string(),
     name: z.string(),
-    /** P = Purchased externally; M = Manufactured in-house; I = Intermediate (both) */
-    itemType: z.enum(['Purchased', 'Manufactured', 'Intermediate']),
+    /** P = Purchased externally; M = Manufactured in-house; I = Intermediate (both); D = Distributed */
+    itemType: z.enum(['Purchased', 'Manufactured', 'Intermediate', 'Distributed']),
     /**
      * Lead Time Factor — multiplier applied to ADU × DLT to size the red zone base.
      * Typical values: 0.5 (short LT), 1.0 (medium LT), 1.5 (long LT).
      */
     leadTimeFactor: z.number().positive(),
     /**
+     * Variable Rate of Demand (VRD) — semantic classification of demand variability.
+     * Low: demand is predictable; High: frequent large spikes within CTT.
+     * Used to derive variabilityFactor when set; see deriveVariabilityFactor().
+     * DDMRP ref: Ptak & Smith Ch 6 §"External Variability", Ch 7 §"Factor 3: Variability".
+     */
+    vrd: z.enum(['low', 'medium', 'high']).optional(),
+    /**
+     * Variable Rate of Supply (VRS) — semantic classification of supply variability.
+     * Low: supplier is reliable; High: frequent late/short/quality failures.
+     * Used to derive variabilityFactor when set; see deriveVariabilityFactor().
+     * DDMRP ref: Ptak & Smith Ch 6 §"External Variability", Ch 7 §"Factor 3: Variability".
+     */
+    vrs: z.enum(['low', 'medium', 'high']).optional(),
+    /**
      * Variability Factor — fraction of the red base added as a safety buffer.
      * TOR = ADU × DLT × LTF × (1 + VF). Typical values: 0.1 (low), 0.5 (medium), 1.0 (high).
+     * Can be set manually or auto-derived from vrd + vrs via deriveVariabilityFactor().
      */
     variabilityFactor: z.number().nonnegative(),
     /**
@@ -1065,6 +1153,22 @@ export const BufferProfileSchema = z.object({
      * ADU, DLT, and zone boundaries.
      */
     recalculationCadence: z.enum(['daily', 'weekly', 'monthly']).optional(),
+    /**
+     * Lead time band classification per Ch 7 profile convention.
+     * Short: LTF 61–100%, Medium: LTF 41–60%, Long: LTF 20–40%.
+     */
+    leadTimeCategory: z.enum(['short', 'medium', 'long']).optional(),
+    /**
+     * Variability band classification per Ch 7 profile convention.
+     * Low: VF 0–40%, Medium: VF 41–60%, High: VF 61–100%+.
+     */
+    variabilityCategory: z.enum(['low', 'medium', 'high']).optional(),
+    /**
+     * 3-letter profile code per Ch 7 convention: ItemType + LTCategory + VariabilityCategory.
+     * Item types: M (Manufactured), P (Purchased), D (Distributed), I (Intermediate).
+     * e.g. "MML" = Manufactured / Medium LT / Low variability, "PSH" = Purchased / Short / High.
+     */
+    code: z.string().optional(),
     note: z.string().optional(),
 });
 export type BufferProfile = z.infer<typeof BufferProfileSchema>;
@@ -1093,8 +1197,19 @@ export const BufferZoneSchema = z.object({
     specId: z.string(),
     /** BufferProfile ID used to compute this zone */
     profileId: z.string(),
+    /**
+     * Buffer classification per Ch 7.
+     * replenished: standard 3-zone (TOR/TOY/TOG), auto-recalculated on ADU/DLT/MOQ change.
+     * replenished_override: user-set zones (contractual/constrained), must NOT be auto-recalculated.
+     * min_max: 2-zone (TOR/TOG), yellow zone not applicable (TOY = TOR).
+     */
+    bufferClassification: z.enum(['replenished', 'replenished_override', 'min_max']).default('replenished'),
     /** SpatialThing ID — if absent, applies to all locations */
     atLocation: z.string().optional(),
+    /** SpatialThing ID of the upstream location that replenishes this zone. */
+    upstreamLocationId: z.string().optional(),
+    /** Recipe ID (transport leg) to execute when issuing a replenishment order. */
+    replenishmentRecipeId: z.string().optional(),
 
     // --- ADU inputs ---
     /** Average Daily Usage quantity (result of the rolling-window calculation) */

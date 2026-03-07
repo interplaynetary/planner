@@ -1,73 +1,98 @@
 <script lang="ts">
-  import type { Process, ProcessSpecification, Agent, BufferZone } from '$lib/schemas';
+  import type { Process, ProcessSpecification, BufferZone } from '$lib/schemas';
+  import { ACTION_DEFINITIONS } from '$lib/schemas';
   import {
     processSpecs, processList, commitmentList, eventList,
-    resourceList, agentList, bufferZoneList, resourceSpecs,
+    resourceList, bufferZoneList, resourceSpecs, capacityBufferList,
+    locationList, agentList,
   } from '$lib/vf-stores.svelte';
+  import { capacityBufferStatus } from '$lib/algorithms/ddmrp';
   import { showTip, hideTip, moveTip } from '$lib/tooltip.svelte';
+  import EntityPanel from '$lib/components/shared/EntityPanel.svelte';
+  import type { EntityType } from '$lib/vf-descriptors';
 
   // ── Layout constants ──────────────────────────────────────────────────────
-  const ML        = 30;    // left margin
-  const MT        = 16;    // top margin
-  const MB        = 56;    // bottom margin (legend)
-  const COL_W     = 360;   // column center-to-center
-  const PROC_W    = 108;
-  const PROC_H    = 44;
-  const AGENT_H   = 22;
-  const AGENT_W   = 80;
-  const AGENT_GAP = 6;     // gap between agent bottom and process top
-  const RES_RX    = 40;
-  const RES_RY    = 13;
-  const RES_GAP   = 12;    // gap: process box edge → resource oval center
-  const ROW_H     = 34;    // vertical spacing between resource rows
-  const SLOT_BOT  = 16;    // padding below last resource row in slot
-  const SLOT_GAP  = 14;    // gap between stacked slots in same column
-  const BUF_W     = 16;    // buffer funnel width
-  const BUF_H     = 22;    // buffer funnel height
+  const ML       = 30;    // left margin
+  const MT       = 16;    // top margin
+  const MB       = 56;    // bottom margin (legend)
+  const COL_W    = 420;   // column center-to-center
+  const PROC_W   = 108;
+  const PROC_H   = 44;
+  const CARD_W   = 114;   // resource card width
+  const CARD_H   = 46;    // resource card height
+  const CARD_RX  = 4;     // card border radius
+  const RES_GAP  = 12;    // gap: process box edge → card center
+  const ROW_H    = 52;    // vertical spacing between resource rows
+  const SLOT_BOT = 16;    // padding below last resource row in slot
+  const SLOT_GAP = 14;    // gap between stacked slots in same column
+  const BUF_W    = 16;    // buffer funnel width
+  const BUF_H    = 22;    // buffer funnel height
+  const CAP_H    = 5;     // capacity bar height in px
+  const CAP_GAP  = 3;     // gap from process box bottom to bar top
 
-  /** Distance from process center-X to resource oval center-X */
-  const IO_X = PROC_W / 2 + RES_GAP + RES_RX; // 54 + 12 + 40 = 106
+  /** Distance from process center-X to resource card center-X */
+  const IO_X = PROC_W / 2 + RES_GAP + CARD_W / 2; // 54 + 12 + 57 = 123
 
-  const AGENT_COLORS = ['#805ad5', '#38a169', '#dd6b20', '#d53f8c', '#3182ce', '#718096'] as const;
+  // ── Distribution layout constants ─────────────────────────────────────────
+  const DN_SEC_GAP = 36;   // gap from mfg content bottom to section header
+  const DN_HDR_H   = 22;   // section header row height
+  const DN_NODE_W  = 136;  // distribution node width
+  const DN_NODE_H  = 56;   // distribution node height
+  const DN_COL_W   = 210;  // tier column center-to-center
+  const DN_ROW_H   = 80;   // row height within a tier
+  const DN_BUF_GAP = 8;    // gap from node right edge to first funnel
+
+  const ACTION_COLORS: Record<string, string> = {
+    produce: '#38a169',
+    consume: '#e53e3e',
+    use:     '#4299e1',
+    work:    '#9f7aea',
+    cite:    '#718096',
+  };
 
   // ── Types ─────────────────────────────────────────────────────────────────
   interface ResRow {
-    specId:     string;
-    specName:   string;
-    action:     string;
-    qty:        string;
-    onhand:     number;
-    unit:       string;
+    specId:      string;
+    specName:    string;
+    action:      string;
+    qty:         string;
+    onhand:      number;
+    unit:        string;
     bufferZone?: BufferZone;
-    y:          number;   // computed center-y
+    y:           number;
   }
 
   interface ProcNode {
     proc:      Process;
     procSpec?: ProcessSpecification;
     col:       number;
-    x:         number;    // center-x of process box
-    y:         number;    // center-y of process box
-    agents:    Agent[];
+    x:         number;
+    y:         number;
     inputs:    ResRow[];
     outputs:   ResRow[];
   }
 
   interface NetEdge {
-    fromProcId: string;
-    toProcId:   string;
-    specId:     string;
-    specName:   string;
-    fromX:      number;
-    fromY:      number;
-    toX:        number;
-    toY:        number;
-    hasEvent:   boolean;
+    fromProcId:       string;
+    toProcId:         string;
+    specId:           string;
+    specName:         string;
+    fromX:            number;
+    fromY:            number;
+    toX:              number;
+    toY:              number;
+    hasEvent:         boolean;
+    action:           string;
+    onhandEffect:     string;
+    accountingEffect: string;
   }
 
   // ── Step 1: raw edge list (proc-to-proc via shared spec) ──────────────────
   const rawEdges = $derived.by(() => {
-    type RE = { fromId: string; toId: string; specId: string; hasEvent: boolean };
+    type RE = {
+      fromId: string; toId: string; specId: string; hasEvent: boolean;
+      action: string; onhandEffect: string; accountingEffect: string;
+    };
     const result: RE[] = [];
     const seen = new Set<string>();
     for (const c1 of commitmentList) {
@@ -80,7 +105,13 @@
         const hasEvent = eventList.some(
           e => e.outputOf === c1.outputOf && e.resourceConformsTo === c1.resourceConformsTo
         );
-        result.push({ fromId: c1.outputOf, toId: c2.inputOf, specId: c1.resourceConformsTo, hasEvent });
+        const def = ACTION_DEFINITIONS[c1.action as keyof typeof ACTION_DEFINITIONS];
+        result.push({
+          fromId: c1.outputOf, toId: c2.inputOf, specId: c1.resourceConformsTo, hasEvent,
+          action:           c1.action,
+          onhandEffect:     def?.onhandEffect     ?? 'noEffect',
+          accountingEffect: def?.accountingEffect ?? 'noEffect',
+        });
       }
     }
     return result;
@@ -136,15 +167,20 @@
       return commits.map(c => {
         const specId = c.resourceConformsTo!;
         const spec   = resourceSpecs.find(s => s.id === specId);
-        const res    = resourceList.find(r => r.conformsTo === specId);
         const bz     = side === 'output' ? bufferZoneList.find(b => b.specId === specId) : undefined;
+        // Aggregate all matching resources; filter by location when bz has one
+        const pool = bz?.atLocation
+          ? resourceList.filter(r => r.conformsTo === specId && r.currentLocation === bz.atLocation)
+          : resourceList.filter(r => r.conformsTo === specId);
+        const onhand = pool.reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+        const unit   = pool[0]?.onhandQuantity?.hasUnit ?? spec?.defaultUnitOfResource ?? '';
         return {
           specId,
           specName:   spec?.name ?? specId.slice(0, 8),
           action:     c.action,
           qty:        c.resourceQuantity ? `${c.resourceQuantity.hasNumericalValue} ${c.resourceQuantity.hasUnit}` : '',
-          onhand:     res?.onhandQuantity?.hasNumericalValue ?? 0,
-          unit:       res?.onhandQuantity?.hasUnit ?? spec?.defaultUnitOfResource ?? '',
+          onhand,
+          unit,
           bufferZone: bz,
         };
       });
@@ -153,7 +189,7 @@
     function slotH(pid: string): number {
       const ni = commitmentList.filter(c => c.inputOf  === pid && c.resourceConformsTo).length;
       const no = commitmentList.filter(c => c.outputOf === pid && c.resourceConformsTo).length;
-      return AGENT_H + AGENT_GAP + Math.max(ni, no, 1) * ROW_H + SLOT_BOT;
+      return Math.max(ni, no, 1) * ROW_H + SLOT_BOT;
     }
 
     // Column heights for vertical centering
@@ -178,7 +214,7 @@
         const inBase    = makeRows(pid, 'input');
         const outBase   = makeRows(pid, 'output');
         const maxRows   = Math.max(inBase.length, outBase.length, 1);
-        const procY     = slotTop + AGENT_H + AGENT_GAP + (maxRows * ROW_H) / 2;
+        const procY     = slotTop + (maxRows * ROW_H) / 2;
 
         const inputs: ResRow[]  = inBase.map((r, i) => ({
           ...r, y: procY + (i - (inBase.length  - 1) / 2) * ROW_H,
@@ -187,18 +223,7 @@
           ...r, y: procY + (i - (outBase.length - 1) / 2) * ROW_H,
         }));
 
-        // Unique agents
-        const agentIds = new Set<string>();
-        for (const c of commitmentList.filter(c => c.inputOf === pid || c.outputOf === pid)) {
-          if (c.provider) agentIds.add(c.provider);
-          if (c.receiver) agentIds.add(c.receiver);
-        }
-        const agents = [...agentIds]
-          .map(id => agentList.find(a => a.id === id))
-          .filter((a): a is Agent => !!a)
-          .slice(0, 3);
-
-        nodes.push({ proc, procSpec, col, x, y: procY, agents, inputs, outputs });
+        nodes.push({ proc, procSpec, col, x, y: procY, inputs, outputs });
         slotTop += slotH(pid) + SLOT_GAP;
       }
     }
@@ -215,31 +240,183 @@
       const inRow  = tgt.inputs.find(r => r.specId === re.specId);
       if (!outRow || !inRow) return [];
       return [{
-        fromProcId: re.fromId,
-        toProcId:   re.toId,
-        specId:     re.specId,
-        specName:   outRow.specName,
-        fromX:      src.x + IO_X + RES_RX,
-        fromY:      outRow.y,
-        toX:        tgt.x - IO_X - RES_RX,
-        toY:        inRow.y,
-        hasEvent:   re.hasEvent,
+        fromProcId:       re.fromId,
+        toProcId:         re.toId,
+        specId:           re.specId,
+        specName:         outRow.specName,
+        fromX:            src.x + IO_X + CARD_W / 2,
+        fromY:            outRow.y,
+        toX:              tgt.x - IO_X - CARD_W / 2,
+        toY:              inRow.y,
+        hasEvent:         re.hasEvent,
+        action:           re.action,
+        onhandEffect:     re.onhandEffect,
+        accountingEffect: re.accountingEffect,
       }];
     });
+  });
+
+  // ── Distribution network types & layout ───────────────────────────────────
+  interface DistZone { bz: BufferZone; specName: string; onhand: number; unit: string; }
+  interface DistNodeLayout {
+    locationId:   string;
+    locationName: string;
+    agentName?:   string;
+    role:         'sourcingUnit' | 'hub' | 'regional';
+    tier:         number;
+    x:            number;
+    y:            number;
+    zones:        DistZone[];
+  }
+  interface DistEdgeLayout {
+    fromId:       string;
+    toId:         string;
+    fromX:        number;
+    fromY:        number;
+    toX:          number;
+    toY:          number;
+    transitDays?: number;
+  }
+
+  // Height of manufacturing content (0 when no processes)
+  const mfgContentH = $derived(
+    netLayout.length === 0 ? 0
+      : Math.max(
+          MT,
+          ...netLayout.flatMap(n => [...n.inputs, ...n.outputs].map(r => r.y + CARD_H / 2)),
+          ...netLayout.map(n => n.y + PROC_H / 2 + CAP_GAP + CAP_H),
+        )
+  );
+
+  // Y of the "DISTRIBUTION NETWORK" section header
+  const distSectionY = $derived(mfgContentH > 0 ? mfgContentH + DN_SEC_GAP : MT);
+
+  const distNetLayout = $derived.by((): { nodes: DistNodeLayout[]; edges: DistEdgeLayout[]; totalH: number } => {
+    // Distribution BZs = those with upstreamLocationId set
+    const distBzs = bufferZoneList.filter(bz => bz.upstreamLocationId);
+    if (distBzs.length === 0) return { nodes: [], edges: [], totalH: 0 };
+
+    // Collect all unique location IDs (both ends of each routing edge)
+    const allLocIds = new Set<string>();
+    for (const bz of distBzs) {
+      if (bz.atLocation) allLocIds.add(bz.atLocation);
+      allLocIds.add(bz.upstreamLocationId!);
+    }
+
+    const atLocationSet  = new Set(distBzs.map(bz => bz.atLocation).filter(Boolean) as string[]);
+    const upstreamLocSet = new Set(distBzs.map(bz => bz.upstreamLocationId!));
+
+    function getRole(locId: string): 'sourcingUnit' | 'hub' | 'regional' {
+      const isAtLoc    = atLocationSet.has(locId);
+      const isUpstream = upstreamLocSet.has(locId);
+      if (!isAtLoc && isUpstream) return 'sourcingUnit';
+      if (isAtLoc  && isUpstream) return 'hub';
+      return 'regional';
+    }
+
+    // Build deduplicated location-to-location edges
+    const edgeSet = new Set<string>();
+    const rawEdges: { fromLocId: string; toLocId: string; transitDays: number }[] = [];
+    for (const bz of distBzs) {
+      if (!bz.atLocation || !bz.upstreamLocationId) continue;
+      const key = `${bz.upstreamLocationId}→${bz.atLocation}`;
+      if (!edgeSet.has(key)) {
+        edgeSet.add(key);
+        rawEdges.push({ fromLocId: bz.upstreamLocationId, toLocId: bz.atLocation, transitDays: bz.dltDays });
+      }
+    }
+
+    // BFS tier assignment from roots (locations that are never a downstream atLocation)
+    const inDegree = new Map<string, number>();
+    for (const locId of allLocIds) inDegree.set(locId, 0);
+    const adj = new Map<string, string[]>();
+    for (const locId of allLocIds) adj.set(locId, []);
+    for (const e of rawEdges) {
+      inDegree.set(e.toLocId, (inDegree.get(e.toLocId) ?? 0) + 1);
+      adj.get(e.fromLocId)?.push(e.toLocId);
+    }
+    const tierMap = new Map<string, number>();
+    const queue: { locId: string; t: number }[] = [];
+    for (const [locId, deg] of inDegree) if (deg === 0) queue.push({ locId, t: 0 });
+    const vis = new Set<string>();
+    while (queue.length) {
+      const { locId, t } = queue.shift()!;
+      if (vis.has(locId)) continue;
+      vis.add(locId); tierMap.set(locId, t);
+      for (const next of adj.get(locId) ?? []) if (!vis.has(next)) queue.push({ locId: next, t: t + 1 });
+    }
+    for (const locId of allLocIds) if (!tierMap.has(locId)) tierMap.set(locId, 0);
+
+    // Group by tier
+    const tierGroups = new Map<number, string[]>();
+    for (const locId of allLocIds) {
+      const t = tierMap.get(locId) ?? 0;
+      if (!tierGroups.has(t)) tierGroups.set(t, []);
+      tierGroups.get(t)!.push(locId);
+    }
+
+    const maxInTier = Math.max(...[...tierGroups.values()].map(g => g.length), 1);
+    const secH = maxInTier * DN_ROW_H;
+    const baseY = distSectionY + DN_HDR_H;
+
+    // Node positions
+    const nodeMap = new Map<string, DistNodeLayout>();
+    for (const [t, locIds] of tierGroups) {
+      const cx = ML + t * DN_COL_W + DN_NODE_W / 2;
+      for (let i = 0; i < locIds.length; i++) {
+        const locId = locIds[i];
+        const cy    = baseY + secH / 2 + (i - (locIds.length - 1) / 2) * DN_ROW_H;
+        const loc   = locationList.find(l => l.id === locId);
+        const warehouseRes = resourceList.find(r => r.currentLocation === locId);
+        const agentName    = warehouseRes?.primaryAccountable
+          ? agentList.find(a => a.id === warehouseRes.primaryAccountable)?.name
+          : undefined;
+        const zones: DistZone[] = bufferZoneList
+          .filter(bz => bz.atLocation === locId)
+          .map(bz => {
+            const spec = resourceSpecs.find(s => s.id === bz.specId);
+            const pool = resourceList.filter(r => r.conformsTo === bz.specId && r.currentLocation === locId);
+            const onhand = pool.reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+            return {
+              bz,
+              specName: spec?.name ?? bz.specId,
+              onhand,
+              unit:     pool[0]?.onhandQuantity?.hasUnit ?? spec?.defaultUnitOfResource ?? '',
+            };
+          });
+        nodeMap.set(locId, {
+          locationId: locId, locationName: loc?.name ?? locId,
+          agentName, role: getRole(locId), tier: t, x: cx, y: cy, zones,
+        });
+      }
+    }
+
+    // Edges with coordinates
+    const edges: DistEdgeLayout[] = rawEdges.flatMap(re => {
+      const src = nodeMap.get(re.fromLocId);
+      const tgt = nodeMap.get(re.toLocId);
+      if (!src || !tgt) return [];
+      return [{ fromId: re.fromLocId, toId: re.toLocId,
+        fromX: src.x + DN_NODE_W / 2, fromY: src.y,
+        toX: tgt.x - DN_NODE_W / 2,   toY: tgt.y,
+        transitDays: re.transitDays }];
+    });
+
+    return { nodes: [...nodeMap.values()], edges, totalH: secH };
   });
 
   // ── SVG dimensions ─────────────────────────────────────────────────────────
   const svgW = $derived(
     netLayout.length === 0 ? 420
       : ML + (Math.max(...netLayout.map(n => n.col)) + 1) * COL_W
-        + IO_X + RES_RX + BUF_W + 28
+        + IO_X + CARD_W / 2 + BUF_W + 28
+  );
+  const distContentH = $derived(
+    distNetLayout.nodes.length === 0 ? 0 : distSectionY + DN_HDR_H + distNetLayout.totalH
   );
   const svgH = $derived(
-    netLayout.length === 0 ? 120
-      : Math.max(
-          ...netLayout.flatMap(n => [...n.inputs, ...n.outputs].map(r => r.y + RES_RY)),
-          ...netLayout.map(n => n.y + PROC_H / 2)
-        ) + MB
+    processList.length === 0 && distNetLayout.nodes.length === 0 ? 120
+      : (distContentH > 0 ? distContentH : mfgContentH) + MB
   );
   const legendY = $derived(svgH - MB + 18);
 
@@ -267,6 +444,26 @@
     return `M${-hw1},${y1f * BUF_H} L${hw1},${y1f * BUF_H} L${hw2},${y2f * BUF_H} L${-hw2},${y2f * BUF_H} Z`;
   }
 
+  function fmtTransit(days: number): string {
+    return days < 1 ? `${(days * 24).toFixed(0)}h` : `${days.toFixed(1)}d`;
+  }
+
+  function distNodeLines(n: DistNodeLayout): string[] {
+    const lines: string[] = [n.locationName];
+    if (n.agentName) lines.push(`Operator: ${n.agentName}`);
+    lines.push(`Role: ${n.role}`);
+    for (const { specName, bz, onhand, unit } of n.zones) {
+      lines.push(`── ${specName}`);
+      lines.push(`TOR ${bz.tor.toFixed(2)} · TOY ${bz.toy.toFixed(2)} · TOG ${bz.tog.toFixed(2)}`);
+      const status = onhand <= bz.tor ? 'RED' : onhand <= bz.toy ? 'YELLOW' : 'GREEN';
+      lines.push(`On-hand: ${onhand} ${unit}  [${status}]`);
+    }
+    return lines;
+  }
+
+  // ── Selection state ────────────────────────────────────────────────────────
+  let selected = $state<{ type: EntityType; id: string } | null>(null);
+
   // ── Tooltip helpers ────────────────────────────────────────────────────────
   function procLines(n: ProcNode): string[] {
     const ps = n.procSpec;
@@ -292,13 +489,9 @@
     }
     return lines;
   }
-
-  function agentLines(a: Agent): string[] {
-    return [`${a.name ?? a.id}`, `Type: ${a.type}`];
-  }
 </script>
 
-{#if processList.length === 0}
+{#if processList.length === 0 && distNetLayout.nodes.length === 0}
   <div class="empty-diagram">Load example to see the network diagram</div>
 {:else}
   <svg
@@ -328,54 +521,13 @@
       />
       <!-- Event fulfilled indicator -->
       {#if e.hasEvent}
-        <circle cx={mx} cy={my} r="4.5" fill="#38a169" stroke="rgba(226,232,240,0.5)" stroke-width="0.8" />
+        <circle cx={mx} cy={my} r="3.5" fill="#38a169" stroke="rgba(226,232,240,0.5)" stroke-width="0.8" />
       {/if}
     {/each}
 
     <!-- ── Nodes ─────────────────────────────────────────────────────────── -->
     {#each netLayout as node (node.proc.id)}
-      {@const ps   = node.procSpec}
-      {@const agentY = node.y - PROC_H / 2 - AGENT_GAP - AGENT_H / 2}
-
-      <!-- Agent boxes (above process box) -->
-      {#each node.agents as agent, ai (agent.id)}
-        {@const total = node.agents.length}
-        {@const aw    = Math.min(AGENT_W, (PROC_W - 4) / Math.max(total, 1))}
-        {@const ax    = node.x + (ai - (total - 1) / 2) * (aw + 4)}
-        <rect
-          x={ax - aw / 2}
-          y={agentY - AGENT_H / 2}
-          width={aw}
-          height={AGENT_H}
-          rx="3"
-          fill="{AGENT_COLORS[ai % AGENT_COLORS.length]}20"
-          stroke={AGENT_COLORS[ai % AGENT_COLORS.length]}
-          stroke-width="1"
-          style="cursor:default"
-          role="img"
-          onmouseenter={(ev) => showTip(ev, agentLines(agent))}
-          onmouseleave={hideTip}
-          onmousemove={moveTip}
-        />
-        <text
-          x={ax}
-          y={agentY + 4}
-          text-anchor="middle"
-          font-size="8"
-          fill={AGENT_COLORS[ai % AGENT_COLORS.length]}
-          style="pointer-events:none"
-        >{trunc(agent.name ?? agent.id, 9)}</text>
-        <!-- Connector line to process top -->
-        <line
-          x1={ax}
-          y1={agentY + AGENT_H / 2}
-          x2={node.x}
-          y2={node.y - PROC_H / 2}
-          stroke="rgba(226,232,240,0.15)"
-          stroke-width="1"
-          style="pointer-events:none"
-        />
-      {/each}
+      {@const ps = node.procSpec}
 
       <!-- Process box -->
       <rect
@@ -403,15 +555,42 @@
         style="pointer-events:none"
       >{trunc(node.proc.name, 14)}</text>
       {#if ps?.name}
+        {@const isSelected = selected?.id === ps.id}
         <text
           x={node.x}
           y={node.y + 9}
           text-anchor="middle"
           font-size="7.5"
-          fill="rgba(226,232,240,0.4)"
-          style="pointer-events:none"
+          fill={isSelected ? '#90cdf4' : 'rgba(226,232,240,0.4)'}
+          style="pointer-events:{ps?.id ? 'auto' : 'none'}; cursor:{ps?.id ? 'pointer' : 'default'};"
+          role="button"
+          tabindex="0"
+          onclick={() => { if (ps?.id) selected = { type: 'processSpec', id: ps.id }; }}
+          onkeydown={(ev) => { if ((ev.key === 'Enter' || ev.key === ' ') && ps?.id) selected = { type: 'processSpec', id: ps.id }; }}
         >{trunc(ps.name, 18)}</text>
+        {#if isSelected}
+          <line
+            x1={node.x - trunc(ps.name, 18).length * 2.4}
+            y1={node.y + 10.5}
+            x2={node.x + trunc(ps.name, 18).length * 2.4}
+            y2={node.y + 10.5}
+            stroke="#90cdf4"
+            stroke-width="0.6"
+            style="pointer-events:none"
+          />
+        {/if}
       {/if}
+
+      <!-- Status dot (top-right corner of process box) -->
+      {@const proc = node.proc as any}
+      {@const statusColor = proc.finished ? '#38a169' : proc.hasBeginning ? '#d69e2e' : 'rgba(226,232,240,0.25)'}
+      <circle
+        cx={node.x + PROC_W / 2 - 7}
+        cy={node.y - PROC_H / 2 + 7}
+        r="3.5"
+        fill={statusColor}
+        style="pointer-events:none"
+      />
 
       <!-- Control-point "C" marker (left of process box) -->
       {#if ps?.isControlPoint}
@@ -435,34 +614,52 @@
         >C</text>
       {/if}
 
-      <!-- ── Input resource ovals (left of process) ──────────────────────── -->
-      {#each node.inputs as row (row.specId + 'in')}
-        {@const ox = node.x - IO_X}
-        <ellipse
-          cx={ox}
-          cy={row.y}
-          rx={RES_RX}
-          ry={RES_RY}
-          fill="rgba(74,85,104,0.25)"
-          stroke="rgba(160,174,192,0.5)"
-          stroke-width="1"
-          style="cursor:default"
+      <!-- Capacity utilisation bar (below process box) -->
+      {@const capBuf = capacityBufferList.find(cb => cb.processSpecId === ps?.id)}
+      {#if capBuf}
+        {@const cbr    = capacityBufferStatus(
+          capBuf.currentLoadHours, capBuf.totalCapacityHours,
+          capBuf.greenThreshold ?? 0.80, capBuf.yellowThreshold ?? 0.95)}
+        {@const barX   = node.x - PROC_W / 2}
+        {@const barY   = node.y + PROC_H / 2 + CAP_GAP}
+        {@const gt     = capBuf.greenThreshold  ?? 0.80}
+        {@const yt     = capBuf.yellowThreshold ?? 0.95}
+        <!-- Zone background segments: green | yellow | red -->
+        <rect x={barX}                   y={barY} width={PROC_W * gt}        height={CAP_H} rx="1" fill="#276749" opacity="0.75" style="pointer-events:none" />
+        <rect x={barX + PROC_W * gt}     y={barY} width={PROC_W * (yt - gt)} height={CAP_H}        fill="#b7791f" opacity="0.75" style="pointer-events:none" />
+        <rect x={barX + PROC_W * yt}     y={barY} width={PROC_W * (1 - yt)}  height={CAP_H} rx="1" fill="#9b2c2c" opacity="0.75" style="pointer-events:none" />
+        <!-- Current load cursor (clamped to 110% max) -->
+        {@const loadFrac = Math.min(cbr.utilizationPct / 100, 1.10)}
+        <line
+          x1={barX + PROC_W * loadFrac} y1={barY - 1}
+          x2={barX + PROC_W * loadFrac} y2={barY + CAP_H + 1}
+          stroke="white" stroke-width="1.5" opacity="0.9"
+          style="pointer-events:none"
+        />
+        <!-- Invisible hit area for tooltip -->
+        <rect
+          x={barX} y={barY} width={PROC_W} height={CAP_H}
+          fill="transparent"
           role="img"
-          onmouseenter={(ev) => showTip(ev, resLines(row, 'input'))}
+          onmouseenter={(ev) => showTip(ev, [
+            `Capacity (${ps?.name ?? ''})`,
+            `Load: ${capBuf.currentLoadHours}h / ${capBuf.totalCapacityHours}h per ${capBuf.periodDays}d`,
+            `Utilisation: ${cbr.utilizationPct.toFixed(0)}%  [${cbr.zone.toUpperCase()}]`,
+          ])}
           onmouseleave={hideTip}
           onmousemove={moveTip}
         />
-        <text
-          x={ox}
-          y={row.y + 4}
-          text-anchor="middle"
-          font-size="8"
-          fill="rgba(226,232,240,0.75)"
-          style="pointer-events:none"
-        >{trunc(row.specName, 11)}</text>
-        <!-- Short arrow: input oval → process box left edge -->
+      {/if}
+
+      <!-- ── Input resource cards (left of process) ──────────────────────── -->
+      {#each node.inputs as row (row.specId + 'in')}
+        {@const ox    = node.x - IO_X}
+        {@const acol  = ACTION_COLORS[row.action] ?? '#718096'}
+        {@const cardX = ox - CARD_W / 2}
+        {@const cardY = row.y - CARD_H / 2}
+        <!-- Connector arrow: input card right edge → process box left edge -->
         <line
-          x1={ox + RES_RX}
+          x1={ox + CARD_W / 2}
           y1={row.y}
           x2={node.x - PROC_W / 2}
           y2={node.y}
@@ -471,34 +668,100 @@
           marker-end="url(#nd-arr)"
           style="pointer-events:none"
         />
+        <!-- Input card -->
+        <rect
+          x={cardX}
+          y={cardY}
+          width={CARD_W}
+          height={CARD_H}
+          rx={CARD_RX}
+          fill="rgba(74,85,104,0.25)"
+          stroke="rgba(160,174,192,0.4)"
+          stroke-width="1"
+          style="cursor:default"
+          role="img"
+          onmouseenter={(ev) => showTip(ev, resLines(row, 'input'))}
+          onmouseleave={hideTip}
+          onmousemove={moveTip}
+        />
+        <!-- specName -->
+        {@const inSelected = selected?.id === row.specId}
+        <text
+          x={ox}
+          y={cardY + 13}
+          text-anchor="middle"
+          font-size="8"
+          font-weight="500"
+          fill={inSelected ? '#90cdf4' : '#e2e8f0'}
+          style="cursor:pointer; pointer-events:auto;"
+          role="button"
+          tabindex="0"
+          onclick={() => { selected = { type: 'resourceSpec', id: row.specId }; }}
+          onkeydown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') selected = { type: 'resourceSpec', id: row.specId }; }}
+        >{trunc(row.specName, 15)}</text>
+        {#if inSelected}
+          <line
+            x1={ox - trunc(row.specName, 15).length * 2.6}
+            y1={cardY + 14.5}
+            x2={ox + trunc(row.specName, 15).length * 2.6}
+            y2={cardY + 14.5}
+            stroke="#90cdf4"
+            stroke-width="0.6"
+            style="pointer-events:none"
+          />
+        {/if}
+        <!-- action -->
+        <text
+          x={ox}
+          y={cardY + 25}
+          text-anchor="middle"
+          font-size="7.5"
+          fill={acol}
+          style="pointer-events:none"
+        >{row.action}</text>
+        <!-- qty / onhand -->
+        {#if row.qty || row.onhand > 0}
+          <text
+            x={ox}
+            y={cardY + 37}
+            text-anchor="middle"
+            font-size="7"
+            fill="rgba(226,232,240,0.4)"
+            style="pointer-events:none"
+          >{row.qty}{row.onhand > 0 ? ` OH:${row.onhand}` : ''}</text>
+        {/if}
       {/each}
 
-      <!-- ── Output resource ovals + buffer funnels (right of process) ───── -->
+      <!-- ── Output resource cards + buffer funnels (right of process) ───── -->
       {#each node.outputs as row (row.specId + 'out')}
-        {@const ox  = node.x + IO_X}
-        {@const bz  = row.bufferZone}
-        {@const tor = bz?.tor ?? 1}
-        {@const toy = bz?.toy ?? 2}
-        {@const tog = bz?.tog ?? 3}
-        <!-- Short arrow: process box right edge → output oval -->
+        {@const ox    = node.x + IO_X}
+        {@const bz    = row.bufferZone}
+        {@const acol  = ACTION_COLORS[row.action] ?? '#718096'}
+        {@const cardX = ox - CARD_W / 2}
+        {@const cardY = row.y - CARD_H / 2}
+        {@const tor   = bz?.tor ?? 1}
+        {@const toy   = bz?.toy ?? 2}
+        {@const tog   = bz?.tog ?? 3}
+        <!-- Connector arrow: process box right edge → output card left edge -->
         <line
           x1={node.x + PROC_W / 2}
           y1={node.y}
-          x2={ox - RES_RX}
+          x2={ox - CARD_W / 2}
           y2={row.y}
           stroke="rgba(226,232,240,0.2)"
           stroke-width="1"
           marker-end="url(#nd-arr)"
           style="pointer-events:none"
         />
-        <!-- Output oval -->
-        <ellipse
-          cx={ox}
-          cy={row.y}
-          rx={RES_RX}
-          ry={RES_RY}
+        <!-- Output card -->
+        <rect
+          x={cardX}
+          y={cardY}
+          width={CARD_W}
+          height={CARD_H}
+          rx={CARD_RX}
           fill="rgba(49,130,206,0.12)"
-          stroke={bz ? procStroke(ps) : 'rgba(49,130,206,0.55)'}
+          stroke={bz ? procStroke(ps) : 'rgba(49,130,206,0.6)'}
           stroke-width={bz ? '1.5' : '1'}
           style="cursor:default"
           role="img"
@@ -506,33 +769,60 @@
           onmouseleave={hideTip}
           onmousemove={moveTip}
         />
+        <!-- specName -->
+        {@const outSelected = selected?.id === row.specId}
         <text
           x={ox}
-          y={row.y - 2}
+          y={cardY + 13}
           text-anchor="middle"
           font-size="8"
           font-weight="500"
-          fill="#e2e8f0"
+          fill={outSelected ? '#90cdf4' : '#e2e8f0'}
+          style="cursor:pointer; pointer-events:auto;"
+          role="button"
+          tabindex="0"
+          onclick={() => { selected = { type: 'resourceSpec', id: row.specId }; }}
+          onkeydown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') selected = { type: 'resourceSpec', id: row.specId }; }}
+        >{trunc(row.specName, 15)}</text>
+        {#if outSelected}
+          <line
+            x1={ox - trunc(row.specName, 15).length * 2.6}
+            y1={cardY + 14.5}
+            x2={ox + trunc(row.specName, 15).length * 2.6}
+            y2={cardY + 14.5}
+            stroke="#90cdf4"
+            stroke-width="0.6"
+            style="pointer-events:none"
+          />
+        {/if}
+        <!-- action -->
+        <text
+          x={ox}
+          y={cardY + 25}
+          text-anchor="middle"
+          font-size="7.5"
+          fill={acol}
           style="pointer-events:none"
-        >{trunc(row.specName, 11)}</text>
-        {#if row.onhand > 0}
+        >{row.action}</text>
+        <!-- qty / onhand -->
+        {#if row.qty || row.onhand > 0}
           <text
             x={ox}
-            y={row.y + 9}
+            y={cardY + 37}
             text-anchor="middle"
             font-size="7"
-            fill="rgba(226,232,240,0.45)"
+            fill="rgba(226,232,240,0.4)"
             style="pointer-events:none"
-          >OH:{row.onhand} {row.unit}</text>
+          >{row.qty}{row.onhand > 0 ? ` OH:${row.onhand}` : ''}</text>
         {/if}
 
-        <!-- Buffer zone funnel (right of output oval, when buffer exists) -->
+        <!-- Buffer zone funnel (right of output card, when buffer exists) -->
         {#if bz}
-          {@const gF   = 1 - toy / tog}
-          {@const yF   = 1 - tor / tog}
-          {@const fx   = ox + RES_RX + 5}
-          {@const fy   = row.y - BUF_H / 2}
-          {@const curF = 1 - Math.min(Math.max(row.onhand / tog, 0), 1)}
+          {@const gF    = 1 - toy / tog}
+          {@const yF    = 1 - tor / tog}
+          {@const fx    = ox + CARD_W / 2 + 5}
+          {@const fy    = row.y - BUF_H / 2}
+          {@const curF  = 1 - Math.min(Math.max(row.onhand / tog, 0), 1)}
           {@const curHW = BUF_W / 2 - curF * BUF_W / 4}
           <g
             transform="translate({fx + BUF_W / 2},{fy})"
@@ -556,25 +846,119 @@
       {/each}
     {/each}
 
+    <!-- ── Distribution Network ───────────────────────────────────────────── -->
+    {#if distNetLayout.nodes.length > 0}
+      <!-- Section divider + header -->
+      <line x1={ML} y1={distSectionY - 8} x2={svgW - ML} y2={distSectionY - 8}
+        stroke="rgba(226,232,240,0.1)" stroke-width="1" style="pointer-events:none" />
+      <text x={ML} y={distSectionY + 10} font-size="8" font-weight="600" letter-spacing="0.08em"
+        fill="rgba(226,232,240,0.35)" style="pointer-events:none">DISTRIBUTION NETWORK</text>
+
+      <!-- Edges first (behind nodes) -->
+      {#each distNetLayout.edges as e (e.fromId + e.toId)}
+        {@const dx = e.toX - e.fromX}
+        {@const mx = (e.fromX + e.toX) / 2}
+        {@const my = (e.fromY + e.toY) / 2}
+        <path
+          d="M{e.fromX},{e.fromY} C{e.fromX + dx * 0.4},{e.fromY} {e.toX - dx * 0.4},{e.toY} {e.toX},{e.toY}"
+          fill="none" stroke="rgba(226,232,240,0.35)" stroke-width="1.5"
+          marker-end="url(#nd-arr)" style="pointer-events:none"
+        />
+        {#if e.transitDays !== undefined}
+          <text x={mx} y={my - 6} text-anchor="middle" font-size="7.5"
+            fill="rgba(226,232,240,0.5)" style="pointer-events:none">{fmtTransit(e.transitDays)}</text>
+        {/if}
+      {/each}
+
+      <!-- Nodes -->
+      {#each distNetLayout.nodes as n (n.locationId)}
+        {@const roleColor = n.role === 'sourcingUnit' ? '#d69e2e' : n.role === 'hub' ? '#4fd1c5' : '#90cdf4'}
+        {@const roleFill  = n.role === 'sourcingUnit' ? 'rgba(214,158,46,0.08)' : n.role === 'hub' ? 'rgba(79,209,197,0.08)' : 'rgba(49,130,206,0.08)'}
+        {@const roleLabel = n.role === 'sourcingUnit' ? 'Sourcing' : n.role === 'hub' ? 'Hub' : 'Regional'}
+        <!-- Node box -->
+        <rect
+          x={n.x - DN_NODE_W / 2} y={n.y - DN_NODE_H / 2}
+          width={DN_NODE_W} height={DN_NODE_H} rx="5"
+          fill={roleFill} stroke={roleColor} stroke-width="1.5"
+          style="cursor:default" role="img"
+          onmouseenter={(ev) => showTip(ev, distNodeLines(n))}
+          onmouseleave={hideTip} onmousemove={moveTip}
+        />
+        <!-- Location name -->
+        <text x={n.x} y={n.y - 9} text-anchor="middle" font-size="9" font-weight="600"
+          fill="#e2e8f0" style="pointer-events:none">{trunc(n.locationName, 17)}</text>
+        <!-- Agent name -->
+        {#if n.agentName}
+          <text x={n.x} y={n.y + 6} text-anchor="middle" font-size="7.5"
+            fill="rgba(226,232,240,0.45)" style="pointer-events:none">{trunc(n.agentName, 17)}</text>
+        {/if}
+        <!-- Role badge (bottom-left of node) -->
+        <text x={n.x - DN_NODE_W / 2 + 6} y={n.y + DN_NODE_H / 2 - 5} font-size="7"
+          fill={roleColor} style="pointer-events:none">{roleLabel}</text>
+
+        <!-- Buffer zone funnels (right of node, one per zone) -->
+        {#each n.zones as zone, zi (zone.bz.id)}
+          {@const { bz, specName, onhand, unit } = zone}
+          {@const gF    = 1 - bz.toy / bz.tog}
+          {@const yF    = 1 - bz.tor / bz.tog}
+          {@const fx    = n.x + DN_NODE_W / 2 + DN_BUF_GAP + BUF_W / 2 + zi * (BUF_W + 18)}
+          {@const fy    = n.y - BUF_H / 2}
+          {@const curF  = 1 - Math.min(Math.max(onhand / bz.tog, 0), 1)}
+          {@const curHW = BUF_W / 2 - curF * BUF_W / 4}
+          <g
+            transform="translate({fx},{fy})"
+            style="cursor:default" role="img"
+            onmouseenter={(ev) => showTip(ev, [
+              specName,
+              `TOR ${bz.tor.toFixed(2)} · TOY ${bz.toy.toFixed(2)} · TOG ${bz.tog.toFixed(2)}`,
+              onhand > 0 ? `On-hand: ${onhand} ${unit}` : 'No inventory',
+              onhand <= bz.tor ? '● RED zone' : onhand <= bz.toy ? '● YELLOW zone' : '● GREEN zone',
+            ])}
+            onmouseleave={hideTip} onmousemove={moveTip}
+          >
+            <path d={funSlice(0, gF)} fill="#276749" opacity="0.9" />
+            <path d={funSlice(gF, yF)} fill="#b7791f" opacity="0.9" />
+            <path d={funSlice(yF, 1)} fill="#9b2c2c" opacity="0.9" />
+            <path d={funSlice(0, 1)} fill="none" stroke="rgba(226,232,240,0.4)" stroke-width="0.6" />
+            <line x1={-curHW - 2} y1={curF * BUF_H} x2={curHW + 2} y2={curF * BUF_H}
+              stroke="white" stroke-width="1.5" opacity="0.9" />
+          </g>
+          <text x={fx} y={fy + BUF_H + 10} text-anchor="middle" font-size="6.5"
+            fill="rgba(226,232,240,0.35)" style="pointer-events:none">{trunc(specName, 10)}</text>
+        {/each}
+      {/each}
+    {/if}
+
     <!-- ── Legend ─────────────────────────────────────────────────────────── -->
     <text x={ML} y={legendY} font-size="7.5" fill="rgba(226,232,240,0.3)" font-weight="600">KEY</text>
-    <!-- Input oval -->
-    <ellipse cx={ML + 42} cy={legendY - 4} rx="11" ry="6" fill="rgba(74,85,104,0.25)" stroke="rgba(160,174,192,0.5)" stroke-width="1" />
-    <text x={ML + 56} y={legendY} font-size="7.5" fill="rgba(226,232,240,0.3)">Input</text>
-    <!-- Output oval -->
-    <ellipse cx={ML + 102} cy={legendY - 4} rx="11" ry="6" fill="rgba(49,130,206,0.12)" stroke="rgba(49,130,206,0.55)" stroke-width="1" />
-    <text x={ML + 116} y={legendY} font-size="7.5" fill="rgba(226,232,240,0.3)">Output</text>
+    <!-- Input card icon -->
+    <rect x={ML + 28} y={legendY - 10} width="28" height="14" rx="2" fill="rgba(74,85,104,0.25)" stroke="rgba(160,174,192,0.4)" stroke-width="1" />
+    <text x={ML + 60} y={legendY} font-size="7.5" fill="rgba(226,232,240,0.3)">Input</text>
+    <!-- Output card icon -->
+    <rect x={ML + 96} y={legendY - 10} width="28" height="14" rx="2" fill="rgba(49,130,206,0.12)" stroke="rgba(49,130,206,0.6)" stroke-width="1" />
+    <text x={ML + 128} y={legendY} font-size="7.5" fill="rgba(226,232,240,0.3)">Output</text>
     <!-- Event dot -->
-    <circle cx={ML + 168} cy={legendY - 4} r="4.5" fill="#38a169" stroke="rgba(226,232,240,0.5)" stroke-width="0.8" />
-    <text x={ML + 176} y={legendY} font-size="7.5" fill="rgba(226,232,240,0.3)">Event fulfilled</text>
+    <circle cx={ML + 180} cy={legendY - 4} r="3.5" fill="#38a169" stroke="rgba(226,232,240,0.5)" stroke-width="0.8" />
+    <text x={ML + 187} y={legendY} font-size="7.5" fill="rgba(226,232,240,0.3)">Event fulfilled</text>
     <!-- Buffer funnel icon -->
-    <g transform="translate({ML + 262},{legendY - BUF_H + 6})">
+    <g transform="translate({ML + 278},{legendY - BUF_H + 6})">
       <path d={funSlice(0, 0.4)} fill="#276749" opacity="0.9" />
       <path d={funSlice(0.4, 0.7)} fill="#b7791f" opacity="0.9" />
       <path d={funSlice(0.7, 1)} fill="#9b2c2c" opacity="0.9" />
     </g>
-    <text x={ML + 272} y={legendY} font-size="7.5" fill="rgba(226,232,240,0.3)">Buffer zone</text>
+    <text x={ML + 288} y={legendY} font-size="7.5" fill="rgba(226,232,240,0.3)">Buffer zone</text>
+    <!-- Capacity bar icon (3-segment horizontal bar) -->
+    <rect x={ML + 330}                  y={legendY - 5} width={28 * 0.80} height={4} fill="#276749" opacity="0.75" />
+    <rect x={ML + 330 + 28 * 0.80}     y={legendY - 5} width={28 * 0.15} height={4} fill="#b7791f" opacity="0.75" />
+    <rect x={ML + 330 + 28 * 0.95}     y={legendY - 5} width={28 * 0.05} height={4} fill="#9b2c2c" opacity="0.75" />
+    <text x={ML + 362} y={legendY} font-size="7.5" fill="rgba(226,232,240,0.3)">Capacity</text>
   </svg>
+
+  {#if selected}
+    {#key `${selected.type}-${selected.id}`}
+      <EntityPanel type={selected.type} id={selected.id} onclose={() => selected = null} />
+    {/key}
+  {/if}
 {/if}
 
 <style>

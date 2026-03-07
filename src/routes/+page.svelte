@@ -39,6 +39,22 @@
 </svelte:head>
 
 <div class="page">
+  <!-- ── NETWORK DIAGRAM ────────────────────────────────────────────────────── -->
+  <section class="band diagram">
+    <div class="band-header">
+      <span class="band-title" style="color: #9f7aea">NETWORK DIAGRAM</span>
+      <span class="counts">
+        <span class="count">Processes({processList.length})</span>
+        <span class="count">Agents({agentList.length})</span>
+        <span class="count">Buffers({bufferZoneList.length})</span>
+      </span>
+    </div>
+    <div class="diagram-wrap">
+      <NetworkDiagram />
+    </div>
+  </section>
+
+
   <!-- ── KNOWLEDGE BAND ───────────────────────────────────────────────────── -->
   <section class="band knowledge">
     <div class="band-header">
@@ -268,21 +284,6 @@
     </div>
     <div class="diagram-wrap">
       <ProcessLayerDiagram />
-    </div>
-  </section>
-
-  <!-- ── NETWORK DIAGRAM ────────────────────────────────────────────────────── -->
-  <section class="band diagram">
-    <div class="band-header">
-      <span class="band-title" style="color: #9f7aea">NETWORK DIAGRAM</span>
-      <span class="counts">
-        <span class="count">Processes({processList.length})</span>
-        <span class="count">Agents({agentList.length})</span>
-        <span class="count">Buffers({bufferZoneList.length})</span>
-      </span>
-    </div>
-    <div class="diagram-wrap">
-      <NetworkDiagram />
     </div>
   </section>
 </div>

@@ -35,6 +35,7 @@ function makeZone(overrides: Partial<BufferZone> = {}): BufferZone {
         id: 'bz-1',
         specId: 'spec-A',
         profileId: 'prof-1',
+        bufferClassification: 'replenished',
         adu: 10,
         aduUnit: 'each',
         dltDays: 10,

@@ -40,10 +40,16 @@ DDMRP concept  |  VF field / function  |  A / M / G
 
 | DDMRP Term | VF Schema Field / Function | Schema Type | Status | Notes |
 |---|---|---|---|---|
-| Buffer profile entity | *(none)* | — | **G** | `BufferProfile` schema needed — see G1 |
-| Lead Time Factor (LTF) | *(none)* | — | **G** | Field on `BufferProfile`; see G1 |
-| Variability Factor (VF) | *(none)* | — | **G** | Field on `BufferProfile`; see G1 |
-| Order cycle days | *(none)* | — | **G** | Field on `BufferProfile`; drives green zone = `order_cycle × ADU` |
+| Buffer profile entity | `BufferProfile` | `BufferProfileSchema` | **A** | Schema implemented; `leadTimeFactor`, `variabilityFactor`, `orderCycleDays` all present |
+| Lead Time Factor (LTF) | `BufferProfile.leadTimeFactor` | `BufferProfileSchema` | **A** | Numeric multiplier on ADU × DLT for red zone base |
+| Variability Factor (VF) | `BufferProfile.variabilityFactor` | `BufferProfileSchema` | **A** | Red safety = red base × VF; derivable from `vrd`/`vrs` via `deriveVariabilityFactor()` |
+| Order cycle days | `BufferProfile.orderCycleDays` | `BufferProfileSchema` | **A** | Drives green zone: `max(ADU × orderCycleDays, redBase, MOQ)` |
+| Lead time band (S/M/L) | `BufferProfile.leadTimeCategory` | `BufferProfileSchema` | **A** | Constrained enum `'short'\|'medium'\|'long'` per Ch 7 convention |
+| Variability band (L/M/H) | `BufferProfile.variabilityCategory` | `BufferProfileSchema` | **A** | Constrained enum `'low'\|'medium'\|'high'` per Ch 7 convention |
+| Profile code (e.g. "MML") | `BufferProfile.code` | `BufferProfileSchema` | **A** | 3-letter code: ItemType + LTCategory + VariabilityCategory |
+| Buffer type classification | `BufferZone.bufferClassification` | `BufferZoneSchema` | **A** | `'replenished'\|'replenished_override'\|'min_max'` per Ch 7 |
+| Min-max buffer (2-zone) | `computeMinMaxBuffer()` | `algorithms/ddmrp.ts` | **A** | TOY = TOR (no yellow zone); `recalibrateBufferZone()` dispatches correctly |
+| Override zone guard | `recalibrateBufferZone()` | `algorithms/ddmrp.ts` | **A** | Returns zone unchanged when `bufferClassification === 'replenished_override'` |
 | ADU — past (data source) | `groupEventsByOccurrence()` + `getOccurrenceStatus()` | `recurrence.ts` | **A** | Raw daily consumption data is available; no rolling calculator yet |
 | ADU — forward (data source) | `materializeOccurrenceDates(window, from, to)` | `recurrence.ts` | **A** | Forward demand occurrences materializable from recurring Intents |
 | ADU — blended calculator | *(none)* | — | **G** | No `computeBlendedADU()` function combining past + forward ADU |

@@ -14,10 +14,11 @@
  *   Observation  → EconomicResources, EconomicEvent (frame fabrication complete)
  */
 
-import { computeBufferZone } from '$lib/algorithms/ddmrp';
+import { computeBufferZone, computeMinMaxBuffer, recipeLeadTime, legLeadTime, deriveVariabilityFactor } from '$lib/algorithms/ddmrp';
 import type { BufferProfile } from '$lib/schemas';
 import {
-    registry, recipes, bufferZones, agents, planner, observer, refresh,
+    registry, recipes, bufferZones, capacityBuffers, agents, planner, observer, refresh,
+    locations,
 } from '$lib/vf-stores.svelte';
 
 export function seedExample(): void {
@@ -35,17 +36,38 @@ export function seedExample(): void {
     recipes.addResourceSpec({ id: 'rs-hyd-fluid', name: 'Hydraulic Fluid', defaultUnitOfResource: 'L'    });
     recipes.addResourceSpec({ id: 'rs-wheel',     name: 'Wheel Assembly',  defaultUnitOfResource: 'each' });
     // Intermediate assemblies (decoupling points — DDMRP buffers)
-    recipes.addResourceSpec({ id: 'rs-frame',     name: 'Welded Frame',    defaultUnitOfResource: 'each', replenishmentRequired: true });
+    recipes.addResourceSpec({
+        id: 'rs-frame', name: 'Welded Frame', defaultUnitOfResource: 'each', replenishmentRequired: true,
+        positioningAnalysis: {
+            customerToleranceTimeDays: 1,      // customer expects same-day frame availability
+            salesOrderVisibilityHorizonDays: 3,
+            vrd: 'medium', vrs: 'low',
+            inventoryLeverageFlexibility: 'medium',
+            decouplingRecommended: true,
+            note: 'Decoupling point: isolates frame fabrication from final assembly variability.',
+        },
+    });
     recipes.addResourceSpec({ id: 'rs-pu',        name: 'Power Unit',      defaultUnitOfResource: 'each', replenishmentRequired: true });
     recipes.addResourceSpec({ id: 'rs-hyd-assy',  name: 'Hyd Assembly',    defaultUnitOfResource: 'each' });
     // Finished goods
-    recipes.addResourceSpec({ id: 'rs-lifetrac',  name: 'LifeTrac',        defaultUnitOfResource: 'each', replenishmentRequired: true });
+    recipes.addResourceSpec({
+        id: 'rs-lifetrac', name: 'LifeTrac', defaultUnitOfResource: 'each', replenishmentRequired: true,
+        positioningAnalysis: {
+            customerToleranceTimeDays: 7,      // customer will wait up to one week
+            marketPotentialLeadTimeDays: 14,   // competitor lead time (benchmark)
+            salesOrderVisibilityHorizonDays: 5,
+            vrd: 'low', vrs: 'low',
+            inventoryLeverageFlexibility: 'low', // finished good — no downstream flexibility
+            decouplingRecommended: true,
+            note: 'Finished-goods buffer; demand is project-driven with low variability.',
+        },
+    });
 
     // ── KNOWLEDGE: Process Specifications ─────────────────────────────────────
-    recipes.addProcessSpec({ id: 'ps-fab-frame',  name: 'Frame Fabrication',    isDecouplingPoint: true  });
-    recipes.addProcessSpec({ id: 'ps-pu-assy',    name: 'Power Unit Assembly'                           });
-    recipes.addProcessSpec({ id: 'ps-hyd-assy',   name: 'Hydraulics Assembly'                           });
-    recipes.addProcessSpec({ id: 'ps-final-assy', name: 'Final Assembly',       isDecouplingPoint: true  });
+    recipes.addProcessSpec({ id: 'ps-fab-frame',  name: 'Frame Fabrication',    isDecouplingPoint: true,                         bufferType: 'stock'    });
+    recipes.addProcessSpec({ id: 'ps-pu-assy',    name: 'Power Unit Assembly',  isControlPoint: true,                            bufferType: 'capacity' });
+    recipes.addProcessSpec({ id: 'ps-hyd-assy',   name: 'Hydraulics Assembly'                                                                          });
+    recipes.addProcessSpec({ id: 'ps-final-assy', name: 'Final Assembly',       isDecouplingPoint: true,                         bufferType: 'stock'    });
 
     // ── KNOWLEDGE: Recipe Processes ───────────────────────────────────────────
     recipes.addRecipeProcess({ id: 'rp-fab',   name: 'Fab Frame',         processConformsTo: 'ps-fab-frame',  hasDuration: { hasNumericalValue: 8, hasUnit: 'h' } });
@@ -55,9 +77,10 @@ export function seedExample(): void {
 
     // ── KNOWLEDGE: Recipe Flows ───────────────────────────────────────────────
     // 1. Frame Fabrication: steel + weld-rod → frame
+    // stage on output + matching input marks the decoupling-point boundary for legLeadTime()
     recipes.addRecipeFlow({ id: 'rf-fab-steel',    action: 'consume', resourceConformsTo: 'rs-steel',    resourceQuantity: { hasNumericalValue: 20, hasUnit: 'm'    }, recipeInputOf:  'rp-fab'   });
     recipes.addRecipeFlow({ id: 'rf-fab-rod',      action: 'consume', resourceConformsTo: 'rs-weld-rod', resourceQuantity: { hasNumericalValue: 2,  hasUnit: 'kg'   }, recipeInputOf:  'rp-fab'   });
-    recipes.addRecipeFlow({ id: 'rf-fab-out',      action: 'produce', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeOutputOf: 'rp-fab'   });
+    recipes.addRecipeFlow({ id: 'rf-fab-out',      action: 'produce', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeOutputOf: 'rp-fab',   stage: 'ps-fab-frame' });
     // 2. Power Unit Assembly: engine + hyd-pump → power-unit
     recipes.addRecipeFlow({ id: 'rf-pu-engine',    action: 'consume', resourceConformsTo: 'rs-engine',   resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeInputOf:  'rp-pu'    });
     recipes.addRecipeFlow({ id: 'rf-pu-pump',      action: 'consume', resourceConformsTo: 'rs-hyd-pump', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeInputOf:  'rp-pu'    });
@@ -67,7 +90,8 @@ export function seedExample(): void {
     recipes.addRecipeFlow({ id: 'rf-hyd-fluid',    action: 'consume', resourceConformsTo: 'rs-hyd-fluid',resourceQuantity: { hasNumericalValue: 20, hasUnit: 'L'    }, recipeInputOf:  'rp-hyd'   });
     recipes.addRecipeFlow({ id: 'rf-hyd-out',      action: 'produce', resourceConformsTo: 'rs-hyd-assy', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeOutputOf: 'rp-hyd'   });
     // 4. Final Assembly: frame + PU + hyd-assy + 4×wheels → LifeTrac
-    recipes.addRecipeFlow({ id: 'rf-final-frame',  action: 'consume', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeInputOf:  'rp-final' });
+    // stage on rf-final-frame matches rf-fab-out so recipeLeadTime can trace the predecessor edge
+    recipes.addRecipeFlow({ id: 'rf-final-frame',  action: 'consume', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeInputOf:  'rp-final', stage: 'ps-fab-frame' });
     recipes.addRecipeFlow({ id: 'rf-final-pu',     action: 'consume', resourceConformsTo: 'rs-pu',       resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeInputOf:  'rp-final' });
     recipes.addRecipeFlow({ id: 'rf-final-hyd',    action: 'consume', resourceConformsTo: 'rs-hyd-assy', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeInputOf:  'rp-final' });
     recipes.addRecipeFlow({ id: 'rf-final-wheels', action: 'consume', resourceConformsTo: 'rs-wheel',    resourceQuantity: { hasNumericalValue: 4,  hasUnit: 'each' }, recipeInputOf:  'rp-final' });
@@ -82,29 +106,99 @@ export function seedExample(): void {
     });
 
     // ── KNOWLEDGE: Buffer Zones (DDMRP) ──────────────────────────────────────
+    // VRD=medium/VRS=low for manufactured intermediates → VF = 0.25
     const mfgProfile: BufferProfile = {
         id: 'mfg-medium',
         name: 'Manufactured Medium',
         itemType: 'Manufactured',
         leadTimeFactor: 1.0,
-        variabilityFactor: 0.5,
+        vrd: 'medium',
+        vrs: 'low',
+        variabilityFactor: deriveVariabilityFactor('medium', 'low'), // 0.25
     };
-    // Welded Frame buffer — decoupling point, ADU 0.5/day, DLT 2 days
-    const frameZone = computeBufferZone(mfgProfile, 0.5, 'each', 2, 1, 'each');
+
+    // DLT from recipe graph — Frame leg: start of recipe → ps-fab-frame output
+    // (fab is the only process before the first decoupling point)
+    const frameDltDays = legLeadTime('lifetrac-recipe', undefined, 'ps-fab-frame', recipes);
+
+    // DLT for LifeTrac = total recipe critical path (all four processes)
+    const tractorDltDays = recipeLeadTime('lifetrac-recipe', recipes);
+
+    // Welded Frame buffer — decoupling point, ADU 0.5/day, DLT computed from recipe
+    const frameZone = computeBufferZone(mfgProfile, 0.5, 'each', frameDltDays, 1, 'each');
     bufferZones.addBufferZone({
         id: 'bz-frame', specId: 'rs-frame', profileId: 'mfg-medium',
-        adu: 0.5, aduUnit: 'each', dltDays: 2, moq: 1, moqUnit: 'each',
+        bufferClassification: 'replenished',
+        adu: 0.5, aduUnit: 'each', dltDays: frameDltDays, moq: 1, moqUnit: 'each',
         tor: frameZone.tor, toy: frameZone.toy, tog: frameZone.tog,
         lastComputedAt: new Date().toISOString(),
     });
-    // LifeTrac finished goods buffer — ADU 0.2/day, DLT 5 days (total chain)
-    const tractorZone = computeBufferZone(mfgProfile, 0.2, 'each', 5, 1, 'each');
+    // LifeTrac finished goods buffer — ADU 0.2/day, DLT = full critical-path days
+    const tractorZone = computeBufferZone(mfgProfile, 0.2, 'each', tractorDltDays, 1, 'each');
     bufferZones.addBufferZone({
         id: 'bz-lifetrac', specId: 'rs-lifetrac', profileId: 'mfg-medium',
-        adu: 0.2, aduUnit: 'each', dltDays: 5, moq: 1, moqUnit: 'each',
+        bufferClassification: 'replenished',
+        atLocation: 'loc-ose-fab',
+        adu: 0.2, aduUnit: 'each', dltDays: tractorDltDays, moq: 1, moqUnit: 'each',
         tor: tractorZone.tor, toy: tractorZone.toy, tog: tractorZone.tog,
         lastComputedAt: new Date().toISOString(),
     });
+
+    // ── KNOWLEDGE: Ch 7 Demo — Min-Max and Replenished-Override Zones ────────
+    // Profile PSL: Purchased / Short LT / Low variability → LTF 0.7, VF ≈ 0.10
+    const pslProfile: BufferProfile = {
+        id: 'purch-short-low',
+        name: 'Purchased Short Low',
+        itemType: 'Purchased',
+        leadTimeFactor: 0.7,
+        vrd: 'low', vrs: 'low',
+        variabilityFactor: deriveVariabilityFactor('low', 'low'),
+        leadTimeCategory: 'short',
+        variabilityCategory: 'low',
+        code: 'PSL',
+    };
+    // Profile PLH: Purchased / Long LT / High variability → LTF 0.3, VF 0.6
+    const plhProfile: BufferProfile = {
+        id: 'purch-long-high',
+        name: 'Purchased Long High',
+        itemType: 'Purchased',
+        leadTimeFactor: 0.3,
+        vrd: 'high', vrs: 'medium',
+        variabilityFactor: 0.6,
+        leadTimeCategory: 'long',
+        variabilityCategory: 'high',
+        code: 'PLH',
+    };
+
+    // Min-max zone — Wheel Assembly (purchased, short LT, low variability → PSL)
+    // TOY = TOR after computeMinMaxBuffer(); no yellow zone.
+    recipes.addResourceSpec({ id: 'rs-wheel-asm', name: 'Wheel Assembly (Min-Max)', defaultUnitOfResource: 'each' });
+    const wheelAsmZone = computeMinMaxBuffer(pslProfile, 8, 'each', 3, 0, 'each');
+    bufferZones.addBufferZone({
+        id: 'bz-wheel-asm', specId: 'rs-wheel-asm', profileId: 'purch-short-low',
+        bufferClassification: 'min_max',
+        adu: 8, aduUnit: 'each', dltDays: 3, moq: 0, moqUnit: 'each',
+        tor: wheelAsmZone.tor, toy: wheelAsmZone.toy, tog: wheelAsmZone.tog,
+        lastComputedAt: new Date().toISOString(),
+    });
+
+    // Replenished-override zone — Hydraulic Pump (contractual / constrained supply)
+    // TOR/TOY/TOG are user-set and must not be overwritten by recalibrateBufferZone().
+    recipes.addResourceSpec({ id: 'rs-hydraulic-pump', name: 'Hydraulic Pump (Contract)', defaultUnitOfResource: 'each' });
+    bufferZones.addBufferZone({
+        id: 'bz-hydraulic-pump', specId: 'rs-hydraulic-pump', profileId: 'purch-long-high',
+        bufferClassification: 'replenished_override',
+        adu: 2, aduUnit: 'each', dltDays: 14, moq: 5, moqUnit: 'each',
+        tor: 10, toy: 25, tog: 40,  // user-defined; recalibrateBufferZone() will not touch these
+        lastComputedAt: new Date().toISOString(),
+    });
+
+    // ── KNOWLEDGE: Capacity Buffers (DDMRP) ───────────────────────────────────
+    // Utilisation = currentLoadHours / totalCapacityHours → varied zones for demo
+    capacityBuffers.addBuffer({ id: 'cb-fab',   processSpecId: 'ps-fab-frame',  totalCapacityHours: 8, periodDays: 1, currentLoadHours: 8 }); // 100% → RED
+    capacityBuffers.addBuffer({ id: 'cb-pu',    processSpecId: 'ps-pu-assy',    totalCapacityHours: 6, periodDays: 1, currentLoadHours: 4 }); //  67% → GREEN
+    capacityBuffers.addBuffer({ id: 'cb-hyd',   processSpecId: 'ps-hyd-assy',   totalCapacityHours: 5, periodDays: 1, currentLoadHours: 3 }); //  60% → GREEN
+    capacityBuffers.addBuffer({ id: 'cb-final', processSpecId: 'ps-final-assy', totalCapacityHours: 7, periodDays: 1, currentLoadHours: 6 }); //  86% → YELLOW
 
     // ── PLAN ──────────────────────────────────────────────────────────────────
     planner.addPlan({ id: 'sprint-1', name: 'Build Sprint 1' });
@@ -177,6 +271,187 @@ export function seedExample(): void {
         fulfills:   'c-fab-out',
         provider:   'ose',
         receiver:   'ose',
+        hasPointInTime: new Date().toISOString(),
+    });
+
+    // ── DISTRIBUTION NETWORK ─────────────────────────────────────────────────
+    // SpatialThings — physical locations for the hub-spoke network
+    locations.addLocation({ id: 'loc-ose-fab',     name: 'OSE Fab Lab',           mappableAddress: 'Marcellus, MO' });
+    locations.addLocation({ id: 'loc-hub-midwest',  name: 'Midwest Hub DC'         });
+    locations.addLocation({ id: 'loc-region-east',  name: 'East Region Warehouse'  });
+    locations.addLocation({ id: 'loc-region-west',  name: 'West Region Warehouse'  });
+
+    // Distribution agents
+    agents.addAgent({ id: 'hub-midwest', type: 'Organization', name: 'Midwest Hub DC'        });
+    agents.addAgent({ id: 'wh-east',     type: 'Organization', name: 'East Region Warehouse' });
+    agents.addAgent({ id: 'wh-west',     type: 'Organization', name: 'West Region Warehouse' });
+
+    // Warehouse ResourceSpec — storage facilities are EconomicResources in VF.
+    // Items in the warehouse use currentLocation (same SpatialThing) — NOT containedIn,
+    // which would block transport-planning eligibility.
+    recipes.addResourceSpec({
+        id: 'rs-storage-facility',
+        name: 'Distribution Storage Facility',
+        defaultUnitOfResource: 'pallets',
+    });
+
+    // Warehouse EconomicResource instances
+    observer.seedResource({
+        id: 'res-hub-midwest', conformsTo: 'rs-storage-facility',
+        name: 'Midwest Hub DC',
+        accountingQuantity: { hasNumericalValue: 100, hasUnit: 'pallets' },
+        onhandQuantity:     { hasNumericalValue: 0,   hasUnit: 'pallets' },
+        currentLocation:    'loc-hub-midwest',
+        primaryAccountable: 'hub-midwest',
+    });
+    observer.seedResource({
+        id: 'res-wh-east', conformsTo: 'rs-storage-facility',
+        name: 'East Region Warehouse',
+        accountingQuantity: { hasNumericalValue: 50, hasUnit: 'pallets' },
+        onhandQuantity:     { hasNumericalValue: 0,  hasUnit: 'pallets' },
+        currentLocation:    'loc-region-east',
+        primaryAccountable: 'wh-east',
+    });
+    observer.seedResource({
+        id: 'res-wh-west', conformsTo: 'rs-storage-facility',
+        name: 'West Region Warehouse',
+        accountingQuantity: { hasNumericalValue: 50, hasUnit: 'pallets' },
+        onhandQuantity:     { hasNumericalValue: 0,  hasUnit: 'pallets' },
+        currentLocation:    'loc-region-west',
+        primaryAccountable: 'wh-west',
+    });
+
+    // LifeTrac stock buffer inventory pools — one EconomicResource per stocking location.
+    // Opening balances represent prior-period inventory; events below build current state.
+    observer.seedResource({
+        id: 'res-lifetrac-fab', conformsTo: 'rs-lifetrac',
+        name: 'LifeTrac — OSE Fab Lab',
+        accountingQuantity: { hasNumericalValue: 3, hasUnit: 'each' },
+        onhandQuantity:     { hasNumericalValue: 3, hasUnit: 'each' },
+        currentLocation: 'loc-ose-fab', primaryAccountable: 'ose',
+    });
+    observer.seedResource({
+        id: 'res-lifetrac-hub', conformsTo: 'rs-lifetrac',
+        name: 'LifeTrac — Midwest Hub DC',
+        accountingQuantity: { hasNumericalValue: 0, hasUnit: 'each' },
+        onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'each' },
+        currentLocation: 'loc-hub-midwest', primaryAccountable: 'hub-midwest',
+    });
+    observer.seedResource({
+        id: 'res-lifetrac-east', conformsTo: 'rs-lifetrac',
+        name: 'LifeTrac — East Region',
+        accountingQuantity: { hasNumericalValue: 0, hasUnit: 'each' },
+        onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'each' },
+        currentLocation: 'loc-region-east', primaryAccountable: 'wh-east',
+    });
+    observer.seedResource({
+        id: 'res-lifetrac-west', conformsTo: 'rs-lifetrac',
+        name: 'LifeTrac — West Region',
+        accountingQuantity: { hasNumericalValue: 0, hasUnit: 'each' },
+        onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'each' },
+        currentLocation: 'loc-region-west', primaryAccountable: 'wh-west',
+    });
+
+    // Transport recipes (pickup/dropoff pairs, no primaryOutput)
+    // Sourcing unit → Hub (8h transit)
+    const rpFabHub  = recipes.addRecipeProcess({ id: 'rp-tr-fab-hub',  name: 'Fab to Hub Leg',  hasDuration: { hasNumericalValue: 8, hasUnit: 'h' } });
+    recipes.addRecipe({ id: 'tr-fab-to-hub',   name: 'LifeTrac: Fab→Hub',   recipeProcesses: [rpFabHub.id]  });
+    recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeInputOf:  rpFabHub.id });
+    recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeOutputOf: rpFabHub.id });
+
+    // Hub → East (4h transit)
+    const rpHubEast = recipes.addRecipeProcess({ id: 'rp-tr-hub-east', name: 'Hub to East Leg', hasDuration: { hasNumericalValue: 4, hasUnit: 'h' } });
+    recipes.addRecipe({ id: 'tr-hub-to-east', name: 'LifeTrac: Hub→East', recipeProcesses: [rpHubEast.id] });
+    recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeInputOf:  rpHubEast.id });
+    recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeOutputOf: rpHubEast.id });
+
+    // Hub → West (6h transit)
+    const rpHubWest = recipes.addRecipeProcess({ id: 'rp-tr-hub-west', name: 'Hub to West Leg', hasDuration: { hasNumericalValue: 6, hasUnit: 'h' } });
+    recipes.addRecipe({ id: 'tr-hub-to-west', name: 'LifeTrac: Hub→West', recipeProcesses: [rpHubWest.id] });
+    recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeInputOf:  rpHubWest.id });
+    recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeOutputOf: rpHubWest.id });
+
+    // DLT computation for distribution tiers
+    const fabToHubDays  = recipeLeadTime('tr-fab-to-hub',  recipes); // 8h = 0.333d
+    const hubToEastDays = recipeLeadTime('tr-hub-to-east', recipes); // 4h = 0.167d
+    const hubToWestDays = recipeLeadTime('tr-hub-to-west', recipes); // 6h = 0.250d
+    const hubDltDays    = tractorDltDays + fabToHubDays;             // mfg DLT + inbound transit
+
+    // Distribution buffer profiles — split by tier (Ch 6 Fig 6-29: aggregation lowers CV at hub)
+    // Hub: aggregated demand → lower CV → lower variabilityFactor
+    const distProfileHub: BufferProfile = {
+        id: 'dist-hub', name: 'Distribution Hub (Aggregated)',
+        itemType: 'Distributed', leadTimeFactor: 0.5,
+        vrd: 'low', vrs: 'low',
+        variabilityFactor: deriveVariabilityFactor('low', 'low'), // 0.10
+    };
+    // Regional: local demand → higher CV → medium vrd
+    const distProfileRegional: BufferProfile = {
+        id: 'dist-regional', name: 'Distribution Regional',
+        itemType: 'Distributed', leadTimeFactor: 0.5,
+        vrd: 'medium', vrs: 'low',
+        variabilityFactor: deriveVariabilityFactor('medium', 'low'), // 0.25
+    };
+
+    // Location-scoped buffer zones
+    // Hub (ADU 0.5/day, serves 2 regions; DLT = mfg + inbound transit)
+    const hubZone  = computeBufferZone(distProfileHub, 0.5,  'each', hubDltDays,   1, 'each');
+    bufferZones.addBufferZone({
+        id: 'bz-lifetrac-hub', specId: 'rs-lifetrac', profileId: 'dist-hub',
+        bufferClassification: 'replenished',
+        atLocation: 'loc-hub-midwest',
+        upstreamLocationId: 'loc-ose-fab',
+        replenishmentRecipeId: 'tr-fab-to-hub',
+        adu: 0.5, aduUnit: 'each', dltDays: hubDltDays, moq: 1, moqUnit: 'each',
+        tor: hubZone.tor, toy: hubZone.toy, tog: hubZone.tog,
+        lastComputedAt: new Date().toISOString(),
+    });
+
+    // East warehouse (ADU 0.2/day, DLT = hub→east transit only)
+    const eastZone = computeBufferZone(distProfileRegional, 0.2,  'each', hubToEastDays, 1, 'each');
+    bufferZones.addBufferZone({
+        id: 'bz-lifetrac-east', specId: 'rs-lifetrac', profileId: 'dist-regional',
+        bufferClassification: 'replenished',
+        atLocation: 'loc-region-east',
+        upstreamLocationId: 'loc-hub-midwest',
+        replenishmentRecipeId: 'tr-hub-to-east',
+        adu: 0.2, aduUnit: 'each', dltDays: hubToEastDays, moq: 1, moqUnit: 'each',
+        tor: eastZone.tor, toy: eastZone.toy, tog: eastZone.tog,
+        lastComputedAt: new Date().toISOString(),
+    });
+
+    // West warehouse (ADU 0.15/day, DLT = hub→west transit only)
+    const westZone = computeBufferZone(distProfileRegional, 0.15, 'each', hubToWestDays, 1, 'each');
+    bufferZones.addBufferZone({
+        id: 'bz-lifetrac-west', specId: 'rs-lifetrac', profileId: 'dist-regional',
+        bufferClassification: 'replenished',
+        atLocation: 'loc-region-west',
+        upstreamLocationId: 'loc-hub-midwest',
+        replenishmentRecipeId: 'tr-hub-to-west',
+        adu: 0.15, aduUnit: 'each', dltDays: hubToWestDays, moq: 1, moqUnit: 'each',
+        tor: westZone.tor, toy: westZone.toy, tog: westZone.tog,
+        lastComputedAt: new Date().toISOString(),
+    });
+
+    // Distribution movement events — observer.record() decrements source, increments dest.
+    observer.record({
+        id: 'ev-fab-to-hub',
+        action: 'transfer',
+        resourceInventoriedAs:   'res-lifetrac-fab',
+        toResourceInventoriedAs: 'res-lifetrac-hub',
+        resourceQuantity: { hasNumericalValue: 3, hasUnit: 'each' },
+        provider: 'ose', receiver: 'hub-midwest',
+        atLocation: 'loc-ose-fab', toLocation: 'loc-hub-midwest',
+        hasPointInTime: new Date().toISOString(),
+    });
+    observer.record({
+        id: 'ev-hub-to-east',
+        action: 'transfer',
+        resourceInventoriedAs:   'res-lifetrac-hub',
+        toResourceInventoriedAs: 'res-lifetrac-east',
+        resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' },
+        provider: 'hub-midwest', receiver: 'wh-east',
+        atLocation: 'loc-hub-midwest', toLocation: 'loc-region-east',
         hasPointInTime: new Date().toISOString(),
     });
 

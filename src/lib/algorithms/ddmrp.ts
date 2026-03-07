@@ -150,9 +150,14 @@ export interface SignalIntegrityEntry {
  */
 function durationToDays(d: Duration): number {
     switch (d.hasUnit) {
+        case 'm':
+        case 'min':
         case 'minutes': return d.hasNumericalValue / 1440;
+        case 'h':
         case 'hours':   return d.hasNumericalValue / 24;
+        case 'd':
         case 'days':    return d.hasNumericalValue;
+        case 'w':
         case 'weeks':   return d.hasNumericalValue * 7;
         default:        return 0;
     }
@@ -679,6 +684,36 @@ export function computeBufferZone(
 }
 
 // =============================================================================
+// 9b. computeMinMaxBuffer
+// =============================================================================
+
+/**
+ * Min-max buffer variant (Ch 7): no yellow zone — TOY = TOR ("Not Applicable").
+ * Red and green zones use the same formulas as replenished buffers.
+ * Suitable for items where demand is relatively stable and a simple Min/Max
+ * policy replaces the full 3-zone DDMRP structure.
+ *
+ * DDMRP ref: Ptak & Smith Ch 7 §"Buffer Types".
+ */
+export function computeMinMaxBuffer(
+    profile: BufferProfile,
+    adu: number,
+    aduUnit: string,
+    dltDays: number,
+    moq: number,
+    moqUnit: string,
+    opts?: {
+        demandAdjFactor?: number;
+        leadTimeAdjFactor?: number;
+        zoneAdjFactor?: number;
+    },
+): BufferZoneComputation {
+    const result = computeBufferZone(profile, adu, aduUnit, dltDays, moq, moqUnit, opts);
+    // Min-max has no yellow zone; TOY = TOR (Not Applicable per Ch 7)
+    return { ...result, toy: result.tor };
+}
+
+// =============================================================================
 // 10. recalibrateBufferZone
 // =============================================================================
 
@@ -706,19 +741,18 @@ export function recalibrateBufferZone(
     adjustments: DemandAdjustmentFactor[],
     asOf: Date,
 ): BufferZone {
+    // Ch 7: replenished_override zones are user-managed (contractual/constrained);
+    // auto-recalculation must never overwrite user-set TOR/TOY/TOG values.
+    if (existing.bufferClassification === 'replenished_override') return existing;
+
     const factors = aggregateAdjustmentFactors(
         adjustments, asOf, existing.specId, existing.atLocation,
     );
 
-    const comp = computeBufferZone(
-        profile,
-        newADU,
-        existing.aduUnit,
-        newDLTDays,
-        existing.moq,
-        existing.moqUnit,
-        factors,
-    );
+    // Ch 7: min-max zones have no yellow zone (TOY = TOR); dispatch accordingly.
+    const comp = existing.bufferClassification === 'min_max'
+        ? computeMinMaxBuffer(profile, newADU, existing.aduUnit, newDLTDays, existing.moq, existing.moqUnit, factors)
+        : computeBufferZone(profile, newADU, existing.aduUnit, newDLTDays, existing.moq, existing.moqUnit, factors);
 
     const asOfStr = asOf.toISOString().slice(0, 10);
     const activeAdjustmentIds = adjustments
@@ -1841,4 +1875,208 @@ export function signalComplianceHistory(
     }
 
     return cells.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.specId < b.specId ? -1 : 1);
+}
+
+// =============================================================================
+// 24. deriveVariabilityFactor — VRD × VRS → numeric VF
+// =============================================================================
+
+type VariabilityLevel = 'low' | 'medium' | 'high';
+
+/**
+ * Derive the numeric Variability Factor (VF) from VRD and VRS classifications.
+ *
+ * Lookup table (Ptak & Smith typical values):
+ *
+ *   VRD \ VRS | low  | medium | high
+ *   ----------|------|--------|-----
+ *   low       | 0.10 |  0.25  | 0.50
+ *   medium    | 0.25 |  0.50  | 0.75
+ *   high      | 0.50 |  0.75  | 1.00
+ *
+ * The result is the authoritative variabilityFactor for a BufferProfile when
+ * both VRD and VRS are known. Callers may still override with a manual value.
+ *
+ * DDMRP ref: Ptak & Smith Ch 6 §"External Variability", Ch 7 §"Factor 3: Variability".
+ */
+export function deriveVariabilityFactor(vrd: VariabilityLevel, vrs: VariabilityLevel): number {
+    const table: Record<VariabilityLevel, Record<VariabilityLevel, number>> = {
+        low:    { low: 0.10, medium: 0.25, high: 0.50 },
+        medium: { low: 0.25, medium: 0.50, high: 0.75 },
+        high:   { low: 0.50, medium: 0.75, high: 1.00 },
+    };
+    return table[vrd][vrs];
+}
+
+// =============================================================================
+// 25. analyzeRecipeTopology — divergent/convergent point detection
+// =============================================================================
+
+/**
+ * Results of a recipe topology analysis.
+ *
+ * DDMRP ref: Ptak & Smith Ch 6 §"Advanced Inventory Positioning Considerations".
+ */
+export interface TopologyAnalysis {
+    /**
+     * ResourceSpecification IDs produced by exactly one process but consumed by
+     * two or more downstream processes. These are ideal decoupling candidates:
+     * stocking here maximises flexibility for all downstream users.
+     */
+    divergentSpecIds: string[];
+    /**
+     * RecipeProcess IDs that receive inputs from two or more distinct supply
+     * chains (i.e. have ≥2 immediate predecessors with no common ancestor).
+     * Convergent points are higher-risk and often warrant time/capacity buffers.
+     */
+    convergentProcIds: string[];
+    /**
+     * Suggested decoupling-point candidates: divergent spec producers union-ed
+     * with any process whose leg DLT exceeds the supplied CTT threshold.
+     * Array of RecipeProcess IDs.
+     */
+    decouplingCandidates: string[];
+    /** Total critical-path length in calendar days (= recipeLeadTime result). */
+    criticalPathDays: number;
+    /**
+     * Per-process leg DLT: critical-path duration from the recipe start to the
+     * end of that process (its Earliest Finish time), in calendar days.
+     */
+    legLeadTimes: Map<string, number>;
+}
+
+/**
+ * Analyse a recipe's flow graph for divergent points, convergent points, and
+ * decoupling candidates.
+ *
+ * Purely analytical — no side effects. Callers can use the result to:
+ *   - Auto-suggest isDecouplingPoint placements on ProcessSpecification
+ *   - Warn about convergent points that lack time/capacity buffers
+ *   - Populate positioningAnalysis.decouplingRecommended on ResourceSpecification
+ *
+ * @param recipeId      Recipe to analyse
+ * @param recipeStore   Knowledge store (provides process chain + flows)
+ * @param cttDays       Optional Customer Tolerance Time threshold in days.
+ *                      Processes whose leg DLT exceeds this are added to
+ *                      decouplingCandidates.
+ */
+export function analyzeRecipeTopology(
+    recipeId: string,
+    recipeStore: RecipeStore,
+    cttDays?: number,
+): TopologyAnalysis {
+    const chain = recipeStore.getProcessChain(recipeId);
+    const criticalPathDays = recipeLeadTime(recipeId, recipeStore);
+
+    if (chain.length === 0) {
+        return {
+            divergentSpecIds: [],
+            convergentProcIds: [],
+            decouplingCandidates: [],
+            criticalPathDays,
+            legLeadTimes: new Map(),
+        };
+    }
+
+    const { predecessors } = buildRecipePredecessors(chain, recipeStore);
+
+    // --- Leg lead times: EF (Earliest Finish) per process ---
+    const EF = new Map<string, number>();
+    for (const rp of chain) {
+        const preds = predecessors.get(rp.id) ?? [];
+        const latestPredEF = preds.length === 0 ? 0 : Math.max(...preds.map(p => EF.get(p) ?? 0));
+        EF.set(rp.id, latestPredEF + (rp.hasDuration ? durationToDays(rp.hasDuration) : 0));
+    }
+
+    // --- Build spec→producing processes and spec→consuming processes maps ---
+    // Key: resourceConformsTo ID (stage omitted — we track the resource spec itself)
+    const specProducers = new Map<string, string[]>(); // specId → [procId, ...]
+    const specConsumers = new Map<string, string[]>(); // specId → [procId, ...]
+
+    for (const rp of chain) {
+        const { inputs, outputs } = recipeStore.flowsForProcess(rp.id);
+        for (const f of outputs) {
+            if (!f.resourceConformsTo) continue;
+            const list = specProducers.get(f.resourceConformsTo) ?? [];
+            if (!list.includes(rp.id)) list.push(rp.id);
+            specProducers.set(f.resourceConformsTo, list);
+        }
+        for (const f of inputs) {
+            if (!f.resourceConformsTo) continue;
+            const list = specConsumers.get(f.resourceConformsTo) ?? [];
+            if (!list.includes(rp.id)) list.push(rp.id);
+            specConsumers.set(f.resourceConformsTo, list);
+        }
+    }
+
+    // --- Divergent specs: produced by exactly 1 process, consumed by 2+ ---
+    const divergentSpecIds: string[] = [];
+    for (const [specId, producers] of specProducers) {
+        if (producers.length === 1) {
+            const consumers = specConsumers.get(specId) ?? [];
+            if (consumers.length >= 2) {
+                divergentSpecIds.push(specId);
+            }
+        }
+    }
+
+    // --- Convergent processes: process with 2+ immediate predecessors ---
+    const convergentProcIds: string[] = [];
+    for (const rp of chain) {
+        if ((predecessors.get(rp.id)?.length ?? 0) >= 2) {
+            convergentProcIds.push(rp.id);
+        }
+    }
+
+    // --- Decoupling candidates: producers of divergent specs + CTT-exceeding processes ---
+    const candidateSet = new Set<string>();
+
+    // Producers of divergent specs are natural decoupling candidates
+    for (const specId of divergentSpecIds) {
+        for (const procId of specProducers.get(specId) ?? []) {
+            candidateSet.add(procId);
+        }
+    }
+
+    // Processes whose leg DLT exceeds CTT are upstream decoupling candidates
+    if (cttDays !== undefined) {
+        for (const rp of chain) {
+            if ((EF.get(rp.id) ?? 0) > cttDays) {
+                candidateSet.add(rp.id);
+            }
+        }
+    }
+
+    return {
+        divergentSpecIds,
+        convergentProcIds,
+        decouplingCandidates: Array.from(candidateSet),
+        criticalPathDays,
+        legLeadTimes: EF,
+    };
+}
+
+// =============================================================================
+// 26. flowIndex / classifyFlowSpeed — Ch 12 fast/slow mover classification
+// =============================================================================
+
+/**
+ * Flow Index = ADU / TOG. Ch 12 metric for fast/slow mover classification.
+ * Returns 0 if tog === 0 (safe default, avoids divide-by-zero).
+ */
+export function flowIndex(adu: number, tog: number): number {
+    return tog === 0 ? 0 : adu / tog;
+}
+
+/**
+ * Classify an item as 'fast' or 'slow' mover at a given location.
+ * threshold defaults to 0.10 — items with FI below this are slow movers
+ * (buffer turns over less than once every 10 periods).
+ */
+export function classifyFlowSpeed(
+    adu: number,
+    tog: number,
+    threshold: number = 0.10,
+): 'fast' | 'slow' {
+    return flowIndex(adu, tog) >= threshold ? 'fast' : 'slow';
 }

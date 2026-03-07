@@ -1,9 +1,11 @@
-import { ProcessRegistry } from '$lib/process-registry';
-import { RecipeStore }     from '$lib/knowledge/recipes';
-import { BufferZoneStore } from '$lib/knowledge/buffer-zones';
-import { AgentStore }      from '$lib/agents';
-import { PlanStore }       from '$lib/planning/planning';
-import { Observer }        from '$lib/observation/observer';
+import { ProcessRegistry }      from '$lib/process-registry';
+import { RecipeStore }           from '$lib/knowledge/recipes';
+import { BufferZoneStore }       from '$lib/knowledge/buffer-zones';
+import { CapacityBufferStore }   from '$lib/knowledge/capacity-buffers';
+import { SpatialThingStore }     from '$lib/knowledge/spatial-things';
+import { AgentStore }            from '$lib/agents';
+import { PlanStore }             from '$lib/planning/planning';
+import { Observer }              from '$lib/observation/observer';
 import type {
     ResourceSpecification,
     ProcessSpecification,
@@ -16,16 +18,20 @@ import type {
     EconomicEvent,
     Agent,
     BufferZone,
+    CapacityBuffer,
+    SpatialThing,
 } from '$lib/schemas';
 
 // ── Underlying class instances (module-level singletons) ──────────────────
 // These are plain let exports (not $state) — can be reassigned in resetStores()
-export let registry    = new ProcessRegistry();
-export let recipes     = new RecipeStore();
-export let bufferZones = new BufferZoneStore();
-export let agents      = new AgentStore();
-export let planner     = new PlanStore(registry);
-export let observer    = new Observer(registry);
+export let registry              = new ProcessRegistry();
+export let recipes               = new RecipeStore();
+export let bufferZones           = new BufferZoneStore();
+export let capacityBuffers       = new CapacityBufferStore();
+export let locations             = new SpatialThingStore();
+export let agents                = new AgentStore();
+export let planner               = new PlanStore(registry);
+export let observer              = new Observer(registry);
 
 // ── Reactive $state arrays (Svelte 5) ────────────────────────────────────
 // Declared as const to satisfy Svelte's "no reassignment of exported state" rule.
@@ -42,8 +48,10 @@ export const intentList     = $state<Intent[]>([]);
 // Observation layer
 export const resourceList   = $state<EconomicResource[]>([]);
 export const eventList      = $state<EconomicEvent[]>([]);
-export const agentList      = $state<Agent[]>([]);
-export const bufferZoneList = $state<BufferZone[]>([]);
+export const agentList               = $state<Agent[]>([]);
+export const bufferZoneList          = $state<BufferZone[]>([]);
+export const capacityBufferList      = $state<CapacityBuffer[]>([]);
+export const locationList            = $state<SpatialThing[]>([]);
 
 // ── refresh() — sync all $state arrays from the current store instances ──
 function syncArr<T>(target: T[], items: T[]): void {
@@ -60,8 +68,10 @@ export function refresh() {
     syncArr(intentList,     planner.allIntents());
     syncArr(resourceList,   observer.allResources());
     syncArr(eventList,      observer.allEvents());
-    syncArr(agentList,      agents.allAgents());
-    syncArr(bufferZoneList, bufferZones.allBufferZones());
+    syncArr(agentList,               agents.allAgents());
+    syncArr(bufferZoneList,          bufferZones.allBufferZones());
+    syncArr(capacityBufferList,      capacityBuffers.allBuffers());
+    syncArr(locationList,            locations.allLocations());
 }
 
 // Auto-refresh on any Observer event
@@ -69,12 +79,14 @@ observer.subscribe(() => refresh());
 
 // ── resetStores() — replace all instances with fresh empty ones ───────────
 export function resetStores() {
-    registry    = new ProcessRegistry();
-    recipes     = new RecipeStore();
-    bufferZones = new BufferZoneStore();
-    agents      = new AgentStore();
-    planner     = new PlanStore(registry);
-    observer    = new Observer(registry);
+    registry             = new ProcessRegistry();
+    recipes              = new RecipeStore();
+    bufferZones          = new BufferZoneStore();
+    capacityBuffers      = new CapacityBufferStore();
+    locations            = new SpatialThingStore();
+    agents               = new AgentStore();
+    planner              = new PlanStore(registry);
+    observer             = new Observer(registry);
     observer.subscribe(() => refresh());
     refresh();
 }
