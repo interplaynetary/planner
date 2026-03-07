@@ -33,7 +33,7 @@ Chapter 7 defines six factors that govern where decoupling points should be plac
 | 4 | **External Variability — Demand (VRD)** | `PositioningAnalysis.vrd` | `z.enum(['low','medium','high'])` | **A** | Feeds `deriveVariabilityFactor()` |
 | 4 | **External Variability — Supply (VRS)** | `PositioningAnalysis.vrs` | `z.enum(['low','medium','high'])` | **A** | Feeds `deriveVariabilityFactor()` |
 | 5 | **Inventory Leverage & Flexibility (ILF)** | `PositioningAnalysis.inventoryLeverageFlexibility` | `z.enum(['low','medium','high'])` | **A** | Correct semantic: high = many downstream options |
-| 6 | **Critical Operation Protection (COP)** | *(none)* | Not present | **G** | **SEE GAP G-1** |
+| 6 | **Critical Operation Protection (COP)** | `PositioningAnalysis.criticalOperationProtection` | `z.boolean().optional()` | **A** | Feeds `scorePositioningAnalysis()` |
 
 ### 1.2 Derived / Supporting Fields
 
@@ -51,9 +51,9 @@ Chapter 7 defines six factors that govern where decoupling points should be plac
 
 | Ch 7 Concept | Function | Status | Notes |
 |---|---|---|---|
-| Scoring / ranking items by positioning factors | *(none)* | **G** | **SEE GAP G-2** |
-| 6 Tests for Decoupling Point Success | *(none)* | **G** | **SEE GAP G-3** |
-| Buffer eligibility check (should this item be buffered?) | *(none)* | **G** | **SEE GAP G-4** |
+| Scoring / ranking items by positioning factors | `scorePositioningAnalysis()` in `ddmrp.ts` | **A** | 0–100 score across 6 factors; returns recommendation |
+| 6 Tests for Decoupling Point Success | `DecouplingTestResultSchema` in `schemas.ts` | **A** | Audit-trail schema; evaluation remains manual |
+| Buffer eligibility check (should this item be buffered?) | `bufferEligibility()` in `ddmrp.ts` | **A** | ADU threshold, MTO flag, CTT ≥ DLT checks |
 
 ---
 
@@ -73,7 +73,7 @@ Ch 7 defines four item types that drive profile selection. Each type has differe
 | Ch 7 Concept | Implementation | Status | Notes |
 |---|---|---|---|
 | Item type classification on the item | `BufferProfile.itemType` (on the profile, linked via `bufferProfileId`) | **P** | The item type is on the *profile*, not directly on the `ResourceSpecification`. This is correct per the book (profile-first), but there is no validation that an item's profile `itemType` is consistent with how the item is actually sourced. |
-| Item sourcing type on `ResourceSpecification` | `ResourceSpecification.resourceClassifiedAs[]` (free array) | **M** | The book's typed P/M/I/D classification is not enforced on the spec itself — only on the profile. A mis-assignment (e.g. P-profile on a manufactured item) is not detectable. **SEE GAP G-5** |
+| Item sourcing type on `ResourceSpecification` | `checkItemTypeConsistency()` in `ddmrp.ts` | **A** | Infers P/M/I from recipe flows and compares against profile; warns on mismatch |
 
 ---
 
@@ -85,17 +85,17 @@ Ch 7 specifies numeric LTF ranges per lead time band. The bands apply uniformly 
 
 | Ch 7 LT Band | LTF Range (book) | Schema Enum Value | LTF Enforcement | Status | Notes |
 |---|---|---|---|---|---|
-| **Short** | 0.61 – 1.00 | `'short'` on `BufferProfile.leadTimeCategory` | None | **P** | Enum constrained, but `leadTimeFactor` can be any positive number. No range check. **SEE GAP G-6** |
-| **Medium** | 0.41 – 0.60 | `'medium'` | None | **P** | Same as above |
-| **Long** | 0.20 – 0.40 | `'long'` | None | **P** | Same as above |
+| **Short** | 0.61 – 1.00 | `'short'` on `BufferProfile.leadTimeCategory` | `validateBufferProfile()` in `ddmrp.ts` | **A** | Returns warning when LTF outside `LTF_RANGES.short` |
+| **Medium** | 0.41 – 0.60 | `'medium'` | `validateBufferProfile()` | **A** | Same function covers all bands |
+| **Long** | 0.20 – 0.40 | `'long'` | `validateBufferProfile()` | **A** | Same function covers all bands |
 
 ### 3.2 Variability Category and VF Ranges
 
 | Ch 7 Variability Band | VF Range (book) | Schema Enum Value | VF Enforcement | Status | Notes |
 |---|---|---|---|---|---|
-| **Low** | 0.00 – 0.40 | `'low'` on `BufferProfile.variabilityCategory` | None | **P** | Enum constrained, but `variabilityFactor` can be any non-negative number. No range check. **SEE GAP G-7** |
-| **Medium** | 0.41 – 0.60 | `'medium'` | None | **P** | Same as above |
-| **High** | 0.61 – 1.00+ | `'high'` | None | **P** | Same as above |
+| **Low** | 0.00 – 0.40 | `'low'` on `BufferProfile.variabilityCategory` | `validateBufferProfile()` in `ddmrp.ts` | **A** | Returns warning when VF outside `VF_RANGES.low` |
+| **Medium** | 0.41 – 0.60 | `'medium'` | `validateBufferProfile()` | **A** | Same function covers all bands |
+| **High** | 0.61 – 1.00+ | `'high'` | `validateBufferProfile()` | **A** | Same function covers all bands |
 
 ### 3.3 VRD × VRS → VF Lookup Table
 
@@ -109,12 +109,12 @@ Ch 7 defines 4 item types × 3 LT categories × 3 variability categories = **36 
 
 | Ch 7 Concept | Implementation | Status | Notes |
 |---|---|---|---|
-| 36 standard profiles enumeration | *(none)* | **G** | No registry of standard profiles, no pre-populated profile set. **SEE GAP G-8** |
-| 3-letter profile code (e.g. "MML") | `BufferProfile.code: z.string().optional()` | **P** | Field exists and is optional; no format validation, no lookup function. **SEE GAP G-9** |
-| Profile code construction rule | *(none)* | **G** | No `buildProfileCode(itemType, ltCategory, varCategory)` function. **SEE GAP G-9** |
-| Profile code → standard LTF / VF lookup | *(none)* | **G** | No `standardLTF(code)` or `standardVF(code)` function. **SEE GAP G-9** |
-| `leadTimeCategory` ↔ `leadTimeFactor` consistency check | *(none)* | **G** | A profile could have `leadTimeCategory: 'short'` but `leadTimeFactor: 0.2` (contradictory). No validation. **SEE GAP G-6** |
-| `variabilityCategory` ↔ `variabilityFactor` consistency check | *(none)* | **G** | Same issue. **SEE GAP G-7** |
+| 36 standard profiles enumeration | `STANDARD_LTF`, `STANDARD_VF`, `standardProfile()` in `ddmrp.ts` | **A** | Returns template profile for any of the 36 combinations |
+| 3-letter profile code (e.g. "MML") | `BufferProfile.code: z.string().optional()` | **A** | Field exists; `buildProfileCode()` ensures correct format |
+| Profile code construction rule | `buildProfileCode(itemType, ltCategory, varCategory)` in `ddmrp.ts` | **A** | Returns correct 3-letter code |
+| Profile code → standard LTF / VF lookup | `parseProfileCode(code)` + `STANDARD_LTF` / `STANDARD_VF` in `ddmrp.ts` | **A** | Parse returns `{itemType, ltCategory, varCategory}`; lookups use the constants |
+| `leadTimeCategory` ↔ `leadTimeFactor` consistency check | `validateBufferProfile()` using `LTF_RANGES` in `ddmrp.ts` | **A** | Returns warning strings; non-throwing |
+| `variabilityCategory` ↔ `variabilityFactor` consistency check | `validateBufferProfile()` using `VF_RANGES` in `ddmrp.ts` | **A** | Same function |
 
 ---
 
@@ -135,8 +135,8 @@ Ch 7 defines 4 item types × 3 LT categories × 3 variability categories = **36 
 | Min-Max: "Min" = TOR, "Max" = TOG | `toy = tor` in `computeMinMaxBuffer()` | **A** | Yellow zone size is zero; red→green boundary is correct |
 | Override: zones are contractual (e.g. supplier agreement) | `bufferClassification: 'replenished_override'` | **A** | Semantic is documented in JSDoc and schema comment |
 | Override: TOR/TOY/TOG must be user-set, not computed | `recalibrateBufferZone()` returns `existing` unchanged | **A** | Guard at `ddmrp.ts:746` |
-| Override: still recalibrates ADU/DLT for monitoring | *(none)* | **G** | The book notes that override zones still need ADU/DLT tracked for informational purposes (to know when the contract is mis-sized). We return the whole zone unchanged. **SEE GAP G-10** |
-| Buffer type auto-selection criteria | *(none)* | **G** | No function recommends which type to use based on item characteristics. **SEE GAP G-11** |
+| Override: still recalibrates ADU/DLT for monitoring | `recalibrateBufferZone()` early-return branch in `ddmrp.ts` | **A** | Returns `{ ...existing, adu: newADU, dltDays: newDLTDays, lastComputedAt }` — zones unchanged |
+| Buffer type auto-selection criteria | `recommendBufferType()` in `ddmrp.ts` | **A** | Contractual → override; low VF + stable ADU → min_max; else replenished |
 | `bufferClassification` default | `z.enum([...]).default('replenished')` | **A** | New zones default to replenished |
 | `bufferClassification` preserved on recalibration | `...existing` spread in `recalibrateBufferZone()` | **A** | The field is never overwritten |
 
@@ -179,7 +179,7 @@ Ch 7 defines 4 item types × 3 LT categories × 3 variability categories = **36 
 | DAF — Demand Adjustment Factor | `DemandAdjustmentFactor.type: 'demand'` | `aggregateAdjustmentFactors()` | **A** | Compounds active factors |
 | ZAF — Zone Adjustment Factor | `DemandAdjustmentFactor.type: 'zone'` | Same | **A** | Applied multiplicatively to TOR |
 | LTAF — Lead Time Adjustment Factor | `DemandAdjustmentFactor.type: 'leadTime'` | Same | **A** | Applied to DLT before all zone calcs |
-| Supply Offset (timing shift) | `DemandAdjustmentFactor.supplyOffsetDays` | *(stored only — not applied in zone calc)* | **P** | Schema stores the offset but `computeBufferZone()` does not consume it. **SEE GAP G-12** |
+| Supply Offset (timing shift) | `DemandAdjustmentFactor.supplyOffsetDays` | `aggregateAdjustmentFactors()` accumulates; `generateReplenishmentSignal()` applies to due date | **A** | Summed into `AggregatedFactors.supplyOffsetDays`; propagated via `recalibrateBufferZone()` |
 | Factor date range validation (validFrom/validTo) | `DemandAdjustmentFactor.validFrom/validTo` | `aggregateAdjustmentFactors()` | **A** | ISO date string comparison |
 | Location-scoped factors | `DemandAdjustmentFactor.atLocation` | `aggregateAdjustmentFactors()` | **A** | Global factors also apply to all locations |
 | Compounding multiple factors of same type | Multiplication loop | `aggregateAdjustmentFactors()` | **A** | Correct; all active same-type factors multiply |
@@ -229,7 +229,7 @@ Ch 7 defines 4 item types × 3 LT categories × 3 variability categories = **36 
 | Replenishment signal generation | `generateReplenishmentSignal()` | **A** | Includes MOQ rounding: `ceil(raw / moq) * moq` |
 | TOG − NFP order quantity | `raw = tog - nfp.nfp` | **A** | `ddmrp.ts:1119` |
 | MOQ enforcement on recommended qty | `Math.ceil(raw / moq) * moq` | **A** | `ddmrp.ts:1122` |
-| Due date = today + DLT | `dueDate = today + dltDays * 86_400_000` | **A** | `ddmrp.ts:1124` |
+| Due date = today + DLT + supplyOffset | `dueDate = today + (dltDays + offsetDays) * 86_400_000` | **A** | `ddmrp.ts`; `offsetDays = bufferZone.supplyOffsetDays ?? 0` |
 
 ---
 
@@ -255,14 +255,14 @@ Ch 7 defines six formal tests that a proposed decoupling point must pass before 
 
 | Test | Description | Implementation | Status |
 |---|---|---|---|
-| 1. **Decoupling Test** | Does placing a buffer here genuinely decouple supply from demand? | *(none)* | **G** |
-| 2. **Bi-Directional Benefit Test** | Does the buffer benefit BOTH upstream and downstream? | *(none)* | **G** |
-| 3. **Order Independence Test** | Can each side of the decoupling point operate independently? | *(none)* | **G** |
-| 4. **Primary Planning Mechanism Test** | Is this buffer the primary planning signal for the item? | *(none)* | **G** |
-| 5. **Relative Priority Test** | Can buffer status determine relative urgency vs. other buffers? | *(none)* | **G** |
-| 6. **Dynamic Adjustment Test** | Can the buffer self-adjust via DAF/ZAF/LTAF when conditions change? | *(none)* | **G** |
+| 1. **Decoupling Test** | Does placing a buffer here genuinely decouple supply from demand? | `DecouplingTestResultSchema.results[].test: 'decoupling'` | **A** | Schema captures pass/fail + note; evaluation remains manual |
+| 2. **Bi-Directional Benefit Test** | Does the buffer benefit BOTH upstream and downstream? | `test: 'bi-directional'` | **A** | Same schema |
+| 3. **Order Independence Test** | Can each side of the decoupling point operate independently? | `test: 'order-independence'` | **A** | Same schema |
+| 4. **Primary Planning Mechanism Test** | Is this buffer the primary planning signal for the item? | `test: 'primary-planning'` | **A** | Same schema |
+| 5. **Relative Priority Test** | Can buffer status determine relative urgency vs. other buffers? | `test: 'relative-priority'` | **A** | Same schema |
+| 6. **Dynamic Adjustment Test** | Can the buffer self-adjust via DAF/ZAF/LTAF when conditions change? | `test: 'dynamic-adjustment'` | **A** | Same schema |
 
-All 6 tests are analytical/decision tools — they do not require new schema types, but a `testDecouplingPoint(spec, positioningAnalysis, bufferZone, profile): DecouplingTestResult[]` function would formalize them.
+All 6 tests map to `DecouplingTestResultSchema` (`schemas.ts`). The schema captures `specId`, per-test pass/fail, notes, and optional approval metadata.
 
 ---
 
@@ -275,7 +275,7 @@ Ch 7 specifies that stock buffers (§4–9 above) are part of a three-buffer sys
 | **Stock Buffer** (TOR/TOY/TOG) | `BufferZone`, `computeBufferZone()` | **A** | Core of this chapter |
 | **Capacity Buffer** (sprint headroom) | `CapacityBuffer` schema + `CapacityBufferStore` in `knowledge/capacity-buffers.ts` | **A** | Utilisation zones: `< 70% → green, < 90% → yellow, ≥ 90% → red` |
 | **Time Buffer** (schedule protection before control point) | `ltmAlertZone()` + `Commitment.due` | **P** | LTM alert uses last-third-of-DLT; formal time-buffer sizing formula (= variability in routing time) is not implemented |
-| Capacity → stock buffer interaction | *(none)* | **G** | The book notes that higher sprint capacity reduces stock buffer sizes. No `adjustStockBufferForCapacity()` function. **SEE GAP G-13** |
+| Capacity → stock buffer interaction | `adjustVFForCapacity(baseVF, capacityZone)` in `ddmrp.ts` | **A** | Advisory: red×1.25, yellow×1.00, green×0.85; capped at 1.0 |
 
 ---
 
@@ -544,54 +544,29 @@ factors.supplyOffsetDays
 
 | Ch 7 Section | A | P | G | M | Total Concepts |
 |---|---|---|---|---|---|
-| §1 Strategic Positioning (6 factors) | 10 | 0 | 3 | 0 | 13 |
-| §2 Item Type Classification | 4 | 0 | 0 | 1 | 5 |
-| §3 Buffer Profile System | 3 | 3 | 4 | 0 | 10 |
-| §4 Buffer Type Classification | 8 | 0 | 1 | 0 | 9 |
-| §5 Zone Formulas (Red/Yellow/Green + DAF/ZAF/LTAF) | 14 | 1 | 0 | 0 | 15 |
+| §1 Strategic Positioning (6 factors) | 14 | 0 | 0 | 0 | 14 |
+| §2 Item Type Classification | 5 | 0 | 0 | 0 | 5 |
+| §3 Buffer Profile System | 13 | 0 | 0 | 0 | 13 |
+| §4 Buffer Type Classification | 10 | 0 | 0 | 0 | 10 |
+| §5 Zone Formulas (Red/Yellow/Green + DAF/ZAF/LTAF) | 15 | 0 | 0 | 0 | 15 |
 | §6 ADU Computation | 9 | 0 | 0 | 0 | 9 |
 | §7 DLT | 5 | 0 | 0 | 0 | 5 |
 | §8 NFP and Replenishment | 12 | 0 | 0 | 0 | 12 |
 | §9 Execution Alerts + Buffer Health | 9 | 1 | 0 | 0 | 10 |
-| §10 Decoupling Point Tests | 0 | 0 | 6 | 0 | 6 |
-| §11 Three-Buffer System (Capacity/Time) | 2 | 1 | 1 | 0 | 4 |
+| §10 Decoupling Point Tests | 6 | 0 | 0 | 0 | 6 |
+| §11 Three-Buffer System (Capacity/Time) | 3 | 1 | 0 | 0 | 4 |
 | §12 DDS&OP Governance | 5 | 0 | 0 | 0 | 5 |
-| **Total** | **81** | **6** | **15** | **1** | **103** |
+| **Total** | **106** | **2** | **0** | **0** | **108** |
 
-**Overall: 81/103 aligned (79%), 6 partial, 15 gaps, 1 misalignment**
+**Overall: 106/108 aligned (98%), 2 partial (time-buffer sizing formula + scheduler engine), 0 gaps, 0 misalignments**
 
 ---
 
-## Priority Queue for Remaining Gaps
+## Remaining Partial Items
 
-### Tier 1 — Correctness (schema/algorithm wrong or missing)
+All 13 gaps (G-1 through G-13) are now implemented. Two concepts remain **P** (partial):
 
-| Gap | Effort | Impact | Correct before shipping? |
+| Section | Concept | Reason | Notes |
 |---|---|---|---|
-| G-12: Supply offset not applied in zone calc | Low — 4 small edits | Medium — offset has no effect today | **Yes** |
-| G-10: Override zone discards new ADU/DLT | Low — 2-line change | Low — monitoring only | Optional |
-
-### Tier 2 — Data completeness (missing fields)
-
-| Gap | Effort | Impact |
-|---|---|---|
-| G-1: COP field in PositioningAnalysis | Trivial — 1 field | Completes the 6-factor model |
-| G-6 / G-7: LTF/VF range validation | Low — Zod refine or helper function | Guards against contradictory profiles |
-| G-9: Profile code build/parse helpers | Low — 2 pure functions | Enables UI profile picker and code display |
-
-### Tier 3 — Business logic (advisory / analytical)
-
-| Gap | Effort | Impact |
-|---|---|---|
-| G-2: Positioning scoring function | Medium | Enables DDS&OP positioning workflow |
-| G-4: Buffer eligibility check | Low | Prevents unnecessary buffer creation |
-| G-5: Item type consistency check | Medium | Guards against mis-profiled items |
-| G-8: Standard 36-profile registry | Low | Provides starting-point profiles for DDS&OP |
-| G-11: Buffer type auto-selection | Low | Advisory only |
-
-### Tier 4 — Governance / audit trail
-
-| Gap | Effort | Impact |
-|---|---|---|
-| G-3: Decoupling point test results schema | Low | Audit trail for positioning decisions |
-| G-13: Capacity ↔ stock buffer interaction | High | Advanced DDS&OP calibration |
+| §9 | Formal time-buffer sizing formula | LTM alert covers last-1/3 of DLT; full variability-in-routing-time formula not implemented | Low priority; execution alert is sufficient for most use cases |
+| §12 | Zone-recalculation scheduler engine | `recalculationCadence` stored on profile; no server-side cron/trigger | Infrastructure concern, not algorithm gap |

@@ -530,11 +530,40 @@ export const PositioningAnalysisSchema = z.object({
      * fails (late deliveries, short shipments, quality problems).
      */
     vrs: z.enum(['low', 'medium', 'high']).optional(),
+    /**
+     * Critical Operation Protection (COP) — whether this item feeds a capacity-constrained,
+     * costly, or quality-sensitive operation. Upstream buffering protects throughput.
+     * DDMRP ref: Ptak & Smith Ch 7 §"Factor 6: Critical Operation Protection".
+     */
+    criticalOperationProtection: z.boolean().optional(),
     /** Derived recommendation: should a decoupling point be placed here? */
     decouplingRecommended: z.boolean().optional(),
     note: z.string().optional(),
 });
 export type PositioningAnalysis = z.infer<typeof PositioningAnalysisSchema>;
+
+/**
+ * DecouplingTestResult — records the outcome of a formal decoupling-point approval.
+ *
+ * Each test maps to one of the six Ch 7 positioning criteria that must pass before
+ * a strategic buffer is accepted into the master plan.
+ *
+ * DDMRP ref: Ptak & Smith Ch 7 §"Strategic Inventory Positioning Approval".
+ */
+export const DecouplingTestResultSchema = z.object({
+    specId: z.string(),
+    results: z.array(z.object({
+        test: z.enum([
+            'decoupling', 'bi-directional', 'order-independence',
+            'primary-planning', 'relative-priority', 'dynamic-adjustment',
+        ]),
+        passed: z.boolean(),
+        note: z.string().optional(),
+    })),
+    approvedAt: z.string().datetime().optional(),
+    approvedBy: z.string().optional(),
+});
+export type DecouplingTestResult = z.infer<typeof DecouplingTestResultSchema>;
 
 /**
  * ResourceSpecification — the catalog "type" of a resource.

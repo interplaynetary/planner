@@ -23,6 +23,7 @@ import type {
     Intent,
     Commitment,
     RecipeProcess,
+    PositioningAnalysis,
 } from '../schemas';
 import { ACTION_DEFINITIONS } from '../schemas';
 import type { PlanStore } from '../planning/planning';
@@ -83,6 +84,7 @@ export interface AggregatedFactors {
     demandAdjFactor: number;    // product of all active 'demand' type factors
     zoneAdjFactor: number;      // product of all active 'zone' type factors
     leadTimeAdjFactor: number;  // product of all active 'leadTime' type factors
+    supplyOffsetDays: number;   // additive sum of all active supply offset days
 }
 
 export interface BufferStatusResult {
@@ -478,9 +480,10 @@ export function aggregateAdjustmentFactors(
 ): AggregatedFactors {
     const asOfStr = asOf.toISOString().slice(0, 10);
 
-    let demand   = 1;
-    let zone     = 1;
-    let leadTime = 1;
+    let demand      = 1;
+    let zone        = 1;
+    let leadTime    = 1;
+    let supplyOffset = 0;
 
     for (const adj of adjustments) {
         if (adj.specId !== specId) continue;
@@ -495,9 +498,10 @@ export function aggregateAdjustmentFactors(
             case 'zone':     zone     *= adj.factor; break;
             case 'leadTime': leadTime *= adj.factor; break;
         }
+        supplyOffset += adj.supplyOffsetDays ?? 0;
     }
 
-    return { demandAdjFactor: demand, zoneAdjFactor: zone, leadTimeAdjFactor: leadTime };
+    return { demandAdjFactor: demand, zoneAdjFactor: zone, leadTimeAdjFactor: leadTime, supplyOffsetDays: supplyOffset };
 }
 
 // =============================================================================
@@ -743,7 +747,10 @@ export function recalibrateBufferZone(
 ): BufferZone {
     // Ch 7: replenished_override zones are user-managed (contractual/constrained);
     // auto-recalculation must never overwrite user-set TOR/TOY/TOG values.
-    if (existing.bufferClassification === 'replenished_override') return existing;
+    // But track current ADU/DLT for drift monitoring (Ch 7: contract renegotiation signals).
+    if (existing.bufferClassification === 'replenished_override') {
+        return { ...existing, adu: newADU, dltDays: newDLTDays, lastComputedAt: asOf.toISOString() };
+    }
 
     const factors = aggregateAdjustmentFactors(
         adjustments, asOf, existing.specId, existing.atLocation,
@@ -774,6 +781,7 @@ export function recalibrateBufferZone(
         demandAdjFactor: factors.demandAdjFactor,
         zoneAdjFactor: factors.zoneAdjFactor,
         leadTimeAdjFactor: factors.leadTimeAdjFactor,
+        supplyOffsetDays: factors.supplyOffsetDays || undefined,
         activeAdjustmentIds,
         lastComputedAt: asOf.toISOString(),
     };
@@ -1121,7 +1129,8 @@ export function generateReplenishmentSignal(
         ? moq
         : Math.ceil(raw / moq) * moq;
 
-    const dueMs  = today.getTime() + bufferZone.dltDays * 86_400_000;
+    const offsetDays = bufferZone.supplyOffsetDays ?? 0;
+    const dueMs  = today.getTime() + (bufferZone.dltDays + offsetDays) * 86_400_000;
     const dueDate = new Date(dueMs).toISOString().slice(0, 10);
 
     return {
@@ -1906,6 +1915,354 @@ export function deriveVariabilityFactor(vrd: VariabilityLevel, vrs: VariabilityL
         high:   { low: 0.50, medium: 0.75, high: 1.00 },
     };
     return table[vrd][vrs];
+}
+
+// =============================================================================
+// 25b. G-6/G-7 — validateBufferProfile (LTF + VF range checks)
+// =============================================================================
+
+/**
+ * LTF valid ranges per lead time band (Ch 7 §"Buffer Profile and Levels").
+ * Short: 61–100%, Medium: 41–60%, Long: 20–40%.
+ */
+export const LTF_RANGES: Record<'short' | 'medium' | 'long', [number, number]> = {
+    short:  [0.61, 1.00],
+    medium: [0.41, 0.60],
+    long:   [0.20, 0.40],
+};
+
+/**
+ * VF valid ranges per variability band (Ch 7 §"Buffer Profile and Levels").
+ * Low: 0–40%, Medium: 41–60%, High: 61%+.
+ */
+export const VF_RANGES: Record<'low' | 'medium' | 'high', [number, number]> = {
+    low:    [0.00, 0.40],
+    medium: [0.41, 0.60],
+    high:   [0.61, Infinity],
+};
+
+/**
+ * Validate that a BufferProfile's LTF and VF values fall within their declared bands.
+ * Returns a list of warning strings (empty = all in range).
+ * Callers decide whether to surface warnings as errors or informational notes.
+ * DDMRP ref: Ptak & Smith Ch 7 §"Buffer Profile and Levels".
+ */
+export function validateBufferProfile(profile: BufferProfile): string[] {
+    const warnings: string[] = [];
+    if (profile.leadTimeCategory) {
+        const [lo, hi] = LTF_RANGES[profile.leadTimeCategory];
+        if (profile.leadTimeFactor < lo || profile.leadTimeFactor > hi) {
+            warnings.push(
+                `leadTimeFactor ${profile.leadTimeFactor} outside ${profile.leadTimeCategory} range [${lo}, ${hi}]`,
+            );
+        }
+    }
+    if (profile.variabilityCategory) {
+        const [lo, hi] = VF_RANGES[profile.variabilityCategory];
+        if (profile.variabilityFactor < lo || profile.variabilityFactor > hi) {
+            warnings.push(
+                `variabilityFactor ${profile.variabilityFactor} outside ${profile.variabilityCategory} range [${lo}, ${hi === Infinity ? '∞' : hi}]`,
+            );
+        }
+    }
+    return warnings;
+}
+
+// =============================================================================
+// 25c. G-9 — buildProfileCode / parseProfileCode
+// =============================================================================
+
+const ITEM_TYPE_LETTER: Record<BufferProfile['itemType'], string> = {
+    Manufactured: 'M', Purchased: 'P', Distributed: 'D', Intermediate: 'I',
+};
+const LT_CATEGORY_LETTER: Record<'short' | 'medium' | 'long', string> = {
+    short: 'S', medium: 'M', long: 'L',
+};
+const VAR_CATEGORY_LETTER: Record<'low' | 'medium' | 'high', string> = {
+    low: 'L', medium: 'M', high: 'H',
+};
+
+/**
+ * Build the 3-letter Ch 7 profile code: ItemType + LTCategory + VariabilityCategory.
+ * Example: buildProfileCode('Manufactured', 'medium', 'low') → 'MML'
+ * DDMRP ref: Ptak & Smith Ch 7 §"Buffer Profile Naming Convention".
+ */
+export function buildProfileCode(
+    itemType: BufferProfile['itemType'],
+    ltCategory: 'short' | 'medium' | 'long',
+    varCategory: 'low' | 'medium' | 'high',
+): string {
+    return `${ITEM_TYPE_LETTER[itemType]}${LT_CATEGORY_LETTER[ltCategory]}${VAR_CATEGORY_LETTER[varCategory]}`;
+}
+
+/**
+ * Parse a 3-letter Ch 7 profile code back into its components.
+ * Returns null when the code does not match the expected pattern.
+ * Example: parseProfileCode('MML') → { itemType: 'Manufactured', ltCategory: 'medium', varCategory: 'low' }
+ * DDMRP ref: Ptak & Smith Ch 7 §"Buffer Profile Naming Convention".
+ */
+export function parseProfileCode(code: string): {
+    itemType: BufferProfile['itemType'];
+    ltCategory: 'short' | 'medium' | 'long';
+    varCategory: 'low' | 'medium' | 'high';
+} | null {
+    if (!/^[MPDI][SML][LMH]$/.test(code)) return null;
+    const itemTypeMap: Record<string, BufferProfile['itemType']> = {
+        M: 'Manufactured', P: 'Purchased', D: 'Distributed', I: 'Intermediate',
+    };
+    const ltMap: Record<string, 'short' | 'medium' | 'long'> = {
+        S: 'short', M: 'medium', L: 'long',
+    };
+    const vrMap: Record<string, 'low' | 'medium' | 'high'> = {
+        L: 'low', M: 'medium', H: 'high',
+    };
+    return { itemType: itemTypeMap[code[0]], ltCategory: ltMap[code[1]], varCategory: vrMap[code[2]] };
+}
+
+// =============================================================================
+// 25d. G-8 — Standard 36-profile registry
+// =============================================================================
+
+/** Mid-point LTF values for each lead time band (Ch 7 starting-point defaults). */
+export const STANDARD_LTF: Record<'short' | 'medium' | 'long', number> = {
+    short: 0.80, medium: 0.50, long: 0.30,
+};
+
+/** Mid-point VF values for each variability band (Ch 7 starting-point defaults). */
+export const STANDARD_VF: Record<'low' | 'medium' | 'high', number> = {
+    low: 0.10, medium: 0.50, high: 1.00,
+};
+
+/**
+ * Returns a template BufferProfile for any of the 36 Ch 7 standard profiles.
+ * Callers must supply id and name; all other fields are set to book mid-points.
+ * DDMRP ref: Ptak & Smith Ch 7 §"Standard Profile Registry".
+ */
+export function standardProfile(
+    itemType: BufferProfile['itemType'],
+    ltCategory: 'short' | 'medium' | 'long',
+    varCategory: 'low' | 'medium' | 'high',
+): Omit<BufferProfile, 'id' | 'name'> {
+    const code = buildProfileCode(itemType, ltCategory, varCategory);
+    return {
+        itemType,
+        leadTimeFactor: STANDARD_LTF[ltCategory],
+        variabilityFactor: STANDARD_VF[varCategory],
+        leadTimeCategory: ltCategory,
+        variabilityCategory: varCategory,
+        code,
+    };
+}
+
+// =============================================================================
+// 25e. G-2 — scorePositioningAnalysis
+// =============================================================================
+
+/**
+ * Translate the six Ch 7 positioning factors into a 0–100 score.
+ * Higher score = stronger case for placing a decoupling buffer here.
+ *
+ * Scoring breakdown (max pts):
+ *   CTT vs DLT (20), SOVH vs DLT (15), ILF (20), VRD (15), VRS (15), COP (15)
+ *
+ * @param pa                  PositioningAnalysis record for the item
+ * @param totalLeadTimeDays   Full end-to-end lead time without buffering
+ * DDMRP ref: Ptak & Smith Ch 7 §"Strategic Inventory Positioning Factors".
+ */
+export function scorePositioningAnalysis(
+    pa: PositioningAnalysis,
+    totalLeadTimeDays: number,
+): { score: number; recommendation: 'buffer' | 'consider' | 'skip'; factors: Record<string, number> } {
+    const factors: Record<string, number> = {};
+
+    // CTT vs DLT: if CTT < DLT customer can't wait — strong buffer case (0–20 pts)
+    if (pa.customerToleranceTimeDays != null) {
+        const ratio = pa.customerToleranceTimeDays / Math.max(totalLeadTimeDays, 1);
+        factors.ctt = ratio < 0.5 ? 20 : ratio < 1.0 ? 12 : 0;
+    }
+    // SOVH: shorter horizon = less forward visibility = stronger buffer need (0–15 pts)
+    if (pa.salesOrderVisibilityHorizonDays != null) {
+        const ratio = pa.salesOrderVisibilityHorizonDays / Math.max(totalLeadTimeDays, 1);
+        factors.sovh = ratio < 0.5 ? 15 : ratio < 1.0 ? 8 : 0;
+    }
+    // ILF: high leverage = many options = strong buffer case (0–20 pts)
+    const ilfScore: Record<string, number> = { high: 20, medium: 10, low: 0 };
+    if (pa.inventoryLeverageFlexibility) factors.ilf = ilfScore[pa.inventoryLeverageFlexibility];
+    // VRD: high demand variability = need buffer (0–15 pts)
+    const vrdScore: Record<string, number> = { high: 15, medium: 8, low: 0 };
+    if (pa.vrd) factors.vrd = vrdScore[pa.vrd];
+    // VRS: high supply variability = need buffer (0–15 pts)
+    const vrsScore: Record<string, number> = { high: 15, medium: 8, low: 0 };
+    if (pa.vrs) factors.vrs = vrsScore[pa.vrs];
+    // COP: feeds critical operation = buffer strongly recommended (0–15 pts)
+    if (pa.criticalOperationProtection != null) {
+        factors.cop = pa.criticalOperationProtection ? 15 : 0;
+    }
+
+    const score = Math.min(100, Object.values(factors).reduce((a, b) => a + b, 0));
+    const recommendation = score >= 60 ? 'buffer' : score >= 30 ? 'consider' : 'skip';
+    return { score, recommendation, factors };
+}
+
+// =============================================================================
+// 25f. G-4 — bufferEligibility
+// =============================================================================
+
+/**
+ * Check whether an item is eligible for a DDMRP buffer.
+ * Returns { eligible: true } when all checks pass; otherwise lists disqualifying reasons.
+ *
+ * @param pa                  PositioningAnalysis for the item (optional)
+ * @param adu                 Average Daily Usage (positive → demand exists)
+ * @param totalLeadTimeDays   Full end-to-end lead time without buffering
+ * @param opts.isMTO          True if item is Make-to-Order (no buffer appropriate)
+ * @param opts.aduThreshold   Minimum ADU to justify a buffer (default 0.01)
+ * DDMRP ref: Ptak & Smith Ch 7 §"Strategic Inventory Positioning".
+ */
+export function bufferEligibility(
+    pa: PositioningAnalysis | undefined,
+    adu: number,
+    totalLeadTimeDays: number,
+    opts?: { isMTO?: boolean; aduThreshold?: number },
+): { eligible: boolean; reasons: string[] } {
+    const reasons: string[] = [];
+    const aduThreshold = opts?.aduThreshold ?? 0.01;
+
+    if (adu < aduThreshold) {
+        reasons.push(`ADU ${adu} below threshold ${aduThreshold} — demand too low to justify buffer`);
+    }
+    if (opts?.isMTO) {
+        reasons.push('Make-to-order item — buffer not appropriate');
+    }
+    if (pa?.customerToleranceTimeDays != null && pa.customerToleranceTimeDays >= totalLeadTimeDays) {
+        reasons.push(
+            `CTT (${pa.customerToleranceTimeDays}d) ≥ total lead time (${totalLeadTimeDays}d) — customer can wait; no buffer benefit`,
+        );
+    }
+
+    return { eligible: reasons.length === 0, reasons };
+}
+
+// =============================================================================
+// 25g. G-5 — checkItemTypeConsistency
+// =============================================================================
+
+/**
+ * Infer an item's type from recipe flows and compare it against the BufferProfile declaration.
+ * Warns when the profile's itemType contradicts what the recipe graph implies.
+ *
+ * Logic:
+ *   hasProduceOutput + hasExternalInput  → Intermediate
+ *   hasProduceOutput only               → Manufactured
+ *   hasExternalInput only               → Purchased
+ *   neither                             → cannot infer (possibly Distributed or no flows)
+ *
+ * @param specId       ResourceSpecification ID to scan
+ * @param profile      BufferProfile whose itemType to validate
+ * @param recipeStore  Recipe store to query for flows
+ * DDMRP ref: Ptak & Smith Ch 7 §"Item Type Classification".
+ */
+export function checkItemTypeConsistency(
+    specId: string,
+    profile: BufferProfile,
+    recipeStore: RecipeStore,
+): { consistent: boolean; inferredType: BufferProfile['itemType'] | null; note: string } {
+    let hasProduceOutput = false;
+    let hasExternalInput  = false;
+
+    for (const recipe of recipeStore.allRecipes()) {
+        for (const rp of recipeStore.getProcessChain(recipe.id)) {
+            const { inputs, outputs } = recipeStore.flowsForProcess(rp.id);
+            for (const f of outputs) {
+                if (f.resourceConformsTo === specId && f.action === 'produce') {
+                    hasProduceOutput = true;
+                }
+            }
+            for (const f of inputs) {
+                if (
+                    f.resourceConformsTo === specId &&
+                    (f.action === 'transfer' || f.action === 'transferAllRights')
+                ) {
+                    hasExternalInput = true;
+                }
+            }
+        }
+    }
+
+    let inferredType: BufferProfile['itemType'] | null = null;
+    if (hasProduceOutput && hasExternalInput) inferredType = 'Intermediate';
+    else if (hasProduceOutput) inferredType = 'Manufactured';
+    else if (hasExternalInput) inferredType = 'Purchased';
+
+    if (inferredType === null) {
+        return {
+            consistent: true,
+            inferredType: null,
+            note: 'Cannot infer item type from recipe flows (possibly Distributed or no flows found)',
+        };
+    }
+
+    const consistent = profile.itemType === inferredType;
+    const note = consistent
+        ? `Confirmed: profile itemType '${profile.itemType}' matches inferred type`
+        : `Mismatch: profile itemType '${profile.itemType}' but recipe flows suggest '${inferredType}'`;
+
+    return { consistent, inferredType, note };
+}
+
+// =============================================================================
+// 25h. G-11 — recommendBufferType
+// =============================================================================
+
+/**
+ * Recommend the appropriate buffer classification for a new DDMRP zone.
+ *
+ * Rules (in priority order):
+ *   1. isContractual  → replenished_override (user-managed zones)
+ *   2. Low VF + stable ADU (CoV < 0.20) → min_max
+ *   3. Default → replenished
+ *
+ * @param variabilityFactor  VF value from the BufferProfile
+ * @param opts.isContractual True when zones are set by contract or executive override
+ * @param opts.aduCoV        Coefficient of variation of daily demand (optional)
+ * DDMRP ref: Ptak & Smith Ch 7 §"Buffer Type Selection".
+ */
+export function recommendBufferType(
+    variabilityFactor: number,
+    opts?: { isContractual?: boolean; aduCoV?: number },
+): BufferZone['bufferClassification'] {
+    if (opts?.isContractual) return 'replenished_override';
+    // Low variability AND stable ADU (CoV < 0.2) → min-max
+    if (variabilityFactor <= 0.20 && (opts?.aduCoV == null || opts.aduCoV < 0.20)) return 'min_max';
+    return 'replenished';
+}
+
+// =============================================================================
+// 25i. G-13 — adjustVFForCapacity
+// =============================================================================
+
+/**
+ * Advisory: suggests a VF multiplier based on capacity buffer zone colour.
+ * Red-zone capacity → recommend higher VF on stock buffer (more safety stock).
+ * Green-zone capacity → recommend lower VF (capacity absorbs variability).
+ *
+ * Result is capped at 1.0 (maximum meaningful VF).
+ * This is advisory only — callers must decide whether to apply the result.
+ *
+ * @param baseVF        Starting variabilityFactor from the BufferProfile
+ * @param capacityZone  Current colour of the associated capacity buffer
+ * DDMRP ref: Ptak & Smith Ch 7 §"Interplay of Buffer Types".
+ */
+export function adjustVFForCapacity(
+    baseVF: number,
+    capacityZone: 'red' | 'yellow' | 'green',
+): number {
+    const multiplier: Record<'red' | 'yellow' | 'green', number> = {
+        red:    1.25,  // capacity in sprint mode — stock buffer needs more cushion
+        yellow: 1.00,  // neutral
+        green:  0.85,  // healthy capacity — stock buffer can be leaner
+    };
+    return Math.min(1.0, baseVF * multiplier[capacityZone]);
 }
 
 // =============================================================================
