@@ -15,6 +15,7 @@
 
 import type {
     EconomicEvent,
+    EconomicResource,
     Duration,
     BufferZone,
     BufferProfile,
@@ -811,12 +812,30 @@ export function recalibrateBufferZone(
         adjustments, asOf, existing.specId, existing.atLocation,
     );
 
+    // Bootstrap ADU blending — Ch 7 Fig 7-16
+    let effectiveADU = newADU;
+    let newBootstrapDays = existing.bootstrapDaysAccumulated;
+    let clearEstimate = false;
+
+    if (existing.estimatedADU !== undefined && existing.estimatedADU > 0) {
+        const windowDays = existing.aduWindowDays ?? 84;
+        const prevDays = existing.bootstrapDaysAccumulated ?? 0;
+        const elapsedDays = existing.lastComputedAt
+            ? Math.max(0, Math.floor((asOf.getTime() - new Date(existing.lastComputedAt).getTime()) / 86_400_000))
+            : 0;
+        const daysActual = Math.min(windowDays, prevDays + elapsedDays);
+        const { blendedADU, bootstrapComplete } = bootstrapADU(newADU, daysActual, existing.estimatedADU, windowDays);
+        effectiveADU = blendedADU;
+        newBootstrapDays = daysActual;
+        clearEstimate = bootstrapComplete;
+    }
+
     // Ch 7: min-max zones have no yellow zone (TOY = TOR); dispatch accordingly.
     // Pass per-part DOC override (N-5) so green zone uses the item's own order cycle.
     const optsWithDoc = { ...factors, docDays: existing.orderCycleDays };
     const comp = existing.bufferClassification === 'min_max'
-        ? computeMinMaxBuffer(profile, newADU, existing.aduUnit, newDLTDays, existing.moq, existing.moqUnit, optsWithDoc)
-        : computeBufferZone(profile, newADU, existing.aduUnit, newDLTDays, existing.moq, existing.moqUnit, optsWithDoc);
+        ? computeMinMaxBuffer(profile, effectiveADU, existing.aduUnit, newDLTDays, existing.moq, existing.moqUnit, optsWithDoc)
+        : computeBufferZone(profile, effectiveADU, existing.aduUnit, newDLTDays, existing.moq, existing.moqUnit, optsWithDoc);
 
     const asOfStr = asOf.toISOString().slice(0, 10);
     const activeAdjustmentIds = adjustments
@@ -830,7 +849,7 @@ export function recalibrateBufferZone(
 
     return {
         ...existing,
-        adu: newADU,
+        adu: effectiveADU,
         dltDays: newDLTDays,
         tor: comp.tor,
         toy: comp.toy,
@@ -842,6 +861,8 @@ export function recalibrateBufferZone(
         leadTimeAdjFactor: factors.leadTimeAdjFactor,
         supplyOffsetDays: factors.supplyOffsetDays || undefined,
         activeAdjustmentIds,
+        bootstrapDaysAccumulated: newBootstrapDays,
+        estimatedADU: clearEstimate ? undefined : existing.estimatedADU,
         lastComputedAt: asOf.toISOString(),
     };
 }
@@ -1468,53 +1489,94 @@ export interface BufferHealthEntry {
 /**
  * Reconstruct daily on-hand buffer status over a historical date range.
  *
- * Starting from `initialOnHand` at the beginning of `fromDate`, replays all
- * qualifying EconomicEvents in [fromDate, toDate] to produce a day-by-day
- * buffer zone classification.
+ * Replays qualifying EconomicEvents in [fromDate, toDate] to produce a
+ * day-by-day buffer zone classification. The caller provides `currentOnHand`
+ * (today's physical balance); the function back-computes the starting balance
+ * at `fromDate` by subtracting the total window delta.
+ *
+ * Event matching uses two paths:
+ *   • Simple actions (increment/decrement): matched by `resourceConformsTo`.
+ *     When `bz.atLocation` is set, `atLocation` must match to exclude synthetic
+ *     ADU-only events that carry no physical location.
+ *   • Transfer-style actions (decrementIncrement — transfer, move, transferCustody):
+ *     matched via `resourceInventoriedAs` → resource conformsTo lookup.
+ *     Source side (atLocation === bz.atLocation) contributes −qty;
+ *     destination side (toLocation === bz.atLocation) contributes +qty.
  *
  * Used for DDS&OP calibration: identifies chronic red-zone penetrations,
  * excess inventory trends, and seasonal patterns (resolves M10).
  *
- * Event filtering: `resourceConformsTo === specId`; applies only
- *   onhandEffect: 'increment' (produce, pickup, accept, …) and
- *   onhandEffect: 'decrement' (consume, lower, combine, …) events.
- *
- * @param specId         ResourceSpecification ID
- * @param events         Caller-supplied EconomicEvents (any date range)
- * @param initialOnHand  Physical on-hand at the START of fromDate (from Observer)
- * @param bz             BufferZone providing TOR/TOY/TOG
- * @param fromDate       Start date (YYYY-MM-DD, inclusive)
- * @param toDate         End date (YYYY-MM-DD, inclusive)
+ * @param specId          ResourceSpecification ID
+ * @param events          Caller-supplied EconomicEvents (any date range)
+ * @param resources       EconomicResources — used to resolve transfer events
+ * @param currentOnHand   Physical on-hand as of `toDate` (today's balance)
+ * @param bz              BufferZone providing TOR/TOY/TOG and atLocation
+ * @param fromDate        Start date (YYYY-MM-DD, inclusive)
+ * @param toDate          End date (YYYY-MM-DD, inclusive)
  */
 export function bufferHealthHistory(
     specId: string,
     events: EconomicEvent[],
-    initialOnHand: number,
+    resources: EconomicResource[],
+    currentOnHand: number,
     bz: BufferZone,
     fromDate: string,
     toDate: string,
 ): BufferHealthEntry[] {
+    // Build a resource-id → conformsTo map for resolving transfer events
+    const resourceSpec = new Map(resources.map(r => [r.id, r.conformsTo]));
+
     // Bucket net OH delta per calendar day within the window
     const dailyNet = new Map<string, number>();
 
     for (const e of events) {
-        if (e.resourceConformsTo !== specId) continue;
         const tStr = e.hasPointInTime ?? e.hasBeginning ?? e.created;
         if (!tStr) continue;
         const d = tStr.slice(0, 10);
         if (d < fromDate || d > toDate) continue;
+
         const qty = e.resourceQuantity?.hasNumericalValue ?? 0;
+        if (!qty) continue;
+
         const def = ACTION_DEFINITIONS[e.action];
         if (!def) continue;
-        const delta =
-            def.onhandEffect === 'increment' ?  qty :
-            def.onhandEffect === 'decrement' ? -qty : 0;
+
+        let delta = 0;
+
+        if (def.onhandEffect === 'decrementIncrement') {
+            // Transfer / move / transferCustody: resolve each side via resource lookup.
+            // Only one side will match our location (or either if no location constraint).
+            const fromSpec = e.resourceInventoriedAs ? resourceSpec.get(e.resourceInventoriedAs) : undefined;
+            const toSpec   = e.toResourceInventoriedAs ? resourceSpec.get(e.toResourceInventoriedAs) : undefined;
+
+            if (bz.atLocation) {
+                if (toSpec === specId && e.toLocation === bz.atLocation)   delta =  qty; // incoming
+                else if (fromSpec === specId && e.atLocation === bz.atLocation) delta = -qty; // outgoing
+            } else {
+                // No location constraint: track from source if it matches spec
+                if (fromSpec === specId || e.resourceConformsTo === specId) delta = -qty;
+            }
+        } else {
+            // Simple increment / decrement
+            if (e.resourceConformsTo !== specId) continue;
+            // When the buffer zone has a location, exclude events that lack a matching
+            // atLocation (this filters out synthetic ADU-only history events).
+            if (bz.atLocation && e.atLocation !== bz.atLocation) continue;
+
+            if (def.onhandEffect === 'increment') delta =  qty;
+            else if (def.onhandEffect === 'decrement') delta = -qty;
+        }
+
         if (delta !== 0) dailyNet.set(d, (dailyNet.get(d) ?? 0) + delta);
     }
 
-    const result: BufferHealthEntry[] = [];
-    let oh = initialOnHand;
+    // Back-compute on-hand at the start of the window from today's known balance.
+    // startOH + totalDelta = currentOnHand  →  startOH = currentOnHand − totalDelta
+    let totalDelta = 0;
+    for (const v of dailyNet.values()) totalDelta += v;
+    let oh = currentOnHand - totalDelta;
 
+    const result: BufferHealthEntry[] = [];
     const from = new Date(fromDate);
     const to   = new Date(toDate);
     for (

@@ -56,7 +56,7 @@
 
   const healthEntries = $derived.by(() => {
     if (!selectedBz) return [];
-    return bufferHealthHistory(selectedBz.specId, eventList, selectedBzOnhand, selectedBz, _from30, _today);
+    return bufferHealthHistory(selectedBz.specId, eventList, resourceList, selectedBzOnhand, selectedBz, _from30, _today);
   });
 
   // Aggregated adjustment factors for the selected buffer zone
@@ -249,7 +249,7 @@
         {@const selZone = bufferZoneList.find(bz => bz.specId === selectedSpecId)}
         {@const selProfile = bufferProfileList.find(p => p.id === selZone?.profileId)}
         <div class="profiles-detail">
-          <ADUComparisonChart specId={selectedSpecId} events={eventList} intents={intentList} today={_today} />
+          <ADUComparisonChart specId={selectedSpecId} events={eventList} intents={intentList} today={_today} zone={selZone} />
           {#if selZone && selProfile}
             <BufferCalculationBreakdown
               bufferZone={selZone}

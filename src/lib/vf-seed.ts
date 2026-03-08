@@ -136,6 +136,9 @@ export function seedExample(): void {
         bufferClassification: 'replenished',
         adu: 0.5, aduUnit: 'units', dltDays: frameDltDays, moq: 1, moqUnit: 'units',
         tor: frameZone.tor, toy: frameZone.toy, tog: frameZone.tog,
+        estimatedADU: 0.30,
+        bootstrapDaysAccumulated: 0,
+        aduWindowDays: 84,
         lastComputedAt: new Date().toISOString(),
     });
     // LifeTrac finished goods buffer — ADU 0.2/day, DLT = full critical-path days
@@ -146,6 +149,9 @@ export function seedExample(): void {
         atLocation: 'loc-ose-fab',
         adu: 0.2, aduUnit: 'units', dltDays: tractorDltDays, moq: 1, moqUnit: 'units',
         tor: tractorZone.tor, toy: tractorZone.toy, tog: tractorZone.tog,
+        estimatedADU: 0.30,
+        bootstrapDaysAccumulated: 0,
+        aduWindowDays: 84,
         lastComputedAt: new Date().toISOString(),
     });
 

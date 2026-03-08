@@ -166,6 +166,30 @@ describe('computeBufferZone', () => {
         expect(result.tog).toBe(250 + 200);   // = 450
     });
 
+    it('Fig 7-20 exact example — ADU=10 DLT=12 LTF=0.5 VF=0.33 MOQ=50 DOC=7', () => {
+        const profile = makeProfile({
+            leadTimeFactor: 0.5,
+            variabilityFactor: 0.33,
+            orderCycleDays: 7,
+        });
+        // redBase   = 10 × 12 × 0.5 = 60
+        // redSafety = 60 × 0.33     = 19.8
+        // tor       = 60 + 19.8     = 79.8  (book rounds to 80)
+        // toy       = 79.8 + 120    = 199.8 (book rounds to 200)
+        // green     = max(70, 60, 50) = 70
+        // tog       = 199.8 + 70    = 269.8 (book rounds to 270)
+        const r = computeBufferZone(profile, 10, 'each', 12, 50, 'each');
+        expect(r.redBase).toBeCloseTo(60);
+        expect(r.redSafety).toBeCloseTo(19.8);
+        expect(r.tor).toBeCloseTo(79.8);
+        expect(r.toy).toBeCloseTo(199.8);
+        expect(r.tog).toBeCloseTo(269.8);
+        // green option 1 (DOC): 10 × 7 = 70 — wins
+        // green option 2 (LTF): redBase = 60
+        // green option 3 (MOQ): 50
+        expect(r.tog - r.toy).toBeCloseTo(70); // green zone = 70
+    });
+
     it('demandAdjFactor scales effective ADU', () => {
         const profile = makeProfile({ leadTimeFactor: 1.0, variabilityFactor: 0 });
         // effectiveADU = 10 * 2 = 20, dlt=5
