@@ -11,10 +11,11 @@
     chains: Chain[];
     candidates?: DecouplingCandidateResult[];
     onselect?: (processId: string) => void;
+    selectedProcessId?: string | null;
     class?: string;
   }
 
-  let { chains, candidates, onselect, class: cls = '' }: Props = $props();
+  let { chains, candidates, onselect, selectedProcessId, class: cls = '' }: Props = $props();
 
   const candidateMap = $derived(new Map(candidates?.map(c => [c.processId, c]) ?? []));
 
@@ -35,6 +36,7 @@
           {@const cand = candidateMap.get(g.processId)}
           <button
             class="node {nodeColor(g)}"
+            class:selected={g.processId === selectedProcessId}
             style="width: {Math.max(24, g.durationDays * 8)}px"
             onclick={() => onselect?.(g.processId)}
             title={g.processId}
@@ -71,6 +73,7 @@
   .node.yellow  { background: var(--zone-yellow-fill); color: var(--zone-yellow); }
   .node.green   { background: var(--zone-green-fill);  color: var(--zone-green); }
   .node.other   { background: rgba(255,255,255,0.08);  color: inherit; }
+  .node.selected { outline: 2px solid var(--zone-green); opacity: 1; }
   .arrow { font-size: var(--text-xs); }
   .score { font-size: 9px; }
   .muted { opacity: var(--muted); }

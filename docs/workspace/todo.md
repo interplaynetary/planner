@@ -21,6 +21,22 @@ Certain processes incur metabolic costs. Like using soil, and extracting nutrien
 Todo: iterative DLT comparisons on decoupling points, integrated into positioning
 Iterations pg. 153
 
+Ch 8 adjustments, and transition is crucial
+
+---
+
+## Major task: modularity and interop points for various use cases
+
+We must identify in DDRMP.pdf
+the points at chiwh the model is itself variable:
+For example:
+- Alert-Systems
+- Planned Adjustment Strategies
+
+For all of these point, it is crucial that we mantain modularity in code and UI, as well as interoperability to facilitate more transparent planning across alert systems.
+
+
+
 ---
 Question: it seems that ADU, the buffer calculations etc. are all perspectival based on location. 
 

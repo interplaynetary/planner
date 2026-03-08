@@ -23,7 +23,9 @@
   import BufferCalculationBreakdown  from '$lib/components/buffers/BufferCalculationBreakdown.svelte';
   import { seedExample } from '$lib/vf-seed';
   import { resetStores } from '$lib/vf-stores.svelte';
-  import { bufferHealthHistory, aggregateAdjustmentFactors } from '$lib/algorithms/ddmrp';
+  import { bufferHealthHistory, aggregateAdjustmentFactors, computeBufferZone } from '$lib/algorithms/ddmrp';
+  import { rankDecouplingCandidates } from '$lib/algorithms/positioning';
+  import PositioningIterationView from '$lib/components/positioning/PositioningIterationView.svelte';
   import BufferHealthRunChart      from '$lib/components/execution/BufferHealthRunChart.svelte';
   import CapacityLoadingView       from '$lib/components/execution/CapacityLoadingView.svelte';
   import BufferOutlierPanel        from '$lib/components/execution/BufferOutlierPanel.svelte';
@@ -76,6 +78,41 @@
       ? adjustmentFactorList.filter(f => f.specId === selectedBz.specId)
       : []
   );
+
+  // ── STRATEGIC POSITIONING band state ──────────────────────────────────────
+  let selectedPositioningRecipeId    = $state<string | null>(null);
+  let selectedPositioningCandidateId = $state<string | null>(null);
+
+  const positioningCandidateCount = $derived.by(() => {
+    if (!selectedPositioningRecipeId) return 0;
+    const existing = new Set(bufferZoneList.map(z => z.specId));
+    return rankDecouplingCandidates(selectedPositioningRecipeId, recipes, existing).length;
+  });
+
+  function handleAcceptCandidate(
+    newZone: Omit<import('$lib/schemas').BufferZone, 'id'>,
+    affectedZoneId: string,
+    newDltDays: number,
+    parentProfileId?: string | null,
+  ) {
+    bufferZones.addBufferZone(newZone);
+    if (affectedZoneId) {
+      const existing = bufferZoneList.find(z => z.id === affectedZoneId);
+      const profile  = bufferProfileList.find(p => p.id === (parentProfileId ?? existing?.profileId));
+      if (existing && profile) {
+        const recomp = computeBufferZone(profile, existing.adu, existing.aduUnit,
+          newDltDays, existing.moq, existing.moqUnit);
+        bufferZones.updateZone(affectedZoneId, {
+          dltDays: newDltDays,
+          profileId: profile.id,
+          tor: recomp.tor, toy: recomp.toy, tog: recomp.tog,
+          lastComputedAt: new Date().toISOString(),
+        });
+      }
+    }
+    refresh();
+    selectedPositioningCandidateId = null;
+  }
 
   // ── BUFFER PROFILES band state ─────────────────────────────────────────────
   let selectedProfileCode = $state<string | null>(null);
@@ -259,6 +296,38 @@
           {/if}
         </div>
       {/if}
+    </div>
+  </section>
+
+  <!-- ── STRATEGIC POSITIONING BAND ──────────────────────────────────────────── -->
+  <section class="band positioning">
+    <div class="band-header">
+      <span class="band-title" style="color: #b794f4">STRATEGIC POSITIONING</span>
+      <span class="counts">
+        <span class="count">Recipes({recipeList.length})</span>
+        {#if selectedPositioningRecipeId}
+          <span class="count">Candidates({positioningCandidateCount})</span>
+        {/if}
+      </span>
+      {#if selectedPositioningCandidateId}
+        <div class="actions">
+          <button onclick={() => { selectedPositioningCandidateId = null; }}>✕ Clear candidate</button>
+        </div>
+      {/if}
+    </div>
+    <div class="positioning-body">
+      <PositioningIterationView
+        {recipes}
+        {recipeList}
+        {bufferZoneList}
+        {bufferProfileList}
+        {resourceSpecs}
+        selectedRecipeId={selectedPositioningRecipeId}
+        selectedCandidateProcessId={selectedPositioningCandidateId}
+        onRecipeSelect={(id) => { selectedPositioningRecipeId = id; selectedPositioningCandidateId = null; }}
+        onCandidateSelect={(id) => { selectedPositioningCandidateId = id; }}
+        onAcceptCandidate={handleAcceptCandidate}
+      />
     </div>
   </section>
 
@@ -698,6 +767,11 @@
     display: flex;
     flex-direction: column;
     gap: var(--gap-sm);
+  }
+
+  /* STRATEGIC POSITIONING band */
+  .positioning-body {
+    overflow-x: auto;
   }
 
   /* BUFFER PROFILES band */
