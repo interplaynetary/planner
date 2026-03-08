@@ -18,7 +18,7 @@ import { computeBufferZone, computeMinMaxBuffer, recipeLeadTime, legLeadTime, de
 import type { BufferProfile } from '$lib/schemas';
 import {
     registry, recipes, bufferZones, capacityBuffers, agents, planner, observer, refresh,
-    locations,
+    locations, upsertBufferProfile,
 } from '$lib/vf-stores.svelte';
 
 export function seedExample(): void {
@@ -30,14 +30,14 @@ export function seedExample(): void {
     // Raw materials
     recipes.addResourceSpec({ id: 'rs-steel',     name: 'Steel Tubing',    defaultUnitOfResource: 'm'    });
     recipes.addResourceSpec({ id: 'rs-weld-rod',  name: 'Welding Rod',     defaultUnitOfResource: 'kg'   });
-    recipes.addResourceSpec({ id: 'rs-engine',    name: 'Engine 18HP',     defaultUnitOfResource: 'each' });
-    recipes.addResourceSpec({ id: 'rs-hyd-pump',  name: 'Hydraulic Pump',  defaultUnitOfResource: 'each' });
+    recipes.addResourceSpec({ id: 'rs-engine',    name: 'Engine 18HP',     defaultUnitOfResource: 'units' });
+    recipes.addResourceSpec({ id: 'rs-hyd-pump',  name: 'Hydraulic Pump',  defaultUnitOfResource: 'units' });
     recipes.addResourceSpec({ id: 'rs-hyd-hose',  name: 'Hydraulic Hose',  defaultUnitOfResource: 'm'    });
     recipes.addResourceSpec({ id: 'rs-hyd-fluid', name: 'Hydraulic Fluid', defaultUnitOfResource: 'L'    });
-    recipes.addResourceSpec({ id: 'rs-wheel',     name: 'Wheel Assembly',  defaultUnitOfResource: 'each' });
+    recipes.addResourceSpec({ id: 'rs-wheel',     name: 'Wheel Assembly',  defaultUnitOfResource: 'units' });
     // Intermediate assemblies (decoupling points — DDMRP buffers)
     recipes.addResourceSpec({
-        id: 'rs-frame', name: 'Welded Frame', defaultUnitOfResource: 'each', replenishmentRequired: true,
+        id: 'rs-frame', name: 'Welded Frame', defaultUnitOfResource: 'units', replenishmentRequired: true,
         positioningAnalysis: {
             customerToleranceTimeDays: 1,      // customer expects same-day frame availability
             salesOrderVisibilityHorizonDays: 3,
@@ -47,11 +47,11 @@ export function seedExample(): void {
             note: 'Decoupling point: isolates frame fabrication from final assembly variability.',
         },
     });
-    recipes.addResourceSpec({ id: 'rs-pu',        name: 'Power Unit',      defaultUnitOfResource: 'each', replenishmentRequired: true });
-    recipes.addResourceSpec({ id: 'rs-hyd-assy',  name: 'Hyd Assembly',    defaultUnitOfResource: 'each' });
+    recipes.addResourceSpec({ id: 'rs-pu',        name: 'Power Unit',      defaultUnitOfResource: 'units', replenishmentRequired: true });
+    recipes.addResourceSpec({ id: 'rs-hyd-assy',  name: 'Hyd Assembly',    defaultUnitOfResource: 'units' });
     // Finished goods
     recipes.addResourceSpec({
-        id: 'rs-lifetrac', name: 'LifeTrac', defaultUnitOfResource: 'each', replenishmentRequired: true,
+        id: 'rs-lifetrac', name: 'LifeTrac', defaultUnitOfResource: 'units', replenishmentRequired: true,
         positioningAnalysis: {
             customerToleranceTimeDays: 7,      // customer will wait up to one week
             marketPotentialLeadTimeDays: 14,   // competitor lead time (benchmark)
@@ -80,22 +80,22 @@ export function seedExample(): void {
     // stage on output + matching input marks the decoupling-point boundary for legLeadTime()
     recipes.addRecipeFlow({ id: 'rf-fab-steel',    action: 'consume', resourceConformsTo: 'rs-steel',    resourceQuantity: { hasNumericalValue: 20, hasUnit: 'm'    }, recipeInputOf:  'rp-fab'   });
     recipes.addRecipeFlow({ id: 'rf-fab-rod',      action: 'consume', resourceConformsTo: 'rs-weld-rod', resourceQuantity: { hasNumericalValue: 2,  hasUnit: 'kg'   }, recipeInputOf:  'rp-fab'   });
-    recipes.addRecipeFlow({ id: 'rf-fab-out',      action: 'produce', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeOutputOf: 'rp-fab',   stage: 'ps-fab-frame' });
+    recipes.addRecipeFlow({ id: 'rf-fab-out',      action: 'produce', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, recipeOutputOf: 'rp-fab',   stage: 'ps-fab-frame' });
     // 2. Power Unit Assembly: engine + hyd-pump → power-unit
-    recipes.addRecipeFlow({ id: 'rf-pu-engine',    action: 'consume', resourceConformsTo: 'rs-engine',   resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeInputOf:  'rp-pu'    });
-    recipes.addRecipeFlow({ id: 'rf-pu-pump',      action: 'consume', resourceConformsTo: 'rs-hyd-pump', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeInputOf:  'rp-pu'    });
-    recipes.addRecipeFlow({ id: 'rf-pu-out',       action: 'produce', resourceConformsTo: 'rs-pu',       resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeOutputOf: 'rp-pu'    });
+    recipes.addRecipeFlow({ id: 'rf-pu-engine',    action: 'consume', resourceConformsTo: 'rs-engine',   resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, recipeInputOf:  'rp-pu'    });
+    recipes.addRecipeFlow({ id: 'rf-pu-pump',      action: 'consume', resourceConformsTo: 'rs-hyd-pump', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, recipeInputOf:  'rp-pu'    });
+    recipes.addRecipeFlow({ id: 'rf-pu-out',       action: 'produce', resourceConformsTo: 'rs-pu',       resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, recipeOutputOf: 'rp-pu'    });
     // 3. Hydraulics Assembly: hoses + fluid → hyd-assy
     recipes.addRecipeFlow({ id: 'rf-hyd-hose',     action: 'consume', resourceConformsTo: 'rs-hyd-hose', resourceQuantity: { hasNumericalValue: 10, hasUnit: 'm'    }, recipeInputOf:  'rp-hyd'   });
     recipes.addRecipeFlow({ id: 'rf-hyd-fluid',    action: 'consume', resourceConformsTo: 'rs-hyd-fluid',resourceQuantity: { hasNumericalValue: 20, hasUnit: 'L'    }, recipeInputOf:  'rp-hyd'   });
-    recipes.addRecipeFlow({ id: 'rf-hyd-out',      action: 'produce', resourceConformsTo: 'rs-hyd-assy', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeOutputOf: 'rp-hyd'   });
+    recipes.addRecipeFlow({ id: 'rf-hyd-out',      action: 'produce', resourceConformsTo: 'rs-hyd-assy', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, recipeOutputOf: 'rp-hyd'   });
     // 4. Final Assembly: frame + PU + hyd-assy + 4×wheels → LifeTrac
     // stage on rf-final-frame matches rf-fab-out so recipeLeadTime can trace the predecessor edge
-    recipes.addRecipeFlow({ id: 'rf-final-frame',  action: 'consume', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeInputOf:  'rp-final', stage: 'ps-fab-frame' });
-    recipes.addRecipeFlow({ id: 'rf-final-pu',     action: 'consume', resourceConformsTo: 'rs-pu',       resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeInputOf:  'rp-final' });
-    recipes.addRecipeFlow({ id: 'rf-final-hyd',    action: 'consume', resourceConformsTo: 'rs-hyd-assy', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeInputOf:  'rp-final' });
-    recipes.addRecipeFlow({ id: 'rf-final-wheels', action: 'consume', resourceConformsTo: 'rs-wheel',    resourceQuantity: { hasNumericalValue: 4,  hasUnit: 'each' }, recipeInputOf:  'rp-final' });
-    recipes.addRecipeFlow({ id: 'rf-final-out',    action: 'produce', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, recipeOutputOf: 'rp-final' });
+    recipes.addRecipeFlow({ id: 'rf-final-frame',  action: 'consume', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, recipeInputOf:  'rp-final', stage: 'ps-fab-frame' });
+    recipes.addRecipeFlow({ id: 'rf-final-pu',     action: 'consume', resourceConformsTo: 'rs-pu',       resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, recipeInputOf:  'rp-final' });
+    recipes.addRecipeFlow({ id: 'rf-final-hyd',    action: 'consume', resourceConformsTo: 'rs-hyd-assy', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, recipeInputOf:  'rp-final' });
+    recipes.addRecipeFlow({ id: 'rf-final-wheels', action: 'consume', resourceConformsTo: 'rs-wheel',    resourceQuantity: { hasNumericalValue: 4,  hasUnit: 'units' }, recipeInputOf:  'rp-final' });
+    recipes.addRecipeFlow({ id: 'rf-final-out',    action: 'produce', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, recipeOutputOf: 'rp-final' });
 
     // ── KNOWLEDGE: Recipe ─────────────────────────────────────────────────────
     recipes.addRecipe({
@@ -115,7 +115,12 @@ export function seedExample(): void {
         vrd: 'medium',
         vrs: 'low',
         variabilityFactor: deriveVariabilityFactor('medium', 'low'), // 0.25
+        leadTimeCategory: 'short',      // LTF 1.0 is within [0.61, 1.00]
+        variabilityCategory: 'low',     // VF 0.25 is within [0.00, 0.40]
+        code: 'MSL',
     };
+
+    upsertBufferProfile(mfgProfile);
 
     // DLT from recipe graph — Frame leg: start of recipe → ps-fab-frame output
     // (fab is the only process before the first decoupling point)
@@ -125,21 +130,21 @@ export function seedExample(): void {
     const tractorDltDays = recipeLeadTime('lifetrac-recipe', recipes);
 
     // Welded Frame buffer — decoupling point, ADU 0.5/day, DLT computed from recipe
-    const frameZone = computeBufferZone(mfgProfile, 0.5, 'each', frameDltDays, 1, 'each');
+    const frameZone = computeBufferZone(mfgProfile, 0.5, 'units', frameDltDays, 1, 'units');
     bufferZones.addBufferZone({
         id: 'bz-frame', specId: 'rs-frame', profileId: 'mfg-medium',
         bufferClassification: 'replenished',
-        adu: 0.5, aduUnit: 'each', dltDays: frameDltDays, moq: 1, moqUnit: 'each',
+        adu: 0.5, aduUnit: 'units', dltDays: frameDltDays, moq: 1, moqUnit: 'units',
         tor: frameZone.tor, toy: frameZone.toy, tog: frameZone.tog,
         lastComputedAt: new Date().toISOString(),
     });
     // LifeTrac finished goods buffer — ADU 0.2/day, DLT = full critical-path days
-    const tractorZone = computeBufferZone(mfgProfile, 0.2, 'each', tractorDltDays, 1, 'each');
+    const tractorZone = computeBufferZone(mfgProfile, 0.2, 'units', tractorDltDays, 1, 'units');
     bufferZones.addBufferZone({
         id: 'bz-lifetrac', specId: 'rs-lifetrac', profileId: 'mfg-medium',
         bufferClassification: 'replenished',
         atLocation: 'loc-ose-fab',
-        adu: 0.2, aduUnit: 'each', dltDays: tractorDltDays, moq: 1, moqUnit: 'each',
+        adu: 0.2, aduUnit: 'units', dltDays: tractorDltDays, moq: 1, moqUnit: 'units',
         tor: tractorZone.tor, toy: tractorZone.toy, tog: tractorZone.tog,
         lastComputedAt: new Date().toISOString(),
     });
@@ -170,25 +175,28 @@ export function seedExample(): void {
         code: 'PLH',
     };
 
+    upsertBufferProfile(pslProfile);
+    upsertBufferProfile(plhProfile);
+
     // Min-max zone — Wheel Assembly (purchased, short LT, low variability → PSL)
     // TOY = TOR after computeMinMaxBuffer(); no yellow zone.
-    recipes.addResourceSpec({ id: 'rs-wheel-asm', name: 'Wheel Assembly (Min-Max)', defaultUnitOfResource: 'each' });
-    const wheelAsmZone = computeMinMaxBuffer(pslProfile, 8, 'each', 3, 0, 'each');
+    recipes.addResourceSpec({ id: 'rs-wheel-asm', name: 'Wheel Assembly (Min-Max)', defaultUnitOfResource: 'units' });
+    const wheelAsmZone = computeMinMaxBuffer(pslProfile, 8, 'units', 3, 0, 'units');
     bufferZones.addBufferZone({
         id: 'bz-wheel-asm', specId: 'rs-wheel-asm', profileId: 'purch-short-low',
         bufferClassification: 'min_max',
-        adu: 8, aduUnit: 'each', dltDays: 3, moq: 0, moqUnit: 'each',
+        adu: 8, aduUnit: 'units', dltDays: 3, moq: 0, moqUnit: 'units',
         tor: wheelAsmZone.tor, toy: wheelAsmZone.toy, tog: wheelAsmZone.tog,
         lastComputedAt: new Date().toISOString(),
     });
 
     // Replenished-override zone — Hydraulic Pump (contractual / constrained supply)
     // TOR/TOY/TOG are user-set and must not be overwritten by recalibrateBufferZone().
-    recipes.addResourceSpec({ id: 'rs-hydraulic-pump', name: 'Hydraulic Pump (Contract)', defaultUnitOfResource: 'each' });
+    recipes.addResourceSpec({ id: 'rs-hydraulic-pump', name: 'Hydraulic Pump (Contract)', defaultUnitOfResource: 'units' });
     bufferZones.addBufferZone({
         id: 'bz-hydraulic-pump', specId: 'rs-hydraulic-pump', profileId: 'purch-long-high',
         bufferClassification: 'replenished_override',
-        adu: 2, aduUnit: 'each', dltDays: 14, moq: 5, moqUnit: 'each',
+        adu: 2, aduUnit: 'units', dltDays: 14, moq: 5, moqUnit: 'units',
         tor: 10, toy: 25, tog: 40,  // user-defined; recalibrateBufferZone() will not touch these
         lastComputedAt: new Date().toISOString(),
     });
@@ -212,21 +220,21 @@ export function seedExample(): void {
     // proc-fab: consume steel + weld-rod, produce frame
     const cFabSteel = planner.addCommitment({ id: 'c-fab-steel', action: 'consume', resourceConformsTo: 'rs-steel',    resourceQuantity: { hasNumericalValue: 20, hasUnit: 'm'    }, inputOf:  'proc-fab',   provider: 'steel-co', receiver: 'ose', plannedWithin: 'sprint-1' });
     const cFabRod   = planner.addCommitment({ id: 'c-fab-rod',   action: 'consume', resourceConformsTo: 'rs-weld-rod', resourceQuantity: { hasNumericalValue: 2,  hasUnit: 'kg'   }, inputOf:  'proc-fab',   provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
-    const cFabOut   = planner.addCommitment({ id: 'c-fab-out',   action: 'produce', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, outputOf: 'proc-fab',   provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cFabOut   = planner.addCommitment({ id: 'c-fab-out',   action: 'produce', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, outputOf: 'proc-fab',   provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
     // proc-pu: consume engine + hyd-pump, produce power-unit
-    const cPuEngine = planner.addCommitment({ id: 'c-pu-engine', action: 'consume', resourceConformsTo: 'rs-engine',   resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, inputOf:  'proc-pu',    provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
-    const cPuPump   = planner.addCommitment({ id: 'c-pu-pump',   action: 'consume', resourceConformsTo: 'rs-hyd-pump', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, inputOf:  'proc-pu',    provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
-    const cPuOut    = planner.addCommitment({ id: 'c-pu-out',    action: 'produce', resourceConformsTo: 'rs-pu',       resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, outputOf: 'proc-pu',    provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cPuEngine = planner.addCommitment({ id: 'c-pu-engine', action: 'consume', resourceConformsTo: 'rs-engine',   resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, inputOf:  'proc-pu',    provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cPuPump   = planner.addCommitment({ id: 'c-pu-pump',   action: 'consume', resourceConformsTo: 'rs-hyd-pump', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, inputOf:  'proc-pu',    provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cPuOut    = planner.addCommitment({ id: 'c-pu-out',    action: 'produce', resourceConformsTo: 'rs-pu',       resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, outputOf: 'proc-pu',    provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
     // proc-hyd: consume hoses + fluid, produce hyd-assy
     const cHydHose  = planner.addCommitment({ id: 'c-hyd-hose',  action: 'consume', resourceConformsTo: 'rs-hyd-hose', resourceQuantity: { hasNumericalValue: 10, hasUnit: 'm'    }, inputOf:  'proc-hyd',   provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
     const cHydFluid = planner.addCommitment({ id: 'c-hyd-fluid', action: 'consume', resourceConformsTo: 'rs-hyd-fluid',resourceQuantity: { hasNumericalValue: 20, hasUnit: 'L'    }, inputOf:  'proc-hyd',   provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
-    const cHydOut   = planner.addCommitment({ id: 'c-hyd-out',   action: 'produce', resourceConformsTo: 'rs-hyd-assy', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, outputOf: 'proc-hyd',   provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cHydOut   = planner.addCommitment({ id: 'c-hyd-out',   action: 'produce', resourceConformsTo: 'rs-hyd-assy', resourceQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, outputOf: 'proc-hyd',   provider: 'ose',      receiver: 'ose', plannedWithin: 'sprint-1' });
     // proc-final: consume frame + PU + hyd-assy + 4×wheels, produce LifeTrac
-    const cFinalFrame  = planner.addCommitment({ id: 'c-final-frame',  action: 'consume', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, inputOf:  'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
-    const cFinalPu     = planner.addCommitment({ id: 'c-final-pu',     action: 'consume', resourceConformsTo: 'rs-pu',       resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, inputOf:  'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
-    const cFinalHyd    = planner.addCommitment({ id: 'c-final-hyd',    action: 'consume', resourceConformsTo: 'rs-hyd-assy', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, inputOf:  'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
-    const cFinalWheels = planner.addCommitment({ id: 'c-final-wheels', action: 'consume', resourceConformsTo: 'rs-wheel',    resourceQuantity: { hasNumericalValue: 4, hasUnit: 'each' }, inputOf:  'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
-    const cFinalOut    = planner.addCommitment({ id: 'c-final-out',    action: 'produce', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, outputOf: 'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cFinalFrame  = planner.addCommitment({ id: 'c-final-frame',  action: 'consume', resourceConformsTo: 'rs-frame',    resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, inputOf:  'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cFinalPu     = planner.addCommitment({ id: 'c-final-pu',     action: 'consume', resourceConformsTo: 'rs-pu',       resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, inputOf:  'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cFinalHyd    = planner.addCommitment({ id: 'c-final-hyd',    action: 'consume', resourceConformsTo: 'rs-hyd-assy', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, inputOf:  'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cFinalWheels = planner.addCommitment({ id: 'c-final-wheels', action: 'consume', resourceConformsTo: 'rs-wheel',    resourceQuantity: { hasNumericalValue: 4, hasUnit: 'units' }, inputOf:  'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cFinalOut    = planner.addCommitment({ id: 'c-final-out',    action: 'produce', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, outputOf: 'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
 
     // Register all commitments with observer for fulfillment tracking
     for (const c of [cFabSteel, cFabRod, cFabOut, cPuEngine, cPuPump, cPuOut,
@@ -250,13 +258,13 @@ export function seedExample(): void {
     // Raw materials — steel is short (15m on hand vs 20m needed)
     observer.seedResource({ id: 'res-steel',     conformsTo: 'rs-steel',     accountingQuantity: { hasNumericalValue: 15, hasUnit: 'm'    }, onhandQuantity: { hasNumericalValue: 15, hasUnit: 'm'    }, primaryAccountable: 'ose' });
     observer.seedResource({ id: 'res-weld-rod',  conformsTo: 'rs-weld-rod',  accountingQuantity: { hasNumericalValue: 5,  hasUnit: 'kg'   }, onhandQuantity: { hasNumericalValue: 5,  hasUnit: 'kg'   }, primaryAccountable: 'ose' });
-    observer.seedResource({ id: 'res-engine',    conformsTo: 'rs-engine',    accountingQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, onhandQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, primaryAccountable: 'ose' });
-    observer.seedResource({ id: 'res-hyd-pump',  conformsTo: 'rs-hyd-pump',  accountingQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, onhandQuantity: { hasNumericalValue: 1,  hasUnit: 'each' }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-engine',    conformsTo: 'rs-engine',    accountingQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-hyd-pump',  conformsTo: 'rs-hyd-pump',  accountingQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, primaryAccountable: 'ose' });
     observer.seedResource({ id: 'res-hyd-hose',  conformsTo: 'rs-hyd-hose',  accountingQuantity: { hasNumericalValue: 12, hasUnit: 'm'    }, onhandQuantity: { hasNumericalValue: 12, hasUnit: 'm'    }, primaryAccountable: 'ose' });
     observer.seedResource({ id: 'res-hyd-fluid', conformsTo: 'rs-hyd-fluid', accountingQuantity: { hasNumericalValue: 20, hasUnit: 'L'    }, onhandQuantity: { hasNumericalValue: 20, hasUnit: 'L'    }, primaryAccountable: 'ose' });
-    observer.seedResource({ id: 'res-wheel',     conformsTo: 'rs-wheel',     accountingQuantity: { hasNumericalValue: 4,  hasUnit: 'each' }, onhandQuantity: { hasNumericalValue: 4,  hasUnit: 'each' }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-wheel',     conformsTo: 'rs-wheel',     accountingQuantity: { hasNumericalValue: 4,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 4,  hasUnit: 'units' }, primaryAccountable: 'ose' });
     // Intermediate output — frame starts at zero, gets produced by event below
-    observer.seedResource({ id: 'res-frame',     conformsTo: 'rs-frame',     accountingQuantity: { hasNumericalValue: 0,  hasUnit: 'each' }, onhandQuantity: { hasNumericalValue: 0,  hasUnit: 'each' }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-frame',     conformsTo: 'rs-frame',     accountingQuantity: { hasNumericalValue: 0,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 0,  hasUnit: 'units' }, primaryAccountable: 'ose' });
 
     // ── OBSERVATION: Events ───────────────────────────────────────────────────
     // Frame fabrication is complete — proc-fab has delivered its output
@@ -266,7 +274,7 @@ export function seedExample(): void {
         action: 'produce',
         resourceInventoriedAs: 'res-frame',
         resourceConformsTo:    'rs-frame',
-        resourceQuantity:      { hasNumericalValue: 1, hasUnit: 'each' },
+        resourceQuantity:      { hasNumericalValue: 1, hasUnit: 'units' },
         outputOf:   'proc-fab',
         fulfills:   'c-fab-out',
         provider:   'ose',
@@ -326,29 +334,29 @@ export function seedExample(): void {
     observer.seedResource({
         id: 'res-lifetrac-fab', conformsTo: 'rs-lifetrac',
         name: 'LifeTrac — OSE Fab Lab',
-        accountingQuantity: { hasNumericalValue: 3, hasUnit: 'each' },
-        onhandQuantity:     { hasNumericalValue: 3, hasUnit: 'each' },
+        accountingQuantity: { hasNumericalValue: 3, hasUnit: 'units' },
+        onhandQuantity:     { hasNumericalValue: 3, hasUnit: 'units' },
         currentLocation: 'loc-ose-fab', primaryAccountable: 'ose',
     });
     observer.seedResource({
         id: 'res-lifetrac-hub', conformsTo: 'rs-lifetrac',
         name: 'LifeTrac — Midwest Hub DC',
-        accountingQuantity: { hasNumericalValue: 0, hasUnit: 'each' },
-        onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'each' },
+        accountingQuantity: { hasNumericalValue: 0, hasUnit: 'units' },
+        onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'units' },
         currentLocation: 'loc-hub-midwest', primaryAccountable: 'hub-midwest',
     });
     observer.seedResource({
         id: 'res-lifetrac-east', conformsTo: 'rs-lifetrac',
         name: 'LifeTrac — East Region',
-        accountingQuantity: { hasNumericalValue: 0, hasUnit: 'each' },
-        onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'each' },
+        accountingQuantity: { hasNumericalValue: 0, hasUnit: 'units' },
+        onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'units' },
         currentLocation: 'loc-region-east', primaryAccountable: 'wh-east',
     });
     observer.seedResource({
         id: 'res-lifetrac-west', conformsTo: 'rs-lifetrac',
         name: 'LifeTrac — West Region',
-        accountingQuantity: { hasNumericalValue: 0, hasUnit: 'each' },
-        onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'each' },
+        accountingQuantity: { hasNumericalValue: 0, hasUnit: 'units' },
+        onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'units' },
         currentLocation: 'loc-region-west', primaryAccountable: 'wh-west',
     });
 
@@ -356,20 +364,20 @@ export function seedExample(): void {
     // Sourcing unit → Hub (8h transit)
     const rpFabHub  = recipes.addRecipeProcess({ id: 'rp-tr-fab-hub',  name: 'Fab to Hub Leg',  hasDuration: { hasNumericalValue: 8, hasUnit: 'h' } });
     recipes.addRecipe({ id: 'tr-fab-to-hub',   name: 'LifeTrac: Fab→Hub',   recipeProcesses: [rpFabHub.id]  });
-    recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeInputOf:  rpFabHub.id });
-    recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeOutputOf: rpFabHub.id });
+    recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, recipeInputOf:  rpFabHub.id });
+    recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, recipeOutputOf: rpFabHub.id });
 
     // Hub → East (4h transit)
     const rpHubEast = recipes.addRecipeProcess({ id: 'rp-tr-hub-east', name: 'Hub to East Leg', hasDuration: { hasNumericalValue: 4, hasUnit: 'h' } });
     recipes.addRecipe({ id: 'tr-hub-to-east', name: 'LifeTrac: Hub→East', recipeProcesses: [rpHubEast.id] });
-    recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeInputOf:  rpHubEast.id });
-    recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeOutputOf: rpHubEast.id });
+    recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, recipeInputOf:  rpHubEast.id });
+    recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, recipeOutputOf: rpHubEast.id });
 
     // Hub → West (6h transit)
     const rpHubWest = recipes.addRecipeProcess({ id: 'rp-tr-hub-west', name: 'Hub to West Leg', hasDuration: { hasNumericalValue: 6, hasUnit: 'h' } });
     recipes.addRecipe({ id: 'tr-hub-to-west', name: 'LifeTrac: Hub→West', recipeProcesses: [rpHubWest.id] });
-    recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeInputOf:  rpHubWest.id });
-    recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' }, recipeOutputOf: rpHubWest.id });
+    recipes.addRecipeFlow({ action: 'pickup',  resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, recipeInputOf:  rpHubWest.id });
+    recipes.addRecipeFlow({ action: 'dropoff', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, recipeOutputOf: rpHubWest.id });
 
     // DLT computation for distribution tiers
     const fabToHubDays  = recipeLeadTime('tr-fab-to-hub',  recipes); // 8h = 0.333d
@@ -384,6 +392,9 @@ export function seedExample(): void {
         itemType: 'Distributed', leadTimeFactor: 0.5,
         vrd: 'low', vrs: 'low',
         variabilityFactor: deriveVariabilityFactor('low', 'low'), // 0.10
+        leadTimeCategory: 'medium',     // LTF 0.5 is within [0.41, 0.60]
+        variabilityCategory: 'low',     // VF 0.10 is within [0.00, 0.40]
+        code: 'DML',
     };
     // Regional: local demand → higher CV → medium vrd
     const distProfileRegional: BufferProfile = {
@@ -391,44 +402,50 @@ export function seedExample(): void {
         itemType: 'Distributed', leadTimeFactor: 0.5,
         vrd: 'medium', vrs: 'low',
         variabilityFactor: deriveVariabilityFactor('medium', 'low'), // 0.25
+        leadTimeCategory: 'medium',     // LTF 0.5 is within [0.41, 0.60]
+        variabilityCategory: 'low',     // VF 0.25 is within [0.00, 0.40]
+        code: 'DML',
     };
+
+    upsertBufferProfile(distProfileHub);
+    upsertBufferProfile(distProfileRegional);
 
     // Location-scoped buffer zones
     // Hub (ADU 0.5/day, serves 2 regions; DLT = mfg + inbound transit)
-    const hubZone  = computeBufferZone(distProfileHub, 0.5,  'each', hubDltDays,   1, 'each');
+    const hubZone  = computeBufferZone(distProfileHub, 0.5,  'units', hubDltDays,   1, 'units');
     bufferZones.addBufferZone({
         id: 'bz-lifetrac-hub', specId: 'rs-lifetrac', profileId: 'dist-hub',
         bufferClassification: 'replenished',
         atLocation: 'loc-hub-midwest',
         upstreamLocationId: 'loc-ose-fab',
         replenishmentRecipeId: 'tr-fab-to-hub',
-        adu: 0.5, aduUnit: 'each', dltDays: hubDltDays, moq: 1, moqUnit: 'each',
+        adu: 0.5, aduUnit: 'units', dltDays: hubDltDays, moq: 1, moqUnit: 'units',
         tor: hubZone.tor, toy: hubZone.toy, tog: hubZone.tog,
         lastComputedAt: new Date().toISOString(),
     });
 
     // East warehouse (ADU 0.2/day, DLT = hub→east transit only)
-    const eastZone = computeBufferZone(distProfileRegional, 0.2,  'each', hubToEastDays, 1, 'each');
+    const eastZone = computeBufferZone(distProfileRegional, 0.2,  'units', hubToEastDays, 1, 'units');
     bufferZones.addBufferZone({
         id: 'bz-lifetrac-east', specId: 'rs-lifetrac', profileId: 'dist-regional',
         bufferClassification: 'replenished',
         atLocation: 'loc-region-east',
         upstreamLocationId: 'loc-hub-midwest',
         replenishmentRecipeId: 'tr-hub-to-east',
-        adu: 0.2, aduUnit: 'each', dltDays: hubToEastDays, moq: 1, moqUnit: 'each',
+        adu: 0.2, aduUnit: 'units', dltDays: hubToEastDays, moq: 1, moqUnit: 'units',
         tor: eastZone.tor, toy: eastZone.toy, tog: eastZone.tog,
         lastComputedAt: new Date().toISOString(),
     });
 
     // West warehouse (ADU 0.15/day, DLT = hub→west transit only)
-    const westZone = computeBufferZone(distProfileRegional, 0.15, 'each', hubToWestDays, 1, 'each');
+    const westZone = computeBufferZone(distProfileRegional, 0.15, 'units', hubToWestDays, 1, 'units');
     bufferZones.addBufferZone({
         id: 'bz-lifetrac-west', specId: 'rs-lifetrac', profileId: 'dist-regional',
         bufferClassification: 'replenished',
         atLocation: 'loc-region-west',
         upstreamLocationId: 'loc-hub-midwest',
         replenishmentRecipeId: 'tr-hub-to-west',
-        adu: 0.15, aduUnit: 'each', dltDays: hubToWestDays, moq: 1, moqUnit: 'each',
+        adu: 0.15, aduUnit: 'units', dltDays: hubToWestDays, moq: 1, moqUnit: 'units',
         tor: westZone.tor, toy: westZone.toy, tog: westZone.tog,
         lastComputedAt: new Date().toISOString(),
     });
@@ -439,7 +456,7 @@ export function seedExample(): void {
         action: 'transfer',
         resourceInventoriedAs:   'res-lifetrac-fab',
         toResourceInventoriedAs: 'res-lifetrac-hub',
-        resourceQuantity: { hasNumericalValue: 3, hasUnit: 'each' },
+        resourceQuantity: { hasNumericalValue: 3, hasUnit: 'units' },
         provider: 'ose', receiver: 'hub-midwest',
         atLocation: 'loc-ose-fab', toLocation: 'loc-hub-midwest',
         hasPointInTime: new Date().toISOString(),
@@ -449,11 +466,61 @@ export function seedExample(): void {
         action: 'transfer',
         resourceInventoriedAs:   'res-lifetrac-hub',
         toResourceInventoriedAs: 'res-lifetrac-east',
-        resourceQuantity: { hasNumericalValue: 1, hasUnit: 'each' },
+        resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' },
         provider: 'hub-midwest', receiver: 'wh-east',
         atLocation: 'loc-hub-midwest', toLocation: 'loc-region-east',
         hasPointInTime: new Date().toISOString(),
     });
+
+    // ── ADU HISTORY: Synthetic consumption events (past 52 weeks) ─────────────
+    // These events have no resourceInventoriedAs so they don't affect current
+    // inventory; they exist purely to give computeADU() historical data to plot.
+    //
+    // LifeTrac ADU ≈ 0.20/day  → ~1.4 units/week, but as discrete integer sales
+    // Welded Frame ADU ≈ 0.50/day → ~3.5 units/week (used in frame fabrication runs)
+    const msPerDay = 86_400_000;
+    const now = Date.now();
+
+    // Seed pattern: each week pick a random-ish day for each sale.
+    // Use a deterministic pseudo-random sequence (LCG) so the chart looks natural
+    // but doesn't change between page loads.
+    let rng = 0x5eed_beef;
+    function nextRng(): number {
+        rng = (Math.imul(rng, 0x19660d) + 0x3c6ef35f) >>> 0;
+        return rng / 0xffff_ffff;
+    }
+
+    for (let week = 52; week >= 1; week--) {
+        const weekStart = now - week * 7 * msPerDay;
+
+        // LifeTrac sales: 0–2 per week (avg ≈ 1.4)
+        const ltracCount = nextRng() < 0.6 ? 1 : nextRng() < 0.5 ? 2 : 0;
+        for (let s = 0; s < ltracCount; s++) {
+            const dayOffset = Math.floor(nextRng() * 7);
+            observer.record({
+                id: `ev-hist-lt-w${week}-s${s}`,
+                action: 'consume',
+                resourceConformsTo: 'rs-lifetrac',
+                resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' },
+                provider: 'ose', receiver: 'ose',
+                hasPointInTime: new Date(weekStart + dayOffset * msPerDay).toISOString(),
+            });
+        }
+
+        // Frame consumption: 3–4 per week (avg ≈ 3.5)
+        const frameCount = 3 + (nextRng() < 0.5 ? 1 : 0);
+        for (let s = 0; s < frameCount; s++) {
+            const dayOffset = Math.floor(nextRng() * 7);
+            observer.record({
+                id: `ev-hist-fr-w${week}-s${s}`,
+                action: 'consume',
+                resourceConformsTo: 'rs-frame',
+                resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' },
+                provider: 'ose', receiver: 'ose',
+                hasPointInTime: new Date(weekStart + dayOffset * msPerDay).toISOString(),
+            });
+        }
+    }
 
     refresh();
 }

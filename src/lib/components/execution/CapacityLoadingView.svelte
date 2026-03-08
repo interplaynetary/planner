@@ -82,6 +82,7 @@
                 tor={gt * b.totalCapacityHours}
                 toy={yt * b.totalCapacityHours}
                 tog={b.totalCapacityHours}
+                invert={true}
               />
             </td>
             <td class="num mono">
@@ -107,6 +108,7 @@
               tor={0.8 * totalCap}
               toy={0.95 * totalCap}
               tog={totalCap}
+              invert={true}
             />
           </td>
           <td class="num mono">

@@ -23,6 +23,11 @@
     showLabels?: boolean;
     /** 'horizontal' fills left-to-right; 'vertical' fills bottom-to-top (funnel) */
     orientation?: "horizontal" | "vertical";
+    /**
+     * When true, inverts the colour mapping so that low values are green and
+     * high values are red (used for capacity utilisation bars).
+     */
+    invert?: boolean;
     /** Extra CSS class */
     class?: string;
   }
@@ -35,6 +40,7 @@
     unit = "",
     showLabels = false,
     orientation = "horizontal",
+    invert = false,
     class: cls = "",
   }: Props = $props();
 
@@ -79,9 +85,15 @@
     </div>
   {:else}
     <div class="track horizontal">
-      <div class="seg red" style="flex:{redPct}"></div>
-      <div class="seg yellow" style="flex:{yellowPct}"></div>
-      <div class="seg green" style="flex:{greenPct}"></div>
+      {#if invert}
+        <div class="seg green" style="flex:{redPct}"></div>
+        <div class="seg yellow" style="flex:{yellowPct}"></div>
+        <div class="seg red" style="flex:{greenPct}"></div>
+      {:else}
+        <div class="seg red" style="flex:{redPct}"></div>
+        <div class="seg yellow" style="flex:{yellowPct}"></div>
+        <div class="seg green" style="flex:{greenPct}"></div>
+      {/if}
       <div class="cursor h" style="left:{cursorPct}%"></div>
     </div>
     {#if showLabels}

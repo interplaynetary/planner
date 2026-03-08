@@ -18,8 +18,10 @@ import type {
     EconomicEvent,
     Agent,
     BufferZone,
+    BufferProfile,
     CapacityBuffer,
     SpatialThing,
+    DemandAdjustmentFactor,
 } from '$lib/schemas';
 
 // ── Underlying class instances (module-level singletons) ──────────────────
@@ -52,6 +54,8 @@ export const agentList               = $state<Agent[]>([]);
 export const bufferZoneList          = $state<BufferZone[]>([]);
 export const capacityBufferList      = $state<CapacityBuffer[]>([]);
 export const locationList            = $state<SpatialThing[]>([]);
+export const adjustmentFactorList    = $state<DemandAdjustmentFactor[]>([]);
+export const bufferProfileList       = $state<BufferProfile[]>([]);
 
 // ── refresh() — sync all $state arrays from the current store instances ──
 function syncArr<T>(target: T[], items: T[]): void {
@@ -72,6 +76,7 @@ export function refresh() {
     syncArr(bufferZoneList,          bufferZones.allBufferZones());
     syncArr(capacityBufferList,      capacityBuffers.allBuffers());
     syncArr(locationList,            locations.allLocations());
+    // adjustmentFactorList is managed directly (no backing store class)
 }
 
 // Auto-refresh on any Observer event
@@ -88,5 +93,21 @@ export function resetStores() {
     planner              = new PlanStore(registry);
     observer             = new Observer(registry);
     observer.subscribe(() => refresh());
+    adjustmentFactorList.splice(0, adjustmentFactorList.length);
+    bufferProfileList.splice(0, bufferProfileList.length);
     refresh();
+}
+
+/** Add or replace an adjustment factor by ID. */
+export function upsertAdjustmentFactor(f: DemandAdjustmentFactor): void {
+    const idx = adjustmentFactorList.findIndex(a => a.id === f.id);
+    if (idx >= 0) adjustmentFactorList.splice(idx, 1, f);
+    else adjustmentFactorList.push(f);
+}
+
+/** Add or replace a buffer profile by ID. */
+export function upsertBufferProfile(p: BufferProfile): void {
+    const idx = bufferProfileList.findIndex(b => b.id === p.id);
+    if (idx >= 0) bufferProfileList.splice(idx, 1, p);
+    else bufferProfileList.push(p);
 }

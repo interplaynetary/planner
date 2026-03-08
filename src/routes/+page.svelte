@@ -14,14 +14,23 @@
     planList, processList, commitmentList, intentList,
     resourceList, eventList, agentList, bufferZoneList,
     capacityBufferList, bufferZones, refresh,
+    adjustmentFactorList, upsertAdjustmentFactor,
+    bufferProfileList,
   } from '$lib/vf-stores.svelte';
+  import BufferProfileMatrix         from '$lib/components/buffers/BufferProfileMatrix.svelte';
+  import PartProfileTable            from '$lib/components/buffers/PartProfileTable.svelte';
+  import ADUComparisonChart          from '$lib/components/buffers/ADUComparisonChart.svelte';
+  import BufferCalculationBreakdown  from '$lib/components/buffers/BufferCalculationBreakdown.svelte';
   import { seedExample } from '$lib/vf-seed';
   import { resetStores } from '$lib/vf-stores.svelte';
-  import { bufferHealthHistory } from '$lib/algorithms/ddmrp';
-  import BufferHealthRunChart   from '$lib/components/execution/BufferHealthRunChart.svelte';
-  import CapacityLoadingView    from '$lib/components/execution/CapacityLoadingView.svelte';
-  import BufferOutlierPanel     from '$lib/components/execution/BufferOutlierPanel.svelte';
-  import ScenarioComparisonView from '$lib/components/planning/ScenarioComparisonView.svelte';
+  import { bufferHealthHistory, aggregateAdjustmentFactors } from '$lib/algorithms/ddmrp';
+  import BufferHealthRunChart      from '$lib/components/execution/BufferHealthRunChart.svelte';
+  import CapacityLoadingView       from '$lib/components/execution/CapacityLoadingView.svelte';
+  import BufferOutlierPanel        from '$lib/components/execution/BufferOutlierPanel.svelte';
+  import ScenarioComparisonView    from '$lib/components/planning/ScenarioComparisonView.svelte';
+  import AdjustmentFactorTimeline  from '$lib/components/execution/AdjustmentFactorTimeline.svelte';
+  import ZoneAdjustmentBreakdown   from '$lib/components/execution/ZoneAdjustmentBreakdown.svelte';
+  import DemandAdjustmentFactorEditor from '$lib/components/settings/DemandAdjustmentFactorEditor.svelte';
 
   // Build specName lookup for row components
   const specNameMap = $derived(
@@ -49,6 +58,28 @@
     if (!selectedBz) return [];
     return bufferHealthHistory(selectedBz.specId, eventList, selectedBzOnhand, selectedBz, _from30, _today);
   });
+
+  // Aggregated adjustment factors for the selected buffer zone
+  const selectedBzFactors = $derived.by(() => {
+    if (!selectedBz) return null;
+    return aggregateAdjustmentFactors(
+      adjustmentFactorList,
+      new Date(_today),
+      selectedBz.specId,
+      selectedBz.atLocation,
+    );
+  });
+
+  // Adjustment factors filtered to the selected spec
+  const selectedBzAdjFactors = $derived(
+    selectedBz
+      ? adjustmentFactorList.filter(f => f.specId === selectedBz.specId)
+      : []
+  );
+
+  // ── BUFFER PROFILES band state ─────────────────────────────────────────────
+  let selectedProfileCode = $state<string | null>(null);
+  let selectedSpecId = $state<string | null>(null);
 
   // All recipe processes and flows for the Knowledge band
   const allRecipeProcesses = $derived(
@@ -81,6 +112,7 @@
       <NetworkDiagram
         onbufferselect={(id) => { selectedBzId = id; }}
         selectedBzId={selectedBzId ?? undefined}
+        adjustments={adjustmentFactorList}
       />
     </div>
   </section>
@@ -145,6 +177,86 @@
               }
             }}
           />
+        </div>
+
+        <!-- Adjustment Factor Timeline -->
+        <div class="ddmrp-adj">
+          <AdjustmentFactorTimeline
+            factors={selectedBzAdjFactors}
+            bufferZone={selectedBz}
+            today={_today}
+          />
+        </div>
+
+        <!-- Zone Adjustment Breakdown -->
+        {#if selectedBzFactors}
+          <div class="ddmrp-zab">
+            <ZoneAdjustmentBreakdown
+              bufferZone={selectedBz}
+              factors={selectedBzFactors}
+            />
+          </div>
+        {/if}
+      {/if}
+
+      <!-- Adjustment Factor Editor -->
+      <div class="ddmrp-dafe">
+        <div class="col-header">Demand Adjustment Factors ({adjustmentFactorList.length})</div>
+        <DemandAdjustmentFactorEditor
+          factors={adjustmentFactorList}
+          specs={resourceSpecs}
+          onupsert={upsertAdjustmentFactor}
+        />
+      </div>
+    </div>
+  </section>
+
+  <!-- ── BUFFER PROFILES BAND ───────────────────────────────────────────────── -->
+  <section class="band profiles">
+    <div class="band-header">
+      <span class="band-title" style="color: #4fd1c5">BUFFER PROFILES</span>
+      <span class="counts">
+        <span class="count">Profiles({bufferProfileList.length})</span>
+        <span class="count">Parts({resourceSpecs.length})</span>
+      </span>
+      {#if selectedProfileCode}
+        <div class="actions">
+          <button onclick={() => { selectedProfileCode = null; selectedSpecId = null; }}>✕ Clear</button>
+        </div>
+      {/if}
+    </div>
+
+    <div class="profiles-body">
+      <BufferProfileMatrix
+        profiles={bufferProfileList}
+        specs={resourceSpecs}
+        zones={bufferZoneList}
+        selectedCode={selectedProfileCode}
+        onselect={(c) => { selectedProfileCode = c; selectedSpecId = null; }}
+      />
+
+      <div class="profiles-table">
+        <PartProfileTable
+          profiles={bufferProfileList}
+          specs={resourceSpecs}
+          zones={bufferZoneList}
+          filterProfileCode={selectedProfileCode}
+          onselect={(id) => { selectedSpecId = id; }}
+        />
+      </div>
+
+      {#if selectedSpecId}
+        {@const selZone = bufferZoneList.find(bz => bz.specId === selectedSpecId)}
+        {@const selProfile = bufferProfileList.find(p => p.id === selZone?.profileId)}
+        <div class="profiles-detail">
+          <ADUComparisonChart specId={selectedSpecId} events={eventList} intents={intentList} today={_today} />
+          {#if selZone && selProfile}
+            <BufferCalculationBreakdown
+              bufferZone={selZone}
+              profile={selProfile}
+              specName={specNameMap.get(selectedSpecId) ?? selectedSpecId}
+            />
+          {/if}
         </div>
       {/if}
     </div>
@@ -561,5 +673,57 @@
   .column.wide {
     min-width: 320px;
     max-height: none;
+  }
+
+  .ddmrp-adj {
+    flex: 0 0 auto;
+    min-width: 460px;
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-sm);
+  }
+
+  .ddmrp-zab {
+    flex: 0 0 auto;
+    min-width: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-sm);
+  }
+
+  .ddmrp-dafe {
+    flex: 0 0 auto;
+    min-width: 320px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-sm);
+  }
+
+  /* BUFFER PROFILES band */
+  .profiles-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-lg);
+    padding: var(--gap-md);
+  }
+
+  .profiles-table {
+    overflow-x: auto;
+  }
+
+  .profiles-detail {
+    display: flex;
+    gap: var(--gap-lg);
+    flex-wrap: wrap;
+    padding-top: var(--gap-sm);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    align-items: flex-start;
+  }
+
+  .profiles-detail > :global(*) {
+    flex: 1;
+    min-width: 300px;
+    max-width: 520px;
   }
 </style>

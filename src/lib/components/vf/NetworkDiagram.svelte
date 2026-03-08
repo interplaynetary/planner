@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Process, ProcessSpecification, BufferZone } from '$lib/schemas';
+  import type { Process, ProcessSpecification, BufferZone, DemandAdjustmentFactor } from '$lib/schemas';
   import { ACTION_DEFINITIONS } from '$lib/schemas';
   import {
     processSpecs, processList, commitmentList, eventList,
@@ -467,8 +467,35 @@
     onbufferselect?: (bzId: string) => void;
     /** Highlights the funnel matching this BufferZone.id. */
     selectedBzId?: string;
+    /** All DemandAdjustmentFactor records — used to badge active-adjustment funnels. */
+    adjustments?: DemandAdjustmentFactor[];
   }
-  let { onbufferselect, selectedBzId }: Props = $props();
+  let { onbufferselect, selectedBzId, adjustments = [] }: Props = $props();
+
+  const _todayStr = new Date().toISOString().slice(0, 10);
+
+  function isFactorActive(f: DemandAdjustmentFactor): boolean {
+    return f.validFrom <= _todayStr && f.validTo >= _todayStr;
+  }
+
+  /** Returns active factors for a given specId, or empty array. */
+  function activeForSpec(specId: string): DemandAdjustmentFactor[] {
+    return adjustments.filter(f => f.specId === specId && isFactorActive(f));
+  }
+
+  /** Badge color: demand (orange) takes precedence; zone=teal; leadTime=blue. */
+  function badgeColor(factors: DemandAdjustmentFactor[]): string {
+    if (factors.some(f => f.type === 'demand'))   return '#ed8936';
+    if (factors.some(f => f.type === 'zone'))     return '#4fd1c5';
+    return '#4299e1';
+  }
+
+  /** Badge label: show what's active. */
+  function badgeLabel(factors: DemandAdjustmentFactor[]): string {
+    if (factors.some(f => f.type === 'demand'))   return '×DAF';
+    if (factors.some(f => f.type === 'zone'))     return '×ZAF';
+    return '×LTAF';
+  }
 
   // ── Selection state ────────────────────────────────────────────────────────
   let selected = $state<{ type: EntityType; id: string } | null>(null);
@@ -827,12 +854,13 @@
 
         <!-- Buffer zone funnel (right of output card, when buffer exists) -->
         {#if bz}
-          {@const gF    = 1 - toy / tog}
-          {@const yF    = 1 - tor / tog}
-          {@const fx    = ox + CARD_W / 2 + 5}
-          {@const fy    = row.y - BUF_H / 2}
-          {@const curF  = 1 - Math.min(Math.max(row.onhand / tog, 0), 1)}
-          {@const curHW = BUF_W / 2 - curF * BUF_W / 4}
+          {@const gF     = 1 - toy / tog}
+          {@const yF     = 1 - tor / tog}
+          {@const fx     = ox + CARD_W / 2 + 5}
+          {@const fy     = row.y - BUF_H / 2}
+          {@const curF   = 1 - Math.min(Math.max(row.onhand / tog, 0), 1)}
+          {@const curHW  = BUF_W / 2 - curF * BUF_W / 4}
+          {@const active = activeForSpec(bz.specId)}
           <g
             transform="translate({fx + BUF_W / 2},{fy})"
             style="cursor:pointer"
@@ -861,6 +889,15 @@
                 stroke="#90cdf4" stroke-width="1.5"
                 style="pointer-events:none"
               />
+            {/if}
+            <!-- Active adjustment badge (top-right corner) -->
+            {#if active.length > 0}
+              {@const bc = badgeColor(active)}
+              {@const bl = badgeLabel(active)}
+              <rect x={BUF_W / 4 - 1} y={-8} width={bl.length * 4.5 + 3} height={8}
+                rx="1" fill={bc} opacity="0.9" style="pointer-events:none" />
+              <text x={BUF_W / 4 + 1} y={-1.5} font-size="5.5" fill="#0d0d0d" font-weight="700"
+                style="pointer-events:none">{bl}</text>
             {/if}
           </g>
         {/if}
@@ -920,12 +957,13 @@
         <!-- Buffer zone funnels (right of node, one per zone) -->
         {#each n.zones as zone, zi (zone.bz.id)}
           {@const { bz, specName, onhand, unit } = zone}
-          {@const gF    = 1 - bz.toy / bz.tog}
-          {@const yF    = 1 - bz.tor / bz.tog}
-          {@const fx    = n.x + DN_NODE_W / 2 + DN_BUF_GAP + BUF_W / 2 + zi * (BUF_W + 18)}
-          {@const fy    = n.y - BUF_H / 2}
-          {@const curF  = 1 - Math.min(Math.max(onhand / bz.tog, 0), 1)}
-          {@const curHW = BUF_W / 2 - curF * BUF_W / 4}
+          {@const gF     = 1 - bz.toy / bz.tog}
+          {@const yF     = 1 - bz.tor / bz.tog}
+          {@const fx     = n.x + DN_NODE_W / 2 + DN_BUF_GAP + BUF_W / 2 + zi * (BUF_W + 18)}
+          {@const fy     = n.y - BUF_H / 2}
+          {@const curF   = 1 - Math.min(Math.max(onhand / bz.tog, 0), 1)}
+          {@const curHW  = BUF_W / 2 - curF * BUF_W / 4}
+          {@const active = activeForSpec(bz.specId)}
           <g
             transform="translate({fx},{fy})"
             style="cursor:pointer" role="button" tabindex="0"
@@ -953,6 +991,15 @@
                 stroke="#90cdf4" stroke-width="1.5"
                 style="pointer-events:none"
               />
+            {/if}
+            <!-- Active adjustment badge -->
+            {#if active.length > 0}
+              {@const bc = badgeColor(active)}
+              {@const bl = badgeLabel(active)}
+              <rect x={BUF_W / 4 - 1} y={-8} width={bl.length * 4.5 + 3} height={8}
+                rx="1" fill={bc} opacity="0.9" style="pointer-events:none" />
+              <text x={BUF_W / 4 + 1} y={-1.5} font-size="5.5" fill="#0d0d0d" font-weight="700"
+                style="pointer-events:none">{bl}</text>
             {/if}
           </g>
           <text x={fx} y={fy + BUF_H + 10} text-anchor="middle" font-size="6.5"

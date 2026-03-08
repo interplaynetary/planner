@@ -81,10 +81,17 @@ export interface BufferZoneComputation {
 }
 
 export interface AggregatedFactors {
-    demandAdjFactor: number;    // product of all active 'demand' type factors
-    zoneAdjFactor: number;      // product of all active 'zone' type factors
-    leadTimeAdjFactor: number;  // product of all active 'leadTime' type factors
-    supplyOffsetDays: number;   // additive sum of all active supply offset days
+    demandAdjFactor: number;        // product of all active 'demand' type factors
+    /** Zone factors with no targetZone (legacy / backward compat) — applied to red zone. */
+    zoneAdjFactor: number;
+    /** Green zone ZAF: adjusts order size / order frequency (Ch 8 §8.2.2). */
+    greenZoneAdjFactor: number;
+    /** Yellow zone ZAF: adjusts demand coverage window (promo or supply disruption). */
+    yellowZoneAdjFactor: number;
+    /** Red zone ZAF: adjusts embedded safety (temporary volatility). */
+    redZoneAdjFactor: number;
+    leadTimeAdjFactor: number;      // product of all active 'leadTime' type factors
+    supplyOffsetDays: number;       // additive sum of all active supply offset days
 }
 
 export interface BufferStatusResult {
@@ -482,9 +489,12 @@ export function aggregateAdjustmentFactors(
 ): AggregatedFactors {
     const asOfStr = asOf.toISOString().slice(0, 10);
 
-    let demand      = 1;
-    let zone        = 1;
-    let leadTime    = 1;
+    let demand       = 1;
+    let zone         = 1;   // untagged zone factors → red zone (backward compat)
+    let greenZone    = 1;
+    let yellowZone   = 1;
+    let redZone      = 1;
+    let leadTime     = 1;
     let supplyOffset = 0;
 
     for (const adj of adjustments) {
@@ -496,14 +506,34 @@ export function aggregateAdjustmentFactors(
         if (adj.validFrom > asOfStr || adj.validTo < asOfStr) continue;
 
         switch (adj.type) {
-            case 'demand':   demand   *= adj.factor; break;
-            case 'zone':     zone     *= adj.factor; break;
-            case 'leadTime': leadTime *= adj.factor; break;
+            case 'demand':
+                demand *= adj.factor;
+                break;
+            case 'zone':
+                // Ch 8 §8.2.2: dispatch to the targeted zone; absent targetZone → red (backward compat).
+                switch (adj.targetZone) {
+                    case 'green':  greenZone  *= adj.factor; break;
+                    case 'yellow': yellowZone *= adj.factor; break;
+                    case 'red':    redZone    *= adj.factor; break;
+                    default:       zone       *= adj.factor; break;  // legacy / untagged → red
+                }
+                break;
+            case 'leadTime':
+                leadTime *= adj.factor;
+                break;
         }
         supplyOffset += adj.supplyOffsetDays ?? 0;
     }
 
-    return { demandAdjFactor: demand, zoneAdjFactor: zone, leadTimeAdjFactor: leadTime, supplyOffsetDays: supplyOffset };
+    return {
+        demandAdjFactor:      demand,
+        zoneAdjFactor:        zone,
+        greenZoneAdjFactor:   greenZone,
+        yellowZoneAdjFactor:  yellowZone,
+        redZoneAdjFactor:     redZone,
+        leadTimeAdjFactor:    leadTime,
+        supplyOffsetDays:     supplyOffset,
+    };
 }
 
 // =============================================================================
@@ -664,7 +694,17 @@ export function computeBufferZone(
     opts?: {
         demandAdjFactor?: number;
         leadTimeAdjFactor?: number;
+        /**
+         * Legacy / untagged zone adjustment factor — applied to red zone.
+         * Prefer the explicit per-zone fields below (Ch 8 §8.2.2).
+         */
         zoneAdjFactor?: number;
+        /** Red zone ZAF: adjusts embedded safety (temporary volatility). Multiplied with zoneAdjFactor. */
+        redZoneAdjFactor?: number;
+        /** Yellow zone ZAF: adjusts demand coverage window (promo or supply disruption). */
+        yellowZoneAdjFactor?: number;
+        /** Green zone ZAF: adjusts order size / order frequency (capacity setup optimization). */
+        greenZoneAdjFactor?: number;
         /** Per-part Desired/Imposed Order Cycle override (N-5). Preferred over profile.orderCycleDays. */
         docDays?: number;
     },
@@ -672,12 +712,18 @@ export function computeBufferZone(
     const effectiveADU = adu * (opts?.demandAdjFactor ?? 1);
     const effectiveDLT = dltDays * (opts?.leadTimeAdjFactor ?? 1);
 
+    // Ch 8 §8.2.2: per-zone ZAF dispatch.
+    // Untagged zone factor (zoneAdjFactor) retains backward-compat behaviour: applies to red zone.
+    const effectiveRedZAF    = (opts?.redZoneAdjFactor ?? 1) * (opts?.zoneAdjFactor ?? 1);
+    const effectiveYellowZAF = opts?.yellowZoneAdjFactor ?? 1;
+    const effectiveGreenZAF  = opts?.greenZoneAdjFactor  ?? 1;
+
     const redBase   = effectiveADU * effectiveDLT * profile.leadTimeFactor;
     const redSafety = redBase * profile.variabilityFactor;
-    const tor       = (redBase + redSafety) * (opts?.zoneAdjFactor ?? 1);
-    const toy       = tor + effectiveADU * effectiveDLT;
+    const tor       = (redBase + redSafety) * effectiveRedZAF;
+    const toy       = tor + effectiveADU * effectiveDLT * effectiveYellowZAF;
 
-    // Three-way max per Ptak & Smith Ch 7/8:
+    // Three-way max per Ptak & Smith Ch 7/8, scaled by green ZAF:
     //   order_cycle × ADU  (per-part docDays preferred over profile.orderCycleDays)
     //   DLT × ADU × LTF    (minimum DLT coverage = redBase)
     //   MOQ                (minimum batch size)
@@ -686,7 +732,7 @@ export function computeBufferZone(
         effectiveDOC != null ? effectiveADU * effectiveDOC : 0,
         redBase,
         moq,
-    );
+    ) * effectiveGreenZAF;
     const tog = toy + greenBase;
 
     return { effectiveADU, effectiveDLT, redBase, redSafety, tor, toy, tog };
@@ -715,6 +761,10 @@ export function computeMinMaxBuffer(
         demandAdjFactor?: number;
         leadTimeAdjFactor?: number;
         zoneAdjFactor?: number;
+        redZoneAdjFactor?: number;
+        yellowZoneAdjFactor?: number;
+        greenZoneAdjFactor?: number;
+        docDays?: number;
     },
 ): BufferZoneComputation {
     const result = computeBufferZone(profile, adu, aduUnit, dltDays, moq, moqUnit, opts);
@@ -1955,6 +2005,60 @@ export function deriveVariabilityFactor(vrd: VariabilityLevel, vrs: VariabilityL
         high:   { low: 0.50, medium: 0.75, high: 1.00 },
     };
     return table[vrd][vrs];
+}
+
+// =============================================================================
+// 25a. Ch 8 — cascadeComponentDAF + computeADUDifferential
+// =============================================================================
+
+/**
+ * Compute the effective DAF for a shared component whose parents have different DAFs
+ * applied (Ch 8 §8.2.1 Fig 8-24).
+ *
+ * Formula:
+ *   componentAdjustedADU = Σ(parentAdjustedADU_i × usageQtyPerParent_i)
+ *   componentDAF = componentAdjustedADU / componentBaseADU
+ *
+ * @param componentBaseADU      Component's base (unadjusted) ADU
+ * @param parentContributions   Array of { parentAdjustedADU, usageQty } — one entry per
+ *                              parent BOM line that consumes this component.
+ *                              `parentAdjustedADU` = parentBaseADU × parentDAF
+ *                              `usageQty` = qty of component per one parent unit (from RecipeProcess ingredient)
+ * @returns Effective DAF for the component (≥ 0)
+ *
+ * @example
+ * // Fig 8-24: FPA (ADU=100, DAF=2) and FPB (ADU=200, DAF=1) each use 2 of ICB.
+ * // ICB base ADU = (100×2) + (200×2) = 600.
+ * cascadeComponentDAF(600, [
+ *   { parentAdjustedADU: 200, usageQty: 2 },  // FPA: 100 × 2 × 2 = 400
+ *   { parentAdjustedADU: 200, usageQty: 2 },  // FPB: 200 × 1 × 2 = 400
+ * ]);
+ * // → 800 / 600 = 1.333…
+ */
+export function cascadeComponentDAF(
+    componentBaseADU: number,
+    parentContributions: Array<{ parentAdjustedADU: number; usageQty: number }>,
+): number {
+    const componentAdjustedADU = parentContributions.reduce(
+        (sum, { parentAdjustedADU, usageQty }) => sum + parentAdjustedADU * usageQty,
+        0,
+    );
+    return componentBaseADU > 0 ? componentAdjustedADU / componentBaseADU : 0;
+}
+
+/**
+ * ADU Differential — ratio of short-window ADU to long-window ADU (Ch 8 §8.2.1).
+ *
+ * Used as an explicit trigger for evaluating when to apply a DAF.
+ * A value significantly above 1.0 indicates a recent demand increase;
+ * below 1.0 indicates a recent demand decrease.
+ *
+ * @param shortWindowADU ADU computed over a short rolling window (e.g. 7 days)
+ * @param longWindowADU  ADU computed over the standard long window (e.g. 84 days)
+ * @returns Ratio of short / long ADU (≥ 0). Returns 0 when longWindowADU is 0.
+ */
+export function computeADUDifferential(shortWindowADU: number, longWindowADU: number): number {
+    return longWindowADU > 0 ? shortWindowADU / longWindowADU : 0;
 }
 
 // =============================================================================

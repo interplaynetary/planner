@@ -1495,6 +1495,14 @@ export const DemandAdjustmentFactorSchema = z.object({
     /** Which component of the buffer zone formula this factor adjusts */
     type: z.enum(['demand', 'zone', 'leadTime']),
     /**
+     * For type='zone' only: which specific zone this factor targets.
+     * - 'green'  → adjusts order size / order frequency (Ch 8 §8.2.2)
+     * - 'yellow' → adjusts demand coverage window (short promo or supply disruption)
+     * - 'red'    → adjusts embedded safety (temporary volatility)
+     * When absent, defaults to 'red' for backward compatibility.
+     */
+    targetZone: z.enum(['green', 'yellow', 'red']).optional(),
+    /**
      * Multiplier applied to the target component.
      * 1.0 = no change; 1.2 = 20% increase; 0.8 = 20% decrease.
      */
