@@ -18,26 +18,31 @@ import { computeBufferZone, computeMinMaxBuffer, recipeLeadTime, legLeadTime, de
 import type { BufferProfile } from '$lib/schemas';
 import {
     registry, recipes, bufferZones, capacityBuffers, agents, planner, observer, refresh,
-    locations, upsertBufferProfile,
+    locations, upsertBufferProfile, commune, resourcePriceSvc,
 } from '$lib/vf-stores.svelte';
 
 export function seedExample(): void {
     // ── AGENTS ────────────────────────────────────────────────────────────────
-    agents.addAgent({ id: 'ose',       type: 'Organization', name: 'OSE Fab Lab'       });
-    agents.addAgent({ id: 'steel-co',  type: 'Organization', name: 'Midwest Steel'     });
+    agents.addAgent({ id: 'ose',        type: 'Organization', name: 'OSE Fab Lab'      });
+    agents.addAgent({ id: 'steel-co',   type: 'Organization', name: 'Midwest Steel'    });
+    agents.addAgent({ id: 'agent-ose',  type: 'Person',       name: 'Ruzgar'           });
+    agents.addAgent({ id: 'agent-maya', type: 'Person',       name: 'Maya'             });
+    agents.addAgent({ id: 'agent-leo',  type: 'Person',       name: 'Leo'              });
+    agents.addAgent({ id: 'agent-sara', type: 'Person',       name: 'Sara'             });
+    agents.addAgent({ id: 'agent-kai',  type: 'Person',       name: 'Kai'              });
 
     // ── KNOWLEDGE: Resource Specifications ────────────────────────────────────
     // Raw materials
-    recipes.addResourceSpec({ id: 'rs-steel',     name: 'Steel Tubing',    defaultUnitOfResource: 'm'    });
-    recipes.addResourceSpec({ id: 'rs-weld-rod',  name: 'Welding Rod',     defaultUnitOfResource: 'kg'   });
-    recipes.addResourceSpec({ id: 'rs-engine',    name: 'Engine 18HP',     defaultUnitOfResource: 'units' });
-    recipes.addResourceSpec({ id: 'rs-hyd-pump',  name: 'Hydraulic Pump',  defaultUnitOfResource: 'units' });
-    recipes.addResourceSpec({ id: 'rs-hyd-hose',  name: 'Hydraulic Hose',  defaultUnitOfResource: 'm'    });
-    recipes.addResourceSpec({ id: 'rs-hyd-fluid', name: 'Hydraulic Fluid', defaultUnitOfResource: 'L'    });
-    recipes.addResourceSpec({ id: 'rs-wheel',     name: 'Wheel Assembly',  defaultUnitOfResource: 'units' });
+    recipes.addResourceSpec({ id: 'rs-steel',     name: 'Steel Tubing',    defaultUnitOfResource: 'm',     resourceClassifiedAs: ['communal'] });
+    recipes.addResourceSpec({ id: 'rs-weld-rod',  name: 'Welding Rod',     defaultUnitOfResource: 'kg',    resourceClassifiedAs: ['communal'] });
+    recipes.addResourceSpec({ id: 'rs-engine',    name: 'Engine 18HP',     defaultUnitOfResource: 'units', resourceClassifiedAs: ['communal'] });
+    recipes.addResourceSpec({ id: 'rs-hyd-pump',  name: 'Hydraulic Pump',  defaultUnitOfResource: 'units', resourceClassifiedAs: ['communal'] });
+    recipes.addResourceSpec({ id: 'rs-hyd-hose',  name: 'Hydraulic Hose',  defaultUnitOfResource: 'm',     resourceClassifiedAs: ['communal'] });
+    recipes.addResourceSpec({ id: 'rs-hyd-fluid', name: 'Hydraulic Fluid', defaultUnitOfResource: 'L',     resourceClassifiedAs: ['communal'] });
+    recipes.addResourceSpec({ id: 'rs-wheel',     name: 'Wheel Assembly',  defaultUnitOfResource: 'units', resourceClassifiedAs: ['communal'] });
     // Intermediate assemblies (decoupling points — DDMRP buffers)
     recipes.addResourceSpec({
-        id: 'rs-frame', name: 'Welded Frame', defaultUnitOfResource: 'units', replenishmentRequired: true,
+        id: 'rs-frame', name: 'Welded Frame', defaultUnitOfResource: 'units', replenishmentRequired: true, resourceClassifiedAs: ['communal'],
         positioningAnalysis: {
             customerToleranceTimeDays: 1,      // customer expects same-day frame availability
             salesOrderVisibilityHorizonDays: 3,
@@ -47,11 +52,11 @@ export function seedExample(): void {
             note: 'Decoupling point: isolates frame fabrication from final assembly variability.',
         },
     });
-    recipes.addResourceSpec({ id: 'rs-pu',        name: 'Power Unit',      defaultUnitOfResource: 'units', replenishmentRequired: true });
-    recipes.addResourceSpec({ id: 'rs-hyd-assy',  name: 'Hyd Assembly',    defaultUnitOfResource: 'units' });
+    recipes.addResourceSpec({ id: 'rs-pu',        name: 'Power Unit',      defaultUnitOfResource: 'units', replenishmentRequired: true, resourceClassifiedAs: ['communal'] });
+    recipes.addResourceSpec({ id: 'rs-hyd-assy',  name: 'Hyd Assembly',    defaultUnitOfResource: 'units', resourceClassifiedAs: ['communal'] });
     // Finished goods
     recipes.addResourceSpec({
-        id: 'rs-lifetrac', name: 'LifeTrac', defaultUnitOfResource: 'units', replenishmentRequired: true,
+        id: 'rs-lifetrac', name: 'LifeTrac', defaultUnitOfResource: 'units', replenishmentRequired: true, resourceClassifiedAs: ['communal'],
         positioningAnalysis: {
             customerToleranceTimeDays: 7,      // customer will wait up to one week
             marketPotentialLeadTimeDays: 14,   // competitor lead time (benchmark)
@@ -62,6 +67,12 @@ export function seedExample(): void {
             note: 'Finished-goods buffer; demand is project-driven with low variability.',
         },
     });
+
+    // ── KNOWLEDGE: Individual-claimable ResourceSpecs ─────────────────────────
+    recipes.addResourceSpec({ id: 'rs-bread',   name: 'Bread',          defaultUnitOfResource: 'loaves', resourceClassifiedAs: ['individual-claimable'] });
+    recipes.addResourceSpec({ id: 'rs-tools',   name: 'Hand Tools Kit', defaultUnitOfResource: 'kits',   resourceClassifiedAs: ['individual-claimable'] });
+    recipes.addResourceSpec({ id: 'rs-energy',  name: 'Energy Credits', defaultUnitOfResource: 'kWh',    resourceClassifiedAs: ['individual-claimable'] });
+    recipes.addResourceSpec({ id: 'rs-housing', name: 'Housing Units',  defaultUnitOfResource: 'nights', resourceClassifiedAs: ['individual-claimable'] });
 
     // ── KNOWLEDGE: Process Specifications ─────────────────────────────────────
     recipes.addProcessSpec({ id: 'ps-fab-frame',  name: 'Frame Fabrication',    isDecouplingPoint: true,                         bufferType: 'stock'    });
@@ -186,7 +197,7 @@ export function seedExample(): void {
 
     // Min-max zone — Wheel Assembly (purchased, short LT, low variability → PSL)
     // TOY = TOR after computeMinMaxBuffer(); no yellow zone.
-    recipes.addResourceSpec({ id: 'rs-wheel-asm', name: 'Wheel Assembly (Min-Max)', defaultUnitOfResource: 'units' });
+    recipes.addResourceSpec({ id: 'rs-wheel-asm', name: 'Wheel Assembly (Min-Max)', defaultUnitOfResource: 'units', resourceClassifiedAs: ['communal'] });
     const wheelAsmZone = computeMinMaxBuffer(pslProfile, 8, 'units', 3, 0, 'units');
     bufferZones.addBufferZone({
         id: 'bz-wheel-asm', specId: 'rs-wheel-asm', profileId: 'purch-short-low',
@@ -198,7 +209,7 @@ export function seedExample(): void {
 
     // Replenished-override zone — Hydraulic Pump (contractual / constrained supply)
     // TOR/TOY/TOG are user-set and must not be overwritten by recalibrateBufferZone().
-    recipes.addResourceSpec({ id: 'rs-hydraulic-pump', name: 'Hydraulic Pump (Contract)', defaultUnitOfResource: 'units' });
+    recipes.addResourceSpec({ id: 'rs-hydraulic-pump', name: 'Hydraulic Pump (Contract)', defaultUnitOfResource: 'units', resourceClassifiedAs: ['communal'] });
     bufferZones.addBufferZone({
         id: 'bz-hydraulic-pump', specId: 'rs-hydraulic-pump', profileId: 'purch-long-high',
         bufferClassification: 'replenished_override',
@@ -260,17 +271,54 @@ export function seedExample(): void {
         provider: 'steel-co',
     });
 
+    // ── COMMUNE: Pool + account setup ─────────────────────────────────────────
+    resourcePriceSvc.set('rs-bread',   5);
+    resourcePriceSvc.set('rs-tools',   25);
+    resourcePriceSvc.set('rs-energy',  2);
+    resourcePriceSvc.set('rs-housing', 15);
+
+    commune.addToPool('individual-claimable', 800);
+    commune.addToPool('communal', 1200);
+
+    // Member accounts — varied contribution histories
+    // welfare_allocation_rate = 0.15 → welfare_fund = 800 × 0.15 = 120 SVC
+    // available_claimable     = 800 - 120 = 680 SVC  (distributed by contribution share)
+    // sum_unmet_capacity      = 0.25 (Sara) + 0.15 (Kai) = 0.40
+    //
+    // Leo   (310 hrs, full):  310/890 × 680 = 236.9 SVC
+    // Ruzgar(240 hrs, full):  240/890 × 680 = 183.5 SVC
+    // Maya  (185 hrs, full):  185/890 × 680 = 141.3 SVC
+    // Sara  ( 95 hrs, 0.75):   95/890 × 680 + 0.25×(120/0.40) =  72.5 + 75  = 147.5 SVC
+    // Kai   ( 60 hrs, 0.85):   60/890 × 680 + 0.15×(120/0.40) =  45.8 + 45  =  90.8 SVC
+    commune.ensureAccount('agent-ose').addContribution(240);
+    commune.ensureAccount('agent-maya').addContribution(185);
+    commune.ensureAccount('agent-leo').addContribution(310);
+
+    const sara = commune.ensureAccount('agent-sara');
+    sara.addContribution(95);
+    sara.contribution_capacity_factor = 0.75;   // chronic illness, 25% unmet capacity
+
+    const kai = commune.ensureAccount('agent-kai');
+    kai.addContribution(60);
+    kai.contribution_capacity_factor  = 0.85;   // new joiner, still ramping up (15% unmet)
+
     // ── OBSERVATION: Seed on-hand inventory ───────────────────────────────────
     // Raw materials — steel is short (15m on hand vs 20m needed)
-    observer.seedResource({ id: 'res-steel',     conformsTo: 'rs-steel',     accountingQuantity: { hasNumericalValue: 15, hasUnit: 'm'    }, onhandQuantity: { hasNumericalValue: 15, hasUnit: 'm'    }, primaryAccountable: 'ose' });
-    observer.seedResource({ id: 'res-weld-rod',  conformsTo: 'rs-weld-rod',  accountingQuantity: { hasNumericalValue: 5,  hasUnit: 'kg'   }, onhandQuantity: { hasNumericalValue: 5,  hasUnit: 'kg'   }, primaryAccountable: 'ose' });
-    observer.seedResource({ id: 'res-engine',    conformsTo: 'rs-engine',    accountingQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, primaryAccountable: 'ose' });
-    observer.seedResource({ id: 'res-hyd-pump',  conformsTo: 'rs-hyd-pump',  accountingQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, primaryAccountable: 'ose' });
-    observer.seedResource({ id: 'res-hyd-hose',  conformsTo: 'rs-hyd-hose',  accountingQuantity: { hasNumericalValue: 12, hasUnit: 'm'    }, onhandQuantity: { hasNumericalValue: 12, hasUnit: 'm'    }, primaryAccountable: 'ose' });
-    observer.seedResource({ id: 'res-hyd-fluid', conformsTo: 'rs-hyd-fluid', accountingQuantity: { hasNumericalValue: 20, hasUnit: 'L'    }, onhandQuantity: { hasNumericalValue: 20, hasUnit: 'L'    }, primaryAccountable: 'ose' });
-    observer.seedResource({ id: 'res-wheel',     conformsTo: 'rs-wheel',     accountingQuantity: { hasNumericalValue: 4,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 4,  hasUnit: 'units' }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-steel',     conformsTo: 'rs-steel',     classifiedAs: ['communal'], accountingQuantity: { hasNumericalValue: 15, hasUnit: 'm'    }, onhandQuantity: { hasNumericalValue: 15, hasUnit: 'm'    }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-weld-rod',  conformsTo: 'rs-weld-rod',  classifiedAs: ['communal'], accountingQuantity: { hasNumericalValue: 5,  hasUnit: 'kg'   }, onhandQuantity: { hasNumericalValue: 5,  hasUnit: 'kg'   }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-engine',    conformsTo: 'rs-engine',    classifiedAs: ['communal'], accountingQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-hyd-pump',  conformsTo: 'rs-hyd-pump',  classifiedAs: ['communal'], accountingQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 1,  hasUnit: 'units' }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-hyd-hose',  conformsTo: 'rs-hyd-hose',  classifiedAs: ['communal'], accountingQuantity: { hasNumericalValue: 12, hasUnit: 'm'    }, onhandQuantity: { hasNumericalValue: 12, hasUnit: 'm'    }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-hyd-fluid', conformsTo: 'rs-hyd-fluid', classifiedAs: ['communal'], accountingQuantity: { hasNumericalValue: 20, hasUnit: 'L'    }, onhandQuantity: { hasNumericalValue: 20, hasUnit: 'L'    }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-wheel',     conformsTo: 'rs-wheel',     classifiedAs: ['communal'], accountingQuantity: { hasNumericalValue: 4,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 4,  hasUnit: 'units' }, primaryAccountable: 'ose' });
     // Intermediate output — frame starts at zero, gets produced by event below
-    observer.seedResource({ id: 'res-frame',     conformsTo: 'rs-frame',     accountingQuantity: { hasNumericalValue: 0,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 0,  hasUnit: 'units' }, primaryAccountable: 'ose' });
+    observer.seedResource({ id: 'res-frame',     conformsTo: 'rs-frame',     classifiedAs: ['communal'], accountingQuantity: { hasNumericalValue: 0,  hasUnit: 'units' }, onhandQuantity: { hasNumericalValue: 0,  hasUnit: 'units' }, primaryAccountable: 'ose' });
+
+    // Individual-claimable resources
+    observer.seedResource({ id: 'res-bread',   conformsTo: 'rs-bread',   classifiedAs: ['individual-claimable'],             primaryAccountable: 'ose', onhandQuantity: { hasNumericalValue: 48,  hasUnit: 'loaves'  }, accountingQuantity: { hasNumericalValue: 48,  hasUnit: 'loaves'  } });
+    observer.seedResource({ id: 'res-tools',   conformsTo: 'rs-tools',   classifiedAs: ['individual-claimable'],             primaryAccountable: 'ose', onhandQuantity: { hasNumericalValue: 12,  hasUnit: 'kits'    }, accountingQuantity: { hasNumericalValue: 12,  hasUnit: 'kits'    } });
+    observer.seedResource({ id: 'res-energy',  conformsTo: 'rs-energy',  classifiedAs: ['individual-claimable'],             primaryAccountable: 'ose', onhandQuantity: { hasNumericalValue: 640, hasUnit: 'kWh'     }, accountingQuantity: { hasNumericalValue: 640, hasUnit: 'kWh'     } });
+    observer.seedResource({ id: 'res-housing', conformsTo: 'rs-housing', classifiedAs: ['individual-claimable'],             primaryAccountable: 'ose', onhandQuantity: { hasNumericalValue: 20,  hasUnit: 'nights'  }, accountingQuantity: { hasNumericalValue: 20,  hasUnit: 'nights'  } });
 
     // ── OBSERVATION: Events ───────────────────────────────────────────────────
     // Frame fabrication is complete — proc-fab has delivered its output
@@ -307,12 +355,13 @@ export function seedExample(): void {
         id: 'rs-storage-facility',
         name: 'Distribution Storage Facility',
         defaultUnitOfResource: 'pallets',
+        resourceClassifiedAs: ['communal'],
     });
 
     // Warehouse EconomicResource instances
     observer.seedResource({
         id: 'res-hub-midwest', conformsTo: 'rs-storage-facility',
-        name: 'Midwest Hub DC',
+        name: 'Midwest Hub DC', classifiedAs: ['communal'],
         accountingQuantity: { hasNumericalValue: 100, hasUnit: 'pallets' },
         onhandQuantity:     { hasNumericalValue: 0,   hasUnit: 'pallets' },
         currentLocation:    'loc-hub-midwest',
@@ -320,7 +369,7 @@ export function seedExample(): void {
     });
     observer.seedResource({
         id: 'res-wh-east', conformsTo: 'rs-storage-facility',
-        name: 'East Region Warehouse',
+        name: 'East Region Warehouse', classifiedAs: ['communal'],
         accountingQuantity: { hasNumericalValue: 50, hasUnit: 'pallets' },
         onhandQuantity:     { hasNumericalValue: 0,  hasUnit: 'pallets' },
         currentLocation:    'loc-region-east',
@@ -328,7 +377,7 @@ export function seedExample(): void {
     });
     observer.seedResource({
         id: 'res-wh-west', conformsTo: 'rs-storage-facility',
-        name: 'West Region Warehouse',
+        name: 'West Region Warehouse', classifiedAs: ['communal'],
         accountingQuantity: { hasNumericalValue: 50, hasUnit: 'pallets' },
         onhandQuantity:     { hasNumericalValue: 0,  hasUnit: 'pallets' },
         currentLocation:    'loc-region-west',
@@ -339,28 +388,28 @@ export function seedExample(): void {
     // Opening balances represent prior-period inventory; events below build current state.
     observer.seedResource({
         id: 'res-lifetrac-fab', conformsTo: 'rs-lifetrac',
-        name: 'LifeTrac — OSE Fab Lab',
+        name: 'LifeTrac — OSE Fab Lab', classifiedAs: ['communal'],
         accountingQuantity: { hasNumericalValue: 3, hasUnit: 'units' },
         onhandQuantity:     { hasNumericalValue: 3, hasUnit: 'units' },
         currentLocation: 'loc-ose-fab', primaryAccountable: 'ose',
     });
     observer.seedResource({
         id: 'res-lifetrac-hub', conformsTo: 'rs-lifetrac',
-        name: 'LifeTrac — Midwest Hub DC',
+        name: 'LifeTrac — Midwest Hub DC', classifiedAs: ['communal'],
         accountingQuantity: { hasNumericalValue: 0, hasUnit: 'units' },
         onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'units' },
         currentLocation: 'loc-hub-midwest', primaryAccountable: 'hub-midwest',
     });
     observer.seedResource({
         id: 'res-lifetrac-east', conformsTo: 'rs-lifetrac',
-        name: 'LifeTrac — East Region',
+        name: 'LifeTrac — East Region', classifiedAs: ['communal'],
         accountingQuantity: { hasNumericalValue: 0, hasUnit: 'units' },
         onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'units' },
         currentLocation: 'loc-region-east', primaryAccountable: 'wh-east',
     });
     observer.seedResource({
         id: 'res-lifetrac-west', conformsTo: 'rs-lifetrac',
-        name: 'LifeTrac — West Region',
+        name: 'LifeTrac — West Region', classifiedAs: ['communal'],
         accountingQuantity: { hasNumericalValue: 0, hasUnit: 'units' },
         onhandQuantity:     { hasNumericalValue: 0, hasUnit: 'units' },
         currentLocation: 'loc-region-west', primaryAccountable: 'wh-west',

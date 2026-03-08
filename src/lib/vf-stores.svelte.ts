@@ -6,6 +6,7 @@ import { SpatialThingStore }     from '$lib/knowledge/spatial-things';
 import { AgentStore }            from '$lib/agents';
 import { PlanStore }             from '$lib/planning/planning';
 import { Observer }              from '$lib/observation/observer';
+import { Commune }               from '$lib/observation/account';
 import type {
     ResourceSpecification,
     ProcessSpecification,
@@ -34,6 +35,32 @@ export let locations             = new SpatialThingStore();
 export let agents                = new AgentStore();
 export let planner               = new PlanStore(registry);
 export let observer              = new Observer(registry);
+export let commune               = new Commune({ observer });
+export const resourcePriceSvc    = new Map<string, number>(); // specId → SVC per unit
+
+export const communeState = $state({
+    activeAgentId: null as string | null,
+    welfareAllocationRate: 0,
+    pools: {} as Record<string, number>,
+    totalSocialSvc: 0,
+    individual_claimable_pool_svc: 0,
+    social_welfare_fund: 0,
+    available_claimable_pool: 0,
+});
+
+export const accountState = $state({
+    loaded: false,
+    agentId: '',
+    gross_contribution_credited: 0,
+    claimed_capacity: 0,
+    contribution_capacity_factor: 1,
+    contribution_claim: 0,
+    solidarity_supplement: 0,
+    total_claim_capacity: 0,
+    current_potential_claim_capacity: 0,
+    current_share_of_claims: 0,
+    current_actual_claim_capacity: 0,
+});
 
 // ── Reactive $state arrays (Svelte 5) ────────────────────────────────────
 // Declared as const to satisfy Svelte's "no reassignment of exported state" rule.
@@ -62,6 +89,36 @@ function syncArr<T>(target: T[], items: T[]): void {
     target.splice(0, target.length, ...items);
 }
 
+export function syncCommune() {
+    communeState.welfareAllocationRate = commune.welfare_allocation_rate;
+    communeState.pools = { ...commune.pools };
+    communeState.totalSocialSvc = commune.total_social_svc;
+    communeState.individual_claimable_pool_svc = commune.individual_claimable_pool_svc;
+    communeState.social_welfare_fund = commune.social_welfare_fund;
+    communeState.available_claimable_pool = commune.available_claimable_pool;
+
+    if (communeState.activeAgentId) {
+        const acct = commune.accountFor(communeState.activeAgentId);
+        if (acct) {
+            accountState.loaded                          = true;
+            accountState.agentId                         = acct.agentId;
+            accountState.gross_contribution_credited     = acct.gross_contribution_credited;
+            accountState.claimed_capacity                = acct.claimed_capacity;
+            accountState.contribution_capacity_factor    = acct.contribution_capacity_factor;
+            accountState.contribution_claim              = acct.contribution_claim;
+            accountState.solidarity_supplement           = acct.solidarity_supplement;
+            accountState.total_claim_capacity            = acct.total_claim_capacity;
+            accountState.current_potential_claim_capacity = acct.current_potential_claim_capacity;
+            accountState.current_share_of_claims         = acct.current_share_of_claims;
+            accountState.current_actual_claim_capacity   = acct.current_actual_claim_capacity;
+        } else {
+            accountState.loaded = false;
+        }
+    } else {
+        accountState.loaded = false;
+    }
+}
+
 export function refresh() {
     syncArr(resourceSpecs,  recipes.allResourceSpecs());
     syncArr(processSpecs,   recipes.allProcessSpecs());
@@ -77,6 +134,7 @@ export function refresh() {
     syncArr(capacityBufferList,      capacityBuffers.allBuffers());
     syncArr(locationList,            locations.allLocations());
     // adjustmentFactorList is managed directly (no backing store class)
+    syncCommune();
 }
 
 // Auto-refresh on any Observer event
@@ -93,9 +151,24 @@ export function resetStores() {
     planner              = new PlanStore(registry);
     observer             = new Observer(registry);
     observer.subscribe(() => refresh());
+    commune              = new Commune({ observer });
+    resourcePriceSvc.clear();
     adjustmentFactorList.splice(0, adjustmentFactorList.length);
     bufferProfileList.splice(0, bufferProfileList.length);
+    communeState.activeAgentId = null;
+    communeState.pools = {};
+    communeState.totalSocialSvc = 0;
+    communeState.individual_claimable_pool_svc = 0;
+    communeState.social_welfare_fund = 0;
+    communeState.available_claimable_pool = 0;
+    accountState.loaded = false;
     refresh();
+}
+
+/** Set the active agent for commune account display. */
+export function setActiveAgentId(id: string | null): void {
+    communeState.activeAgentId = id;
+    syncCommune();
 }
 
 /** Add or replace an adjustment factor by ID. */

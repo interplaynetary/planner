@@ -12,11 +12,11 @@
 
 `This is not because all needs can be satisfied locally (today many countries have transferred most conditions of production - industrial manufacture etc. to other countries, creating international division of labor, and decreasing local resilience) but because our planner should aim to construct plans that allow most needs to be satisfied locally, of course while also aiming to satisfy other objectives like, labor-time reduction etc.`
 
-`This orientation is essential to dissolving the international division of labor, therewith also the division between town and country, and the division between mental and physical labor.`
+`This orientation is essential to dissolving the division between town and country, and therewith the division between mental and physical labor.`
 
-`Our planner is not aiming to find a globally optimal solution to need satisfaction (an impossible, un-tractable, NP-hard problem) based on the currently-existing global division of labor and global distribution of the conditions of production.`
+`Our planner is not aiming to find a globally optimal solution to need satisfaction (an impossible, un-tractable, NP-hard problem) based on the currently-existing global division of labor and globally uneven distribution of the conditions of production.`
 
-`Moreover, it should be noted that in capitalism, it often only seems more “efficient” to outsource production to other countries, because labor-time is (and is forcefully maintained to be, internationally and domestically) cheaper in those countries - people’s lives are literally valued less, this doesn't mean that these global supply chains are actually more efficient in terms of resource-usage or in terms of the actual total expenditure human-labor-time.`
+`Moreover, it should be noted that in capitalism, it often only seems more “efficient” to outsource production to other countries because labor-time is (and is forcefully maintained to be, internationally and domestically) cheaper in those countries - people’s lives are literally valued less, this doesn't mean that these global supply chains are actually more efficient in terms of resource-usage or in terms of the actual total expenditure human-labor-time.`
 
 `The aim is to formulate good-enough plans that satisfy all constraints (metabolic sustainability etc., and maximize all objectives), in such a way that is:`
 
@@ -32,6 +32,7 @@
 - **`Constraint: Satisfy derived demands`** `(ranked by criticality)`
 - **`Satisfy Replenishment (metabolic) demands`** `(ranked by criticality)`
 - **`Satisfy`** `Reserve/Buffers demands (ranked by criticality)`
+  - **`Satisfy`** `Control Point demands (ranked by criticality)`
 - **`Constraint: Respect Max-Individual-Effort-Time/Day`** `(individuals classifiedAs child etc. enable granular limitations)`
 - **`Objective: Minimize Total Socially Necessary Effort (SNE)`**
 - **`Unit of Effort:`** `<Time>`
@@ -51,7 +52,7 @@
 
 `The way these coordination bodies are composed should allow for global constraints to be satisfied and for planners to find solutions quickly and effectively, staying responsive to local information.`
 
-`A federation structure with disjoint membership (no entity can be part of more than one other entity), ensures minimal conflict resolution requirement, and has the least stress on planners with local/global inversion. A strict disjoint federation is not the only possible structure, but is the most efficient structure for achieving planner objectives/constraints with local/global inversion. Moreover, generally speaking, spatial continuity of the members of a coordination-body aligns well with the aforementioned design goals for the planner.`
+`A federation structure with disjoint membership (no entity can be part of more than one other entity), ensures minimal conflict resolution requirement, and has the least stress on planners with local/global inversion. A strict disjoint federation is not the only possible structure, but is the most efficient structure for achieving planner objectives/constraints with local/global inversion. Generally speaking, spatial continuity of the members of a coordination-body aligns well with the aforementioned design goals for the planner.`
 
 `Participants in these coordination-bodies must remain embedded in and responsible to their communities — they must feel in their own lives the consequences of the decisions they make during plan merging. Otherwise, we create a professional planning class, and with it, the division between mental and physical labor reasserts itself in a new form.`
 
@@ -98,8 +99,6 @@
 
 **\*`Local/global inversion:`** `every global constraint is a local objective. Planners try to satisfy all demands and emit surplus/deficit signals. Planner composition converts local failures into global constraints by routing surplus/deficit upward until resolved or declared genuinely infeasible, resulting in local contraction of those dependent demands leading into those independent demands that are relevant to freeing up capacity needed to satisfy those constraints (in doing so attempting to distribute the load of net-sacrifice evenly: sacrifice determined by independent demand priority).`\*
 
-_`unmetDemand[] = consumption gap (someone doesn't get what they wanted). metabolicDebt[] = sustainability gap (productive base degrades). Both propagate up through merge planners; metabolicDebt carries elevated routing priority.`_
-
 **`Social Validation of Effort:`**
 
 - **`Administration`** `(or an extension thereof) can socially-validate work-intent satisfaction in a Process only up to the limit of the Planned Effort of the work-intent.`
@@ -114,19 +113,27 @@ _`unmetDemand[] = consumption gap (someone doesn't get what they wanted). metabo
 - **`Total Pool Validated Contribution:`**  
   `<pool>_svc = Σ(SVC of all resources classified as <pool>)`  
   `Pool Examples: individual-claimable, replenishment, reserve/buffer, administration, unspecified, social-welfare. Recall, plans classify resources as belonging to these pools.`
-- **`Social Welfare Fund (for those unable to work):`**  
-  `social_welfare_fund = individual_claimable_pool_svc × welfare_allocation_rate`  
-  `available_claimable_pool = individual_claimable_pool_svc - social_welfare_fund`  
-  _`The welfare allocation rate is democratically determined, representing the portion of the individual-claimable pool reserved for those unable to work (children, elderly, disabled, ill, caregivers).`_
-- **`Dependent Population Claim Capacity:`**  
-  `For individuals classified as unable to work:`  
-  `dependent_claim_capacity = (social_welfare_fund / dependent_population) × dependency_multiplier`  
-  _`Dependency multipliers account for differential degrees of dependency and inability to work.`_
-- **`Net Claim Capacity (for those able to work):`**  
-  `net_claim_capacity = gross_contribution_credited × (available_claimable_pool / total_social_svc)`
+- **`Individual Contribution Capacity Factor:`**
+  `contribution_capacity_factor = f(age, health, caring responsibilities, etc.)`
+  `*Ranges from 0 (unable to contribute) to 1 (full contribution capacity). Determined through participatory health and social assessment, not binary classification. This factor represents the degree to which a person is able to participate in socially-validated work, not a judgment on the value of their actual work.*`
+- **`Social Welfare Fund:`**
+  `sum_unmet_capacity    = Σ (1 − contribution_capacity_factor_i)`
+  `sum_met_capacity      = Σ contribution_capacity_factor_i`
+  `total_capacity_mass   = sum_met_capacity + sum_unmet_capacity`
+  `welfare_allocation_rate = sum_unmet_capacity / total_capacity_mass`
+  `social_welfare_fund   = individual_claimable_pool_svc × welfare_allocation_rate`
+  `available_claimable_pool = individual_claimable_pool_svc − social_welfare_fund`
+  _`The welfare allocation rate is self-computed from aggregate incapacity: the fraction of total capacity-mass that is unmet. No manual tuning — when all members are at full capacity the rate is 0%; when all are fully incapacitated it is 100%. The social welfare fund supplements the claim capacity of those with reduced capacity to contribute, without creating a separate track.`_
+- **`Contribution-Based Claim (from actual work):`**  
+  `contribution_claim = gross_contribution_credited × (available_claimable_pool / total_social_svc)`  
+  _`This is what their actual work entitles them to from the contribution-based pool.`_
+- **`Solidarity Supplement:`**  
+  `solidarity_supplement = (1 - contribution_capacity_factor) × (social_welfare_fund / Σ(1 - contribution_capacity_factor))`  
+  _`The welfare fund is distributed proportional to unmet capacity. This is a social dividend, not a wage adjustment. Everyone below full capacity receives a supplement scaled to their degree of incapacity; those at full capacity receive none.`_
+- **`Total Claim Capacity:`**  
+  `total_claim_capacity = contribution_claim + solidarity_supplement`
 - **`Current Potential Claims:`** `Remaining capacity after claims are made.`  
-  `current_potential_claim_capacity = net_claim_capacity - claimed_capacity`  
-  _`(For dependents: = dependent_claim_capacity - claimed_capacity)`_
+  `current_potential_claim_capacity = total_claim_capacity - claimed_capacity`
 - **`Social Share:`** `The individual's portion of total outstanding claims.`  
   `current_share_of_claims = current_potential_claim_capacity / social_total_potential_claims`
 - **`Actual Claim Capacity:`** `The real-world purchasing power relative to the available individual-claimable pool.`  
@@ -189,8 +196,8 @@ _`Membership List auto-generated from those entities that are in Membership Inde
     - **`Commune-Agents`**
       - `Delegates with Imperative Mandates (Binding Instructions)`
       - `Observers of Social Planning Processes`
-  - **`Withdraw:`** `The right to withdraw from any commune/intermediate federation. This right is the expression of freedom of association among communes. Withdrawal is subject to: (1) withdrawal does not dissolve obligations incurred during membership — these must be honored through the planning process until settled, or a new federation plan voids previous obligations; (2) withdrawal severs the federation's authority over the commune for all future matters; (3) the metabolic consequences of withdrawal become visible in the planning process, enabling the commune to make an informed decision; (4) withdrawal from all intermediate federations does not constitute withdrawal from the Universal Commune, which guarantees universal membership.`
   - **`Communicate:`** `Publish all doings and shortcomings`
+  - **`Withdraw:`** `The right to withdraw from any commune/intermediate federation. This right is the expression of freedom of association among communes. Withdrawal is subject to: (1) withdrawal does not dissolve obligations incurred during membership — these must be honored through the planning process until settled, or a new federation plan voids previous obligations; (2) withdrawal severs the federation's authority over the commune for all future matters; (3) the metabolic consequences of withdrawal become visible in the planning process, enabling the commune to make an informed decision; (4) withdrawal from all intermediate federations does not constitute withdrawal from the Universal Commune, which guarantees universal membership.`
 - **`Responsibilities:`**
   - **`To electorate:`** `Publication of proceedings`
   - **`To federation:`** `Abide by federation decisions on matters within the federation's delegated authority. Where a federation decision conflicts with a commune's binding instructions on a matter outside the federation's authority, the commune may seek judicial review.`
@@ -300,13 +307,13 @@ _`The Universal Commune maintains no standing army, no police force, no permanen
 - **`Phase 0 — Normalize:`** `Deduplicate input H3 cells. A cell is dominated if any ancestor appears in the set. Remove dominated. Result: non-overlapping canonical cover; no slot loaded twice.`
 - **`Phase 1 — Extract:`** `queryDemandByRegion + querySupplyByRegion over canonical cells. Horizon filter (from, to) applied to slot.due. H3 cells used only here — not involved in planning.`
 - **`Phase 2 — Classify:`** `Each open demand slot: locally-satisfiable | transport-candidate | producible-with-imports | external-dependency. Locally satisfiable planned first (cheapest, no transport overhead).`
-- **`Phase 3 — Formulate:`** `One PlanNetter per invocation (Mode C). Caller decides plan granularity — not grid-derived.`
+- **`Phase 3 — Formulate:`** `One PlanNetter per invocation. Caller decides plan granularity — not grid-derived.`
   - `Pass 1 (primary): all pre-existing demands sorted by D-category then due date. dependentDemand per slot; netter.allocated grows from highest priority down.`
   - `Compute: endogenous replenishment demands from Pass 1's consumption records (consumed qty × replenishment rate per spec). These did not exist before Pass 1.`
   - `Pass 2 (derived): replenishment + buffer demands against remaining capacity. Same PlanStore, same netter — no merge step needed.`
-  - `Backtrack (if metabolicDebt after Pass 2): walk Pass 1 allocations in reverse priority (lowest D-category first, latest due date first within category). Retract process subgraphs (by provenanceId) until freed capacity covers unmet replenishment qty. Re-explode retracted demands against newly freed capacity — their shortfall becomes unmetDemand[]. If metabolicDebt persists after exhausting all lower-priority retractable allocations, escalate to merge hierarchy.`
+  - `Backtrack (if metabolicDebt after Pass 2): walk Pass 1 allocations in reverse priority (lowest D-category first, latest due date first within category). Retract process subgraphs (by provenanceId) until freed capacity covers unmet replenishment qty. Re-explode retracted demands against newly freed capacity — their shortfall becomes unmetDemand[]. If metabolicDebt persists after exhausting all lower-priority retractable allocations, escalate to a merge hierarchy.`
   - `Phase B (Supply): unabsorbed supply (not in allocated) forward-scheduled via dependentSupply.`
-- **`Phase 4 — Collect:`** `purchaseIntents[] | surplus[] | unmetDemand[] | metabolicDebt[] | laborGaps[]`
+- **`Phase 4 — Collect:`** `purchaseIntents[] | surplus[] | unmetDemand[] | laborGaps[]`
 
 **`Merge Planner:`** `Same planForRegion with subStores provided. Merges sub-PlanStores; runs Phase 3 Formulate treating leaf unmetDemand[] + metabolicDebt[] signals as new demand inputs. dependentDemand at inter-region scope — can traverse into a neighbour region's capacity, discover transport or production recipes, and back-schedule their full dependency chain as sub-demands. The inter-region supply being routed may itself be the output of a dependent production chain, not just inventory — dependentSupply runs forward from unabsorbed inter-region capacity to discover what could be produced. PlanNetter initialised from merged PlanStore: netter.allocated contains all leaf allocations; inter-region processes claim only unallocated capacity. Surgical retraction can reach into any leaf's allocations to liberate capacity on the inter-regional dependency path. Leaf planner = subStores = [].`
 
@@ -320,7 +327,6 @@ _`The Universal Commune maintains no standing army, no police force, no permanen
 - **`Recursion:`** `Merge planner PlanStores may themselves conflict → planForRegion for their union. Depth bounded by region nesting (typically 1–2 levels). metabolicDebt[] signals routed with elevated priority over unmetDemand[] at every merge level.`
 
 | `Key Properties: Three orthogonal axes: H3 cells, PlanStore, and Plans do not constrain each other. Cells scope what data gets loaded (Phases 0–2). PlanStore is owned by an invocation and corresponds to its region. Plans are organizational labels for logical work groupings — they can span many cells or many Plans can exist within one cell. The PlanNetter is the consistency boundary, not the Plan. PlanStore is region-scoped, not global: Each planForRegion invocation owns its own PlanStore corresponding to its region. There is no single global store. Coordination between planners happens only when a merge planner is created for a region that spans both. Parallelism is maximal at the leaf: Leaf planners share nothing — no coordination, no shared state, no locks. Conflicts between them are only visible (and only matter) when someone asks for a higher-order region that spans both. If no one ever asks for that larger region, the leaf PlanStores coexist independently. Merge = a planner for the union region: Resolving conflicts is not a special operation — it is a planForRegion call that happens to receive sub-PlanStores. The function is the same. The difference is the starting state of the PlanStore (merged vs. empty). Resolution is surgical, not global re-computation: The merge planner retracts only the specific commitments above the availability threshold and re-explodes only the demand fragments those commitments were serving. Sub-PlanStores are not modified. The rest of every Plan is preserved in the merged PlanStore. Substitution is emergent: When a retracted fragment is re-exploded, dependentDemand tries the next available option on its own fallback ladder — alt inventory → transport → scheduled receipt → production recipe → purchase intent. The merge planner provides no guidance on which substitute to use; it only ensures the retracted resource is no longer available in the netter. Recursion is shallow in practice: Most conflicts are between adjacent leaf regions and resolve in a single merge step. The hierarchy only recurses up when a merge planner's PlanStore itself conflicts with another region's — bounded by the nesting depth of overlapping regions, typically 2–3 levels. Indexes are the scoping filter; they are never mutated: The demand and supply indexes tell the planner what exists and where — before any allocation. After a planning cycle, rebuild the indexes from the updated PlanStore state(s) before the next horizon.` |
-| :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 
 # **Infrastructure**
 

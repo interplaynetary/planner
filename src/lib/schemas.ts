@@ -575,7 +575,15 @@ export const ResourceSpecificationSchema = z.object({
     name: z.string(),
     note: z.string().optional(),
     image: z.string().optional(),
-    resourceClassifiedAs: z.array(z.string()).optional(), // taxonomy URIs
+    /**
+     * Taxonomy URIs / classification tags for this spec.
+     *
+     * Commune convention: every spec is either `'individual-claimable'` (members
+     * can claim instances from the commune pool) OR `'communal'` (shared production
+     * infrastructure owned collectively). These two are mutually exclusive — a spec
+     * must never carry both tags.
+     */
+    resourceClassifiedAs: z.array(z.string()).optional(),
     defaultUnitOfResource: z.string().optional(),         // unit label or URI
     defaultUnitOfEffort: z.string().optional(),
     substitutable: z.boolean().optional(),
@@ -753,7 +761,9 @@ export const EconomicResourceSchema = z.object({
 
     // Type system
     conformsTo: z.string(),                                // ResourceSpecification ID (required!)
-    classifiedAs: z.array(z.string()).optional(),          // taxonomy URIs
+    /** Taxonomy tags. Either `'individual-claimable'` (claimable from commune pool)
+     *  or `'communal'` (shared infrastructure). Mutually exclusive — never both. */
+    classifiedAs: z.array(z.string()).optional(),
 
     // Quantities (derived from events)
     accountingQuantity: MeasureSchema.optional(),
