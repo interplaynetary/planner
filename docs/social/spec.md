@@ -16,7 +16,7 @@
 
 `Our planner is not aiming to find a globally optimal solution to need satisfaction (an impossible, un-tractable, NP-hard problem) based on the currently-existing global division of labor and globally uneven distribution of the conditions of production.`
 
-`Moreover, it should be noted that in capitalism, it often only seems more “efficient” to outsource production to other countries because labor-time is (and is forcefully maintained to be, internationally and domestically) cheaper in those countries - people’s lives are literally valued less, this doesn't mean that these global supply chains are actually more efficient in terms of resource-usage or in terms of the actual total expenditure human-labor-time.`
+`Moreover, it should be noted that in capitalism, it often only seems more “efficient” to outsource production to other countries because labor-time is (and is forcefully maintained to be, internationally and domestically) cheaper in those countries - people’s lives are literally valued less, this doesn't mean that these global supply chains are actually more efficient in terms of resource-usage or in terms of the actual total expenditure of human-labor-time.`
 
 `The aim is to formulate good-enough plans that satisfy all constraints (metabolic sustainability etc., and maximize all objectives), in such a way that is:`
 

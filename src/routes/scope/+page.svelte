@@ -1,6 +1,11 @@
 <script lang="ts">
   import "$lib/components/ui/tokens.css";
   import ScopePanel from "$lib/components/scope/ScopePanel.svelte";
+  import NetworkDiagram from "$lib/components/vf/NetworkDiagram.svelte";
+  import EventRecorderPanel from "$lib/components/observation/EventRecorderPanel.svelte";
+  import type { FlowSelectCtx } from "$lib/components/vf/observe-types";
+  import { resetStores, processList } from "$lib/vf-stores.svelte";
+  import { seedExample } from "$lib/vf-seed";
   import WorkerCard from "$lib/components/scope/WorkerCard.svelte";
   import {
     computeScopeTransitionReport,
@@ -111,6 +116,9 @@
 
   const report = $derived(computeScopeTransitionReport(mockConfig));
 
+  let diagramMode = $state<"plan" | "observe">("plan");
+  let selectedFlow = $state<FlowSelectCtx | null>(null);
+
   // Worker name map
   const nameMap: Record<string, string> = {
     alice: "Alice",
@@ -166,47 +174,119 @@
   <!-- ── SCOPE PANEL ────────────────────────────────────────────────────────── -->
   <ScopePanel {report} scopeName="Metalwork Scope" period="2026-Q1" />
 
+  <!-- ── PROCESS LAYER DIAGRAM ─────────────────────────────────────────────── -->
+  <section class="band diagram">
+    <div class="band-header">
+      <span class="band-title" style="color: #a0aec0">PROCESS LAYER</span>
+      {#if processList.length === 0}
+        <div class="diagram-actions">
+          <button onclick={seedExample}>Load Example</button>
+        </div>
+      {:else}
+        <button class="reset-btn" onclick={resetStores}>Reset</button>
+      {/if}
+      <div class="mode-toggle">
+        <button
+          class:active={diagramMode === "plan"}
+          onclick={() => {
+            diagramMode = "plan";
+            selectedFlow = null;
+          }}>PLAN</button
+        >
+        <button
+          class:active={diagramMode === "observe"}
+          onclick={() => (diagramMode = "observe")}>OBSERVE</button
+        >
+      </div>
+    </div>
+    <div class="diagram-wrap">
+      <NetworkDiagram
+        mode={diagramMode}
+        onflowselect={(ctx) => (selectedFlow = ctx)}
+        {selectedFlow}
+      />
+    </div>
+    {#if selectedFlow}
+      <div class="observe-panel">
+        <EventRecorderPanel
+          context={selectedFlow}
+          onrecord={() => (selectedFlow = null)}
+          onclose={() => (selectedFlow = null)}
+        />
+      </div>
+    {/if}
+  </section>
+
   <!-- ── FLOW FRACTIONS band ─────────────────────────────────────────────────── -->
   <section class="band">
     <div class="band-header">
-      <span class="band-title" style="color: rgb(56,189,248)">FLOW FRACTIONS</span>
+      <span class="band-title" style="color: rgb(56,189,248)"
+        >FLOW FRACTIONS</span
+      >
     </div>
     <p class="band-desc">
-      How much of this scope's activity has entered the social economy — and how much has
-      been formally acknowledged? Each bar is a fraction of the scope's total volume.
+      How much of this scope's activity has entered the social economy — and how
+      much has been formally acknowledged? Each bar is a fraction of the scope's
+      total volume.
     </p>
     <div class="fractions-body">
       <div class="frac-item">
         <div class="frac-row">
           <span class="frac-label">Social inputs</span>
           <div class="frac-track">
-            <div class="frac-fill" style="width: {report.fractions.social_input_fraction * 100}%; background: rgb(56,189,248)"></div>
+            <div
+              class="frac-fill"
+              style="width: {report.fractions.social_input_fraction *
+                100}%; background: rgb(56,189,248)"
+            ></div>
           </div>
-          <span class="frac-pct">{(report.fractions.social_input_fraction * 100).toFixed(1)}%</span>
+          <span class="frac-pct"
+            >{(report.fractions.social_input_fraction * 100).toFixed(1)}%</span
+          >
         </div>
-        <p class="frac-desc">of raw materials sourced from social-plan providers</p>
+        <p class="frac-desc">
+          of raw materials sourced from social-plan providers
+        </p>
       </div>
 
       <div class="frac-item">
         <div class="frac-row">
           <span class="frac-label">Social outputs</span>
           <div class="frac-track">
-            <div class="frac-fill" style="width: {report.fractions.social_output_fraction * 100}%; background: #68d391"></div>
+            <div
+              class="frac-fill"
+              style="width: {report.fractions.social_output_fraction *
+                100}%; background: #68d391"
+            ></div>
           </div>
-          <span class="frac-pct">{(report.fractions.social_output_fraction * 100).toFixed(1)}%</span>
+          <span class="frac-pct"
+            >{(report.fractions.social_output_fraction * 100).toFixed(1)}%</span
+          >
         </div>
-        <p class="frac-desc">of production dispatched to social-plan recipients</p>
+        <p class="frac-desc">
+          of production dispatched to social-plan recipients
+        </p>
       </div>
 
       <div class="frac-item">
         <div class="frac-row">
           <span class="frac-label">Confirmed receipts</span>
           <div class="frac-track">
-            <div class="frac-fill" style="width: {report.fractions.confirmed_output_fraction * 100}%; background: var(--zone-yellow)"></div>
+            <div
+              class="frac-fill"
+              style="width: {report.fractions.confirmed_output_fraction *
+                100}%; background: var(--zone-yellow)"
+            ></div>
           </div>
-          <span class="frac-pct">{(report.fractions.confirmed_output_fraction * 100).toFixed(1)}%</span>
+          <span class="frac-pct"
+            >{(report.fractions.confirmed_output_fraction * 100).toFixed(
+              1,
+            )}%</span
+          >
         </div>
-        <p class="frac-desc">of social deliveries formally acknowledged by recipients</p>
+        <p class="frac-desc">
+          of social deliveries formally acknowledged by recipients
+        </p>
       </div>
 
       <div class="frac-divider"></div>
@@ -215,22 +295,39 @@
         <div class="frac-row">
           <span class="frac-label">Transition depth</span>
           <div class="frac-track">
-            <div class="frac-fill" style="width: {report.fractions.transition_depth * 100}%; background: #a78bfa"></div>
+            <div
+              class="frac-fill"
+              style="width: {report.fractions.transition_depth *
+                100}%; background: #a78bfa"
+            ></div>
           </div>
-          <span class="frac-pct">{(report.fractions.transition_depth * 100).toFixed(1)}%</span>
+          <span class="frac-pct"
+            >{(report.fractions.transition_depth * 100).toFixed(1)}%</span
+          >
         </div>
-        <p class="frac-desc">social outputs × confirmed — the verified, end-to-end transition progress</p>
+        <p class="frac-desc">
+          social outputs × confirmed — the verified, end-to-end transition
+          progress
+        </p>
       </div>
 
       <div class="frac-item derived">
         <div class="frac-row">
           <span class="frac-label">Commitment gap</span>
           <div class="frac-track">
-            <div class="frac-fill" style="width: {report.fractions.commitment_gap * 100}%; background: #f6ad55"></div>
+            <div
+              class="frac-fill"
+              style="width: {report.fractions.commitment_gap *
+                100}%; background: #f6ad55"
+            ></div>
           </div>
-          <span class="frac-pct">{(report.fractions.commitment_gap * 100).toFixed(1)}%</span>
+          <span class="frac-pct"
+            >{(report.fractions.commitment_gap * 100).toFixed(1)}%</span
+          >
         </div>
-        <p class="frac-desc">dispatched to social recipients but not yet confirmed — a trust signal</p>
+        <p class="frac-desc">
+          dispatched to social recipients but not yet confirmed — a trust signal
+        </p>
       </div>
     </div>
   </section>
@@ -243,8 +340,9 @@
     </div>
     <p class="band-desc">
       Per-worker breakdown of labor, market wages, and social plan compensation.
-      The <em>goods access</em> bar at the bottom of each card shows what fraction of each
-      worker's real purchasing power flows through the social economy vs. the market.
+      The <em>goods access</em> bar at the bottom of each card shows what fraction
+      of each worker's real purchasing power flows through the social economy vs.
+      the market.
     </p>
     <div class="workers-body">
       {#each report.workers as worker (worker.agentId)}
@@ -256,13 +354,15 @@
   <!-- ── WAGES band ──────────────────────────────────────────────────────────── -->
   <section class="band">
     <div class="band-header">
-      <span class="band-title" style="color: var(--zone-yellow)">WAGES &amp; LABOR</span>
+      <span class="band-title" style="color: var(--zone-yellow)"
+        >WAGES &amp; LABOR</span
+      >
     </div>
     <p class="band-desc">
-      Validated hours determine SVC claim capacity; unvalidated hours go uncompensated by
-      the social plan. Real wages translate nominal pay into equivalent goods, letting
-      you compare across channels — when social real wages approach market real wages,
-      the transition is economically adequate.
+      Validated hours determine SVC claim capacity; unvalidated hours go
+      uncompensated by the social plan. Real wages translate nominal pay into
+      equivalent goods, letting you compare across channels — when social real
+      wages approach market real wages, the transition is economically adequate.
     </p>
     <div class="band-body">
       <!-- Left: Scope Totals -->
@@ -355,22 +455,29 @@
       <span class="band-title" style="color: #7c3aed">TRANSITION RATIOS</span>
     </div>
     <p class="band-desc">
-      Two composite signals tracking whether the transition is delivering adequate
-      compensation for workers. Both should trend toward 1.0 or above as the social plan
-      deepens and communal provision grows.
+      Two composite signals tracking whether the transition is delivering
+      adequate compensation for workers. Both should trend toward 1.0 or above
+      as the social plan deepens and communal provision grows.
     </p>
     <div class="ratios-body">
       <!-- Substitution Ratio -->
       <div class="ratio-block">
         <span class="ratio-label">SUBSTITUTION RATIO</span>
-        <span class="ratio-num" style="color: {subRatioColor}">{report.substitution_ratio.toFixed(3)}</span>
-        <span class="ratio-tag" style="color: {subRatioColor}">{subRatioTag}</span>
+        <span class="ratio-num" style="color: {subRatioColor}"
+          >{report.substitution_ratio.toFixed(3)}</span
+        >
+        <span class="ratio-tag" style="color: {subRatioColor}"
+          >{subRatioTag}</span
+        >
         <p class="ratio-meaning">
-          For each unit of real goods a worker could access via the market, how much does
-          the social channel deliver through confirmed hours? A ratio of 1.0 means the
-          social plan fully substitutes for foregone market compensation.
+          For each unit of real goods a worker could access via the market, how
+          much does the social channel deliver through confirmed hours? A ratio
+          of 1.0 means the social plan fully substitutes for foregone market
+          compensation.
         </p>
-        <code class="ratio-formula">social_rw × confirmed_frac / (market_rw × (1 − social_frac))</code>
+        <code class="ratio-formula"
+          >social_rw × confirmed_frac / (market_rw × (1 − social_frac))</code
+        >
       </div>
 
       <div class="ratio-divider"></div>
@@ -378,14 +485,19 @@
       <!-- Communal Satisfaction -->
       <div class="ratio-block">
         <span class="ratio-label">COMMUNAL SATISFACTION</span>
-        <span class="ratio-num" style="color: {satColor}">{report.communal_satisfaction_ratio.toFixed(3)}×</span>
+        <span class="ratio-num" style="color: {satColor}"
+          >{report.communal_satisfaction_ratio.toFixed(3)}×</span
+        >
         <span class="ratio-tag" style="color: {satColor}">{satTag}</span>
         <p class="ratio-meaning">
-          Does the total value of social access — SVC claim purchasing power plus
-          communally provided essentials — cover what workers still need to buy on the
-          market? Above 1.0 means workers are better off than market wages alone.
+          Does the total value of social access — SVC claim purchasing power
+          plus communally provided essentials — cover what workers still need to
+          buy on the market? Above 1.0 means workers are better off than market
+          wages alone.
         </p>
-        <code class="ratio-formula">total_social_value / effective_net_market_wage</code>
+        <code class="ratio-formula"
+          >total_social_value / effective_net_market_wage</code
+        >
       </div>
     </div>
   </section>
@@ -674,5 +786,58 @@
     width: 1px;
     background: rgba(255, 255, 255, 0.05);
     flex-shrink: 0;
+  }
+
+  /* ── DIAGRAM ── */
+  .diagram-wrap {
+    overflow-x: auto;
+    padding: var(--gap-md);
+  }
+  .diagram-actions {
+    display: flex;
+    gap: var(--gap-xs);
+  }
+  .diagram-actions button,
+  .reset-btn {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #e2e8f0;
+  }
+  .diagram-actions button:hover,
+  .reset-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+  .reset-btn {
+    color: rgba(226, 232, 240, 0.4);
+  }
+  .mode-toggle {
+    display: flex;
+    gap: var(--gap-xs);
+    margin-left: auto;
+  }
+  .mode-toggle button {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(226, 232, 240, 0.5);
+  }
+  .mode-toggle button.active {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #e2e8f0;
+  }
+  .observe-panel {
+    padding: var(--gap-md);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    max-width: 480px;
   }
 </style>

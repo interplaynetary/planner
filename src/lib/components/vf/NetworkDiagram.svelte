@@ -10,6 +10,7 @@
   import { showTip, hideTip, moveTip } from '$lib/tooltip.svelte';
   import EntityPanel from '$lib/components/shared/EntityPanel.svelte';
   import type { EntityType } from '$lib/vf-descriptors';
+  import type { FlowSelectCtx } from './observe-types';
 
   // ── Layout constants ──────────────────────────────────────────────────────
   const ML       = 30;    // left margin
@@ -50,16 +51,46 @@
     cite:    '#718096',
   };
 
+  function fulfillColor(pct: number): string {
+    if (pct >= 100) return '#38a169';
+    if (pct >= 50)  return '#d69e2e';
+    return '#e53e3e';
+  }
+
+  function handleFlowClick(node: ProcNode, row: ResRow, isInput: boolean) {
+    if (mode !== 'observe') return;
+    const commitment = row.commitmentId
+      ? commitmentList.find(c => c.id === row.commitmentId)
+      : undefined;
+    const existingEvents = eventList.filter(e =>
+      (isInput ? e.inputOf === node.proc.id : e.outputOf === node.proc.id) &&
+      e.resourceConformsTo === row.specId
+    );
+    onflowselect?.({
+      processId: node.proc.id, procName: node.proc.name,
+      specId: row.specId, specName: row.specName, action: row.action,
+      isInput, commitmentId: row.commitmentId, commitment,
+      existingEvents, fulfilledQty: row.fulfilledQty ?? 0,
+      plannedQty: row.plannedQty ?? 0, unit: row.unit,
+    });
+  }
+
   // ── Types ─────────────────────────────────────────────────────────────────
   interface ResRow {
-    specId:      string;
-    specName:    string;
-    action:      string;
-    qty:         string;
-    onhand:      number;
-    unit:        string;
-    bufferZone?: BufferZone;
-    y:           number;
+    specId:          string;
+    specName:        string;
+    action:          string;
+    qty:             string;
+    onhand:          number;
+    unit:            string;
+    bufferZone?:     BufferZone;
+    y:               number;
+    // observe mode fields (optional, zero overhead in plan mode)
+    commitmentId?:   string;
+    fulfilledQty?:   number;
+    plannedQty?:     number;
+    fulfillmentPct?: number;
+    eventCount?:     number;
   }
 
   interface ProcNode {
@@ -174,6 +205,22 @@
           : resourceList.filter(r => r.conformsTo === specId);
         const onhand = pool.reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
         const unit   = pool[0]?.onhandQuantity?.hasUnit ?? spec?.defaultUnitOfResource ?? '';
+
+        // Observe mode: compute fulfillment from eventList (reactive, covers user-created events too)
+        let commitmentId: string | undefined;
+        let fulfilledQty: number | undefined;
+        let plannedQty: number | undefined;
+        let fulfillmentPct: number | undefined;
+        let eventCount: number | undefined;
+        if (mode === 'observe') {
+          const fillingEvents = eventList.filter(e => e.fulfills === c.id);
+          fulfilledQty  = fillingEvents.reduce((s, e) => s + (e.resourceQuantity?.hasNumericalValue ?? 0), 0);
+          plannedQty    = c.resourceQuantity?.hasNumericalValue ?? 0;
+          fulfillmentPct = plannedQty > 0 ? Math.min(100, fulfilledQty / plannedQty * 100) : 0;
+          commitmentId  = c.id;
+          eventCount    = fillingEvents.length;
+        }
+
         return {
           specId,
           specName:   spec?.name ?? specId.slice(0, 8),
@@ -182,6 +229,11 @@
           onhand,
           unit,
           bufferZone: bz,
+          commitmentId,
+          fulfilledQty,
+          plannedQty,
+          fulfillmentPct,
+          eventCount,
         };
       });
     }
@@ -469,8 +521,14 @@
     selectedBzId?: string;
     /** All DemandAdjustmentFactor records — used to badge active-adjustment funnels. */
     adjustments?: DemandAdjustmentFactor[];
+    /** Diagram mode: 'plan' (default) or 'observe' (shows fulfillment, clickable cards). */
+    mode?: 'plan' | 'observe';
+    /** Called when a resource card is clicked in observe mode. */
+    onflowselect?: (ctx: FlowSelectCtx) => void;
+    /** Highlights the card matching this context. */
+    selectedFlow?: FlowSelectCtx | null;
   }
-  let { onbufferselect, selectedBzId, adjustments = [] }: Props = $props();
+  let { onbufferselect, selectedBzId, adjustments = [], mode = 'plan', onflowselect, selectedFlow }: Props = $props();
 
   const _todayStr = new Date().toISOString().slice(0, 10);
 
@@ -557,7 +615,15 @@
       />
       <!-- Event fulfilled indicator -->
       {#if e.hasEvent}
-        <circle cx={mx} cy={my} r="3.5" fill="#38a169" stroke="rgba(226,232,240,0.5)" stroke-width="0.8" />
+        {#if mode === 'observe'}
+          {@const eCnt = eventList.filter(ev =>
+            ev.outputOf === e.fromProcId && ev.resourceConformsTo === e.specId).length}
+          <circle cx={mx} cy={my} r="5.5" fill="#1a202c" stroke="#38a169" stroke-width="1.2" />
+          <text x={mx} y={my + 3.5} text-anchor="middle" font-size="6.5" font-weight="700"
+            fill="#38a169" style="pointer-events:none">{eCnt}</text>
+        {:else}
+          <circle cx={mx} cy={my} r="3.5" fill="#38a169" stroke="rgba(226,232,240,0.5)" stroke-width="0.8" />
+        {/if}
       {/if}
     {/each}
 
@@ -627,6 +693,22 @@
         fill={statusColor}
         style="pointer-events:none"
       />
+
+      <!-- Observe mode: fulfillment ring overlay on status dot -->
+      {#if mode === 'observe'}
+        {@const avgPct = node.outputs.length === 0 ? 0
+          : node.outputs.reduce((s, r) => s + (r.fulfillmentPct ?? 0), 0) / node.outputs.length}
+        {@const ringR = 5}
+        {@const dotX = node.x + PROC_W / 2 - 7}
+        {@const dotY = node.y - PROC_H / 2 + 7}
+        <circle cx={dotX} cy={dotY} r={ringR} fill="#1a202c"
+          stroke="rgba(255,255,255,0.1)" stroke-width="0.8" style="pointer-events:none" />
+        <circle cx={dotX} cy={dotY} r={ringR - 1} fill="none"
+          stroke={fulfillColor(avgPct)} stroke-width="2"
+          stroke-dasharray="{(avgPct / 100) * (2 * Math.PI * (ringR - 1))} {2 * Math.PI * (ringR - 1)}"
+          stroke-dashoffset={(2 * Math.PI * (ringR - 1)) / 4}
+          style="pointer-events:none" />
+      {/if}
 
       <!-- Control-point "C" marker (left of process box) -->
       {#if ps?.isControlPoint}
@@ -714,12 +796,20 @@
           fill="rgba(74,85,104,0.25)"
           stroke="rgba(160,174,192,0.4)"
           stroke-width="1"
-          style="cursor:default"
+          style={mode === 'observe' ? 'cursor:pointer' : 'cursor:default'}
           role="img"
           onmouseenter={(ev) => showTip(ev, resLines(row, 'input'))}
           onmouseleave={hideTip}
           onmousemove={moveTip}
+          onclick={() => handleFlowClick(node, row, true)}
         />
+        <!-- Observe mode: selected highlight overlay -->
+        {#if mode === 'observe' && selectedFlow?.processId === node.proc.id
+            && selectedFlow?.specId === row.specId && selectedFlow?.isInput}
+          <rect x={cardX - 1} y={cardY - 1} width={CARD_W + 2} height={CARD_H + 2}
+            rx={CARD_RX + 1} fill="none" stroke="#f6ad55" stroke-width="1.5"
+            style="pointer-events:none" />
+        {/if}
         <!-- specName -->
         {@const inSelected = selected?.id === row.specId}
         <text
@@ -755,15 +845,21 @@
           fill={acol}
           style="pointer-events:none"
         >{row.action}</text>
-        <!-- qty / onhand -->
-        {#if row.qty || row.onhand > 0}
-          <text
-            x={ox}
-            y={cardY + 37}
-            text-anchor="middle"
-            font-size="7"
-            fill="rgba(226,232,240,0.4)"
-            style="pointer-events:none"
+        <!-- qty / onhand (input card) -->
+        {#if mode === 'observe' && row.plannedQty != null}
+          <text x={ox} y={cardY + 34} text-anchor="middle" font-size="6.5"
+            fill="rgba(226,232,240,0.3)" style="pointer-events:none"
+          >plan {row.qty}</text>
+          <text x={ox} y={cardY + 42} text-anchor="middle" font-size="7"
+            fill={fulfillColor(row.fulfillmentPct ?? 0)} style="pointer-events:none"
+          >act {(row.fulfilledQty ?? 0).toFixed(1)} {row.unit}</text>
+          {@const barW = ((row.fulfillmentPct ?? 0) / 100) * (CARD_W - 6)}
+          <rect x={cardX + 3} y={cardY + CARD_H - 4} width={Math.max(0, barW)} height={3}
+            rx="1" fill={fulfillColor(row.fulfillmentPct ?? 0)} opacity="0.9"
+            style="pointer-events:none" />
+        {:else if row.qty || row.onhand > 0}
+          <text x={ox} y={cardY + 37} text-anchor="middle" font-size="7"
+            fill="rgba(226,232,240,0.4)" style="pointer-events:none"
           >{row.qty}{row.onhand > 0 ? ` OH:${row.onhand}` : ''}</text>
         {/if}
       {/each}
@@ -799,12 +895,20 @@
           fill="rgba(49,130,206,0.12)"
           stroke={bz ? procStroke(ps) : 'rgba(49,130,206,0.6)'}
           stroke-width={bz ? '1.5' : '1'}
-          style="cursor:default"
+          style={mode === 'observe' ? 'cursor:pointer' : 'cursor:default'}
           role="img"
           onmouseenter={(ev) => showTip(ev, resLines(row, 'output'))}
           onmouseleave={hideTip}
           onmousemove={moveTip}
+          onclick={() => handleFlowClick(node, row, false)}
         />
+        <!-- Observe mode: selected highlight overlay -->
+        {#if mode === 'observe' && selectedFlow?.processId === node.proc.id
+            && selectedFlow?.specId === row.specId && selectedFlow?.isInput === false}
+          <rect x={cardX - 1} y={cardY - 1} width={CARD_W + 2} height={CARD_H + 2}
+            rx={CARD_RX + 1} fill="none" stroke="#f6ad55" stroke-width="1.5"
+            style="pointer-events:none" />
+        {/if}
         <!-- specName -->
         {@const outSelected = selected?.id === row.specId}
         <text
@@ -840,15 +944,21 @@
           fill={acol}
           style="pointer-events:none"
         >{row.action}</text>
-        <!-- qty / onhand -->
-        {#if row.qty || row.onhand > 0}
-          <text
-            x={ox}
-            y={cardY + 37}
-            text-anchor="middle"
-            font-size="7"
-            fill="rgba(226,232,240,0.4)"
-            style="pointer-events:none"
+        <!-- qty / onhand (output card) -->
+        {#if mode === 'observe' && row.plannedQty != null}
+          <text x={ox} y={cardY + 34} text-anchor="middle" font-size="6.5"
+            fill="rgba(226,232,240,0.3)" style="pointer-events:none"
+          >plan {row.qty}</text>
+          <text x={ox} y={cardY + 42} text-anchor="middle" font-size="7"
+            fill={fulfillColor(row.fulfillmentPct ?? 0)} style="pointer-events:none"
+          >act {(row.fulfilledQty ?? 0).toFixed(1)} {row.unit}</text>
+          {@const barW = ((row.fulfillmentPct ?? 0) / 100) * (CARD_W - 6)}
+          <rect x={cardX + 3} y={cardY + CARD_H - 4} width={Math.max(0, barW)} height={3}
+            rx="1" fill={fulfillColor(row.fulfillmentPct ?? 0)} opacity="0.9"
+            style="pointer-events:none" />
+        {:else if row.qty || row.onhand > 0}
+          <text x={ox} y={cardY + 37} text-anchor="middle" font-size="7"
+            fill="rgba(226,232,240,0.4)" style="pointer-events:none"
           >{row.qty}{row.onhand > 0 ? ` OH:${row.onhand}` : ''}</text>
         {/if}
 

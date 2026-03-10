@@ -5,6 +5,9 @@
   import ProcessRow from "$lib/components/vf/ProcessRow.svelte";
   import EventRow from "$lib/components/vf/EventRow.svelte";
   import ProcessLayerDiagram from "$lib/components/vf/ProcessLayerDiagram.svelte";
+  import NetworkDiagram from "$lib/components/vf/NetworkDiagram.svelte";
+  import EventRecorderPanel from "$lib/components/observation/EventRecorderPanel.svelte";
+  import type { FlowSelectCtx } from "$lib/components/vf/observe-types";
   import ResourceSpecCard from "$lib/components/vf/ResourceSpecCard.svelte";
   import ResourceSpecFormPanel from "$lib/components/vf/ResourceSpecFormPanel.svelte";
   import CommunePanel from "$lib/components/commune/CommunePanel.svelte";
@@ -57,6 +60,8 @@
 
   let showForm = $state(false);
   let specFilter = $state<string | null>(null);
+  let diagramMode  = $state<'plan' | 'observe'>('plan');
+  let selectedFlow = $state<FlowSelectCtx | null>(null);
 
   function addDemandForSpec(specId: string) {
     const spec = resourceSpecs.find((s) => s.id === specId);
@@ -820,10 +825,29 @@
   <section class="band diagram">
     <div class="band-header">
       <span class="band-title" style="color: #a0aec0">PROCESS LAYER</span>
+      <div class="mode-toggle">
+        <button class:active={diagramMode === 'plan'}
+          onclick={() => { diagramMode = 'plan'; selectedFlow = null; }}>PLAN</button>
+        <button class:active={diagramMode === 'observe'}
+          onclick={() => diagramMode = 'observe'}>OBSERVE</button>
+      </div>
     </div>
     <div class="diagram-wrap">
-      <ProcessLayerDiagram />
+      <NetworkDiagram
+        mode={diagramMode}
+        onflowselect={(ctx) => selectedFlow = ctx}
+        selectedFlow={selectedFlow}
+      />
     </div>
+    {#if selectedFlow}
+      <div class="observe-panel">
+        <EventRecorderPanel
+          context={selectedFlow}
+          onrecord={() => selectedFlow = null}
+          onclose={() => selectedFlow = null}
+        />
+      </div>
+    {/if}
   </section>
 </div>
 
@@ -1198,5 +1222,23 @@
     font-size: 0.55rem;
     opacity: 0.45;
     font-weight: 400;
+  }
+
+  /* ── DIAGRAM OBSERVE MODE ─────────────────────────────────────────────── */
+  .mode-toggle { display: flex; gap: var(--gap-xs); margin-left: auto; }
+  .mode-toggle button {
+    font-family: var(--font-mono); font-size: var(--text-xs);
+    padding: 2px 8px; border-radius: 3px; cursor: pointer;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(226,232,240,0.5);
+  }
+  .mode-toggle button.active {
+    background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.3);
+    color: #e2e8f0;
+  }
+  .observe-panel {
+    padding: var(--gap-md);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    max-width: 480px;
   }
 </style>
