@@ -99,10 +99,13 @@
 
 **\*`Local/global inversion:`** `every global constraint is a local objective. Planners try to satisfy all demands and emit surplus/deficit signals. Planner composition converts local failures into global constraints by routing surplus/deficit upward until resolved or declared genuinely infeasible, resulting in local contraction of those dependent demands leading into those independent demands that are relevant to freeing up capacity needed to satisfy those constraints (in doing so attempting to distribute the load of net-sacrifice evenly: sacrifice determined by independent demand priority).`\*
 
+**`Social Recipient:`**
+_`Any named entity within the social plan — a commune, a scope under Scope Committee management, a public works body, a school, a hospital, or a reserve — that receives outputs from a producing scope as part of a planned flow. A social recipient must be identified by name in the PlanStore; delivery to an unnamed entity is not social delivery and generates no validation. The social recipient's act of recording a confirmed receipt EconomicEvent in the PlanStore is the sole basis for social validation of the producing scope's labour. The social recipient may confirm partial quantity (e.g. accepting 80 of 100 units on quality grounds); only the confirmed quantity generates validation. Validation is bounded by the Planned Effort of the relevant work-intent.`_
+
 **`Social Validation of Effort:`**
 
-- **`Administration`** `(or an extension thereof) can socially-validate work-intent satisfaction in a Process only up to the limit of the Planned Effort of the work-intent.`
-- **`recognition-of-contribution`** `is non-transferable and retractable by the recognizer.`
+- **`The social recipient validates work-intent satisfaction`** `in a Process by recording a confirmed receipt EconomicEvent in the PlanStore. Validation is bounded by the Planned Effort of the work-intent: a recipient cannot validate more effort than the plan anticipated for that output.`
+- **`recognition-of-contribution`** `is non-transferable and retractable by the recognizer (the social recipient).`
   - `A plan’s failure to produce desired outcomes is a risk shared by society. Process inputs/outputs are recorded and inform future plans. Reserves/buffers aim to limit the harm of failures.`
 
 **`Capacity & Individual Claim Equations:`**
@@ -347,17 +350,190 @@ _`Infrastructure operators (Aggregators/Indexers/Planners etc.) are responsible 
 
 # **Draft Specification**
 
-**`Communization of Knowledge:`**  
-`The goal is that no community, however isolated, should lack access to the sum total of human productive knowledge.`
+**`Communization of Knowledge:`** `The goal is that no community, however isolated, should lack access to the sum total of human productive knowledge.`
 
-- **`Open Recipe Libraries:`**
-  - `indexed by SNE, metabolic impact, and bioregional suitability`
-  - **`OpenSourceEcologies`**
-- **`Documentation`**
-- **`Translation`**
-- **`Other Key Recipes`**
+- **`Open Recipe Libraries:`** `Indexed by SNE, metabolic impact, and bioregional suitability.`
+- **`Key Components:`** `OpenSourceEcologies, Documentation, Translation, and other key recipes.`
 
-**`Planning across borders:`**
+**`Transition in Low-Income Regions:`**
+
+- **`Strategic Priority:`**
+- **`Effect:`**
+
+**`Transition in High-Income Regions:`** `High-income regions face a specific contradiction: they import most real goods but have idle labor and resources.`
+
+- **`Strategic Priority:`** `Organizing the unemployed and precariously employed to meet local needs through local production using open recipes.`
+- **`Effect:`** `Reduces import dependence, builds alternative institutions, demonstrates planner capability, creates material pressure on wages in the remaining market sector, and prepares the ground for deeper transition when crisis hits.`
+
+**`Scope Committees:`** `Scopes are spatial assemblages of economic resources — factories, farms, mines, transport networks, research institutions. Scope Committees are elected by workers within a scope to steward the transition of production.`
+
+- **`Rights:`**
+  - **`Decisions:`** `for all scope-participants on matters internal to the scope's production process, subject to federation decisions on matters of broader metabolic interdependence`
+  - **`Immediately-Revoke:`** `scope-participants (committee members), delegates to parent-scope assemblies, technical consultants`
+  - **`Access:`** `Full visibility into all scope operations, including: business secrets, financial records, supply contracts, customer lists; technical specifications and recipes; maintenance schedules and equipment condition; labor processes and skill inventories; input sources and output destinations`
+  - **`Communicate:`** `Publish all doings and shortcomings — to workers within the scope, to the parent federation, to the public`
+  - **`Inspect:`** `Send observers to suppliers, customers, and related scopes to trace metabolic connections`
+  - **`Propose:`** `Alternative production plans, repurposing of equipment, disassembly recipes`
+  - **`Withdraw:`** `The right to initiate withdrawal from a federation, subject to settlement of obligations`
+- **`Responsibilities:`**
+  - **`To electors (scope-participants):`** `Faithful execution of binding mandates, regular reporting and open meetings, publication of all records obtained through access rights, economic literacy training — turning all workers into planners`
+  - **`To federation:`** `Provide accurate capacity data, abide by delegated decisions, seek planning-based dispute resolution where federation authority is contested`
+  - **`To external-constituency:`** `Grant standing to materially affected non-workers; consider interests of downstream communities, neighbors, future inhabitants`
+  - **`To the movement as a whole:`** `Prepare for direct workers' management when conditions permit. Document all learning — create recipes for how other scopes can do the same.`
+
+**`Scope Committee Tasks:`**
+
+| `Phase`                  | `Activity`                                                                                                                                                                                                                                              |
+| :----------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Infiltration & Mapping` | `Workers use their access rights to document everything. Not passive observation — active investigation. Where do inputs come from? Where do outputs go? Who decides? What skills exist? What's hidden? Build the real PlanStore from below.`           |
+| `Exposure`               | `Publish business secrets. Make visible to all workers — and to society — the actual accounts: what capitalists extract, what gets wasted, what's squandered through anarchy and profit-seeking.`                                                       |
+| `Control`                | `Begin intervening. Not yet management, but oversight. Challenge decisions that harm workers or communities. Use metabolic visibility to show consequences. Build worker confidence and competence.`                                                    |
+| `Planning`               | `Develop alternative plans from within the scope. Show what could be produced, how work could be organized, what would change if workers managed. Use the same planning tools — PlanNetters, indexes, recipes — but now with real data from inside.`    |
+| `Management`             | `When conditions permit — when the old power is broken or withdrawn — transition from control to direct management. The committee becomes the managing body. The PlanStore becomes binding. The scope operates as a cooperative within the federation.` |
+
+**`Scope Committee Composition:`**
+
+- **`Elected Delegates:`** `Workers from within the scope, chosen by their peers, immediately revocable, bound by imperative mandate`
+- **`Technical Consultants:`** `Accountants, statisticians, engineers, scientists, and others called in as needed — as advisors, not decision-makers. Selected for sincere devotion to the people, not for technocratic authority.`
+- **`Affected Interest Representatives:`** `Where scope operations materially affect non-workers (neighbors, downstream communities), those affected have standing to send observers or delegates with limited participation rights defined by the relevant federation.`
+- **`Scope Hierarchy:`** `Workplace -> Enterprise -> Branch -> Regional -> National -> International.`
+
+- **`Dual Power Within the Scope:`** `At first, the Scope Committee changes nothing about ownership or legal authority. The capitalist still owns; the manager still manages; the shareholder still extracts. But every decision can now be scrutinized, every secret exposed, every lie countered with visible truth. This cannot last. The committee either:`
+  1. `Accumulates power (through production, worker loyalty, militia strength) until it displaces the capitalist.`
+  2. `Is co-opted (incorporated into management, separated from workers) and becomes a new layer of control. Co-optation signal: if wage_rate_normalized for committee members diverges upward from workers', the committee is separating from those it represents.`
+
+**`Gradual Transition Within the Scope:`** `A scope cannot sever market connections overnight without collapse. Its current operation depends on inputs bought on markets and outputs sold on markets. Transition from capitalist operation to associated production must be gradual, deliberate, and safe.`
+
+**`Two Plans, One Scope:`**
+
+| `Plan`         | `Description`                                                                                                                                                                                                                   |
+| :------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Current Plan` | `The plan that actually governs production today. Inputs sourced from markets, outputs sold to markets, labor organized according to capitalist command. The Scope Committee maps it, exposes it, but does not yet control it.` |
+| `Desired Plan` | `The plan the workers would implement if they managed. Inputs chosen for metabolic sustainability, outputs chosen for social need, labor organized cooperatively. Replenishment demands honored. Reserves maintained.`          |
+
+_`The gap between Current Plan and Desired Plan is the measure of capitalist distortion. Closing that gap is the work of transition.`_
+
+**`Three Classes of Plans:`**
+
+| `Class`            | `Feasible Without Social Plan?` | `Feasible With Social Plan?` | `Transition Path`                                                                                                                     |
+| :----------------- | :------------------------------ | :--------------------------- | :------------------------------------------------------------------------------------------------------------------------------------ |
+| `Autonomous`       | `Yes`                           | `Yes`                        | `Implementable immediately. First steps — low-hanging fruit requiring no federation coordination.`                                    |
+| `Social-Dependent` | `No`                            | `Yes`                        | `Cannot be implemented until the federation provides inputs or absorbs outputs. These become demands on the social plan.`             |
+| `Infeasible`       | `No`                            | `No`                         | `Cannot be implemented with current technology or resources. Set aside but not forgotten — may become feasible as conditions change.` |
+
+_`Scope Committees prioritize Autonomous plans first — they build momentum and deepen worker commitment. Social-Dependent plans are brought to the federation. Infeasible plans are held as a horizon.`_
+
+**`Social Plan as Enabler:`** `The federation of scopes exists to enable transitions that individual scopes cannot accomplish alone. Its role is not to command, but to supply and absorb.`
+
+- **`Supply-Side Support:`** `When a scope's Desired Plan requires inputs not available through markets (sustainably grown cotton, non-toxic dyes, repairable components), the federation searches for scopes that can produce them. If none exist, it may seed new production.`
+- **`Demand-Side Support:`** `When a scope's Desired Plan produces outputs that markets won't buy, the federation becomes a customer — distributing outputs to other scopes, social consumption (schools, hospitals, public works), or reserves. It provides labor, replenishment, resources that keeps the producing scope viable.`
+
+_`The social plan's capacity grows as more scopes join, as more Autonomous plans succeed, as more Social-Dependent plans are attempted and validated.`_
+
+**`Communal Satisfaction of Need:`** `The social plan does not only produce goods for individual claim — it also satisfies needs communally. Housing, healthcare, childcare, food security, public transport: when these are provided as collective goods by the social plan, workers no longer purchase them individually on the market.`
+
+_`Communal satisfaction of need is distinguished from market satisfaction of need not by the goods themselves but by the social relation: market satisfaction binds need to dollar income, creating dependence on employment and wage-setting. Communal satisfaction dissolves that binding — need is met through collective production, validated by use, not priced.`_
+
+_`This creates a positive feedback loop within the transition:`_
+
+1. _`As communal provision expands, communal_need_coverage[i]rises anduncovered_essential_expenses[i] falls.`_
+2. _`The minimum viable dollar wage falls — workers can tolerate a lower dollar wage without real hardship because survival needs are no longer market-dependent.`_
+3. _`Lower minimum viable dollar wage reduces resistance to increasing social_output_fraction (which reduces market revenue and thus dollar wages).`_
+4. _`Faster transition deepens the social plan's productive capacity, enabling further communal provision — closing the loop.`_
+
+_`This feedback runs independently of the substitution ratio. A scope can have a balanced substitution ratio while communal_satisfaction_ratio rises steadily, signaling deepening transition even where individual compensation appears stable.`_
+
+_`The effect is strongest in low-income regions, where a larger fraction of current market income covers bare essentials. A worker spending 60% of their wage on housing, healthcare, and childcare is far more sensitive to dollar wage reductions than one spending 10%. Communal provision of those three essentials alone can transform the political economy of transition without touching the individual claims pool.`_
+
+_`The individual claims pool remains a distinct category — it is not diminished by communal provision. Its character changes: as communal coverage absorbs survival goods, the claims pool shifts from a survival instrument to a discretionary one. Workers use it for cultural goods, personal tools, travel, and non-essential consumption. This shift, visible in the Observer's data, marks one of the clearest signs that a scope's transition is deepening.`_
+
+**`Gradual Substitution Ladder:`** `For each input or output targeted for substitution, the scope climbs a ladder of increasing social integration. The transition is not smooth:`
+
+| `Rung`             | `Description`                                                                                                                                                         |
+| :----------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1. Observation`   | `Map flows, identify opportunities. Build the real PlanStore from below.`                                                                                             |
+| `2. Partial Trial` | `Social plan supplies/absorbs ~10% on trial basis.`                                                                                                                   |
+| `3. Evaluation`    | `Assess quality, reliability, metabolic cost. Fall back to market if the social plan fails to deliver.`                                                               |
+| `4. Expansion`     | `Increase social fraction to 25%, then 50%, 75%, 90% over successive cycles.`                                                                                         |
+| `5. [CONFLICT]`    | `The capitalist refuses further concessions, the state intervenes, or strikebreakers cross picket lines. Advance becomes blocked.`                                    |
+| `6. Defense`       | `The workers' militia appears. The committee defends its right to exist and to transition. PlanStores and assemblies are protected.`                                  |
+| `7. Consolidation` | `After conflict resolves — through capitalist flight, expropriation, or negotiated settlement — the committee secures management. The Desired Plan begins to govern.` |
+| `8. Full Social`   | `Social plan supplies/absorbs 100%. The scope operates as a cooperative within the federation.`                                                                       |
+
+_`At any rung before Conflict, if the social plan fails to deliver, the scope falls back to the market. This safety net is essential — it allows ambitious transition without catastrophic risk.`_
+
+**`Conflict Between Current and Desired:`** `The scope operates two plans but has one set of machines, one workforce, one flow of inputs and outputs. When the plans compete for the same resources:`
+
+- **`During Control Phase:`** `The capitalist's plan prevails. Conflict is pedagogical — it reveals the gap between what is and what could be.`
+- **`During Transition Phase:`** `The scope begins implementing Autonomous plans alongside the capitalist's plan. Conflict is managed through negotiation and worker pressure.`
+- **`During Management Phase:`** `The capitalist is gone. Conflict is internal — between worker preferences, technical possibilities, ecological constraints — resolved through democratic process.`
+
+**`Scope Committee Observer Procedure:`** `The Observer measures the gap between Current and Desired plans. The Observer publishes all findings openly, making visible how much output goes to the social vs market and comparing expected compensation. The numbers serve as an organizing tool for assemblies and public meetings, not just a technical calculation.`
+
+- **`Physical Flow Fractions:`**
+  - `social_input_fraction = social_inputs / total_inputs (fraction of inputs sourced from the social plan)`
+  - `social_output_fraction = social_outputs / total_outputs (fraction of outputs dispatched to named social recipients)`
+  - `confirmed_output_fraction = confirmed_social_outputs / total_outputs (fraction confirmed received via EconomicEvent in the PlanStore)`
+- **`Input Substitution Mechanisms:`** `(three ways social_input_fraction increases)`
+  - **`New social provider:`** `The federation creates or seeds a new socially-organised source for this input. Slow to establish; deepens the social plan's productive base permanently.`
+  - **`Supplier partial transition:`** `An existing supplier's own Scope Committee redirects a fraction of their output to the social plan. Both scopes advance their fractions together; their trajectories are coupled.`
+  - **`Dollar bridge:`** `subsidy_received from the federation covers market input costs while input substitution capacity is being built. Does not increase social_input_fraction — inputs still come from market. A bridge, not a destination: dollar subsidies without concurrently expanding the social claim pool creates dependency, not transition.`
+- **`Dollar Solvency Constraint:`**
+  - `(market_revenue + social_cash_revenue + subsidy_received) ≥ (market_input_cost + social_input_cash_cost + dollar_wages + other_costs + contribution_sent)`
+- **`Labor Validation:`**
+  - `hours_worked[i] — pre-split total: the worker's full hours for the period before any social/market fraction is applied. All splits are derived calculations on top of this number.`
+  - `validated_hours[i] = confirmed_output_fraction × hours_worked[i] (automatic once the recipient records receipt; bounded by the Planned Effort of the work-intent)`
+  - _`Validation originates with the social recipient, not the producing scope. Unconfirmed deliveries — due to quality failures, delivery shortfalls, or disputes — generate no claim. If confirmed_output_fraction lags social_output_fraction, workers' claim capacity falls below expectation, creating material pressure to resolve the gap.`_
+- **`Compensation Equations:`**
+  - **`Dollar Wage (from market revenue):`** `total_dollar_wages = (1 - social_output_fraction) × total_output_market_value × labor_share_of_revenue wage_rate_normalized[i] = hourly_rate[i] / average_hourly_rate (= 1 for all workers when rates are equal; captures pre-existing wage differentials carried over from capitalist operation) dollar_wage[i] = total_dollar_wages × (hours_worked[i] × wage_rate_normalized[i]) / Σ(hours_worked[j] × wage_rate_normalized[j]) If social_output_fraction increases but dollar wages do not decrease proportionally (because workers resist wage cuts), the scope becomes insolvent. Co-optation signal: if wage_rate_normalized for committee members diverges upward from workers', the committee is separating from those it represents.`
+  - **`Claim Capacity (from social pool):`** `claim_capacity[i] = validated_hours[i] × (available_claimable_pool / total_social_svc) + solidarity_supplement[i]`
+  - **`Communal Need Coverage:`** `communal_need_coverage[i] — the market cost equivalent of essential goods and services (housing, healthcare, childcare, food security, public transport) that the social plan provides communally to worker i, at no individual cost. These are collectively-provisioned through the social plan, not drawn from the individual claims pool. uncovered_essential_expenses[i] — remaining market cost of essentials not yet communally covered; falls as communal provision expands. effective_net_market_wage[i] = dollar_wage[i] − uncovered_essential_expenses[i] As communal_need_coverage[i] grows, uncovered_essential_expenses[i] falls and effective_net_market_wage[i] approaches dollar_wage[i] in discretionary character — the dollar wage increasingly covers preference, not survival. The minimum viable dollar wage falls with it, reducing resistance to social_output_fraction increases.`
+- **`The composition Ratio (Real Purchasing Power):`**
+  - `claim_purchasing_power  = goods per 1 SVC unit in the local claim pool`
+  - `dollar_purchasing_power = goods per $1 in local markets`
+  - `social_real_wage_per_hour = average_claim_per_validated_hour × claim_purchasing_power`
+  - `market_real_wage_per_hour = average_dollar_wage_per_hour     × dollar_purchasing_power`
+  - `composition_ratio = [social_real_wage_per_hour × confirmed_output_fraction] / [market_real_wage_per_hour × (1 - social_output_fraction)]`
+  - _`Workers compare real goods received per hour of work on each side of the transition. Neither the per-hour rates alone (which omit purchasing power differences between SVC and dollars) nor the purchasing power terms alone (which omit the per-hour compensation rates) are sufficient — the correct ratio requires both. A gap between confirmed_output_fraction and social_output_fraction — unconfirmed deliveries — depresses the social side and creates material pressure to resolve outstanding confirmations.`_
+  - _`Political usage:`_ `The substitution ratio is published for every scope. Workers can see whether their social compensation matches their market compensation, whether the gap is growing or shrinking, and how their scope compares to others. Transparency turns compensation into a democratic question: "Why is our substitution ratio 0.7 when the neighboring scope's is 1.1?" Assemblies debate, federations adjust, and the Observer recalculates.`
+- **`The Communal Satisfaction Ratio:`**
+  - `total_social_value[i] = (claim_capacity[i] × claim_purchasing_power) + communal_need_coverage[i]`
+  - `communal_satisfaction_ratio = total_social_value[i] / effective_net_market_wage[i]`
+  - _`Where the substitution ratio compares compensation streams per hour of work, the communal satisfaction ratio compares total social plan value — claim pool access plus communal provision — against what the market wage must actually cover. As communal_need_coverage[i] grows, effective_net_market_wage[i] shrinks even without any change in dollar_wage[i]: the communal satisfaction ratio rises from expansion of provision alone, without any change in social_output_fraction.`_
+  - _`The individual claims pool is not diminished by communal provision — it is a separate category. But its character changes: as communal coverage absorbs survival goods (housing, healthcare, childcare), the claims pool shifts from a survival instrument to a discretionary one. Workers use it for cultural goods, personal tools, travel, non-essential consumption. This shift in the character of the claims pool, visible in the Observer's data, is one of the clearest signs that a scope's transition is deepening.`_
+- **`Federation Role in Transition Composition:`**
+  - `For proposed (social_input_fraction_next, social_output_fraction_next), the Observer computes required subsidy_received to balance dollars.`
+  - `If composition_ratio_next << 1 or subsidy_received exceeds federation capacity, the federation must:`
+    1. `Increase available claimable pool (reclassify goods to individual-claimable)`
+    2. `Accept more confirmed outputs (if currently under-confirming)`
+    3. `Provide dollar subsidies (as a bridge, not a permanent solution)`
+    4. `Negotiate a slower social_output_fraction increase.`
+  - _`Note: Dollar subsidies without concurrently expanding the social claim pool creates dependency, not transition.`_
+
+**`Observer's Report:`** `The Observer produces a report each planning cycle covering:`
+
+- **`Current State Snapshot:`** `social_input_fraction, social_output_fraction, confirmed_output_fraction; dollar_balance; total_dollar_wages; composition_ratio; communal_satisfaction_ratio; per-worker: hours_worked[i], dollar_wage[i], total_claim_capacity[i], communal_need_coverage[i], effective_net_market_wage[i]`
+- **`Transition Feasibility:`** `For each proposed (social_input_fraction_next, social_output_fraction_next), compute required subsidy_received_next to balance dollars and projected composition_ratio_next.`
+- **`Recommendation:`** `Proposed targets, subsidy_request, projected substitution ratio, resistance risk.`
+
+**`Committee Decision:`** `The elected workers review the Observer's report and decide:`
+
+1. **`Targets:`** `social_input_fraction_target, social_output_fraction_target for next period`
+2. **`Request:`** `subsidy_request from federation (if needed)`
+3. **`Communication:`** `Send to federation: "We can increase social provision to social_output_fraction_target if you provide subsidy_request dollars and can absorb these outputs."`
+
+**`Key Insight:`** `The transition is constrained by three things simultaneously: (1) Dollar balance — can the scope cover remaining dollar costs as market revenue shrinks? (2) Substitution ratio — do workers receive equivalent real purchasing power from social and market compensation? (3) Communal satisfaction ratio — does the social plan's total value (claims plus communal provision) remain sufficient relative to what the market wage must still cover? All three must be tracked at each step. The substitution ratio is where individual compensation resistance emerges. The communal satisfaction ratio is where the transition's political sustainability is built — as communal provision grows, the minimum viable dollar wage falls, and the political economy of transition shifts.`
+
+**`Global Claim Pool & Political Sustainability:`** `One hour of socially-validated labor anywhere yields the same baseline claim capacity. The claim pool makes visible what capitalist prices hide: that an hour producing food in Mozambique and an hour producing financial instruments in Luxembourg are not inherently unequal. Their apparent inequality under capitalism reflects not real value but the power to extract.`
+
+_`The global pool inverts this: value is determined by social validation of useful output.`_
+
+_`Whether this massive reorientation is politically sustainable depends on material interdependence:`_
+
+- `Do high-income regions produce anything low-income regions actually need?`
+- `If yes, the relationship is mutual—each needs what the other produces.`
+- `If no, their claim on the global pool rests on convincing others that their labor deserves equal recognition despite producing little of use.`
+- _`The transition's political sustainability rests on this material truth, not on moral appeals. Regions that produce real goods hold material power. Regions that produce only claims on future production hold only persuasion.`_
 
 **`Inspirations:`**  
 _`Critique of the Gotha Program`_`, Karl Marx`  

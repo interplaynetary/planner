@@ -16,9 +16,10 @@
 
 import { computeBufferZone, computeMinMaxBuffer, recipeLeadTime, legLeadTime, deriveVariabilityFactor } from '$lib/algorithms/ddmrp';
 import type { BufferProfile } from '$lib/schemas';
+import type { DayOfWeek } from '$lib/utils/time';
 import {
     registry, recipes, bufferZones, capacityBuffers, agents, planner, observer, refresh,
-    locations, upsertBufferProfile, commune, resourcePriceSvc,
+    locations, upsertBufferProfile, commune, resourcePriceSvc, upsertDemandPolicy,
 } from '$lib/vf-stores.svelte';
 
 export function seedExample(): void {
@@ -73,6 +74,11 @@ export function seedExample(): void {
     recipes.addResourceSpec({ id: 'rs-tools',   name: 'Hand Tools Kit', defaultUnitOfResource: 'kits',   resourceClassifiedAs: ['individual-claimable'] });
     recipes.addResourceSpec({ id: 'rs-energy',  name: 'Energy Credits', defaultUnitOfResource: 'kWh',    resourceClassifiedAs: ['individual-claimable'] });
     recipes.addResourceSpec({ id: 'rs-housing', name: 'Housing Units',  defaultUnitOfResource: 'nights', resourceClassifiedAs: ['individual-claimable'] });
+
+    // ── KNOWLEDGE: Communal-classified ResourceSpecs ──────────────────────────
+    recipes.addResourceSpec({ id: 'rs-medicine',   name: 'Medicine',            defaultUnitOfResource: 'doses', resourceClassifiedAs: ['communal', 'communal-demand'] });
+    recipes.addResourceSpec({ id: 'rs-sanitation', name: 'Sanitation Supplies', defaultUnitOfResource: 'kits',  resourceClassifiedAs: ['communal', 'communal-demand'] });
+    recipes.addResourceSpec({ id: 'rs-education',  name: 'Education Materials', defaultUnitOfResource: 'sets',  resourceClassifiedAs: ['communal', 'communal-demand'] });
 
     // ── KNOWLEDGE: Process Specifications ─────────────────────────────────────
     recipes.addProcessSpec({ id: 'ps-fab-frame',  name: 'Frame Fabrication',    isDecouplingPoint: true,                         bufferType: 'stock'    });
@@ -260,7 +266,30 @@ export function seedExample(): void {
         observer.registerCommitment(c);
     }
 
+    // ── KNOWLEDGE: Humanitarian resource specs ────────────────────────────────
+    recipes.addResourceSpec({ id: 'rs-emrg-food',    name: 'Emergency Food',      image: '🍱', defaultUnitOfResource: 'meals',  resourceClassifiedAs: ['individual-claimable'] });
+    recipes.addResourceSpec({ id: 'rs-clean-water',  name: 'Clean Water',         image: '💧', defaultUnitOfResource: 'liters', resourceClassifiedAs: ['individual-claimable'] });
+    recipes.addResourceSpec({ id: 'rs-med-supplies', name: 'Medical Supplies',    image: '🩹', defaultUnitOfResource: 'boxes',  resourceClassifiedAs: ['communal-demand'] });
+    recipes.addResourceSpec({ id: 'rs-school-books', name: 'School Books',        image: '📚', defaultUnitOfResource: 'books',  resourceClassifiedAs: ['communal-demand'] });
+    recipes.addResourceSpec({ id: 'rs-shelter',      name: 'Shelter Tents',       image: '⛺', defaultUnitOfResource: 'units',  resourceClassifiedAs: ['individual-claimable'] });
+    recipes.addResourceSpec({ id: 'rs-mentoring',    name: 'Technical Mentoring', image: '👩‍💻', defaultUnitOfResource: 'hours',  resourceClassifiedAs: ['individual-claimable'] });
+    recipes.addResourceSpec({ id: 'rs-clothing',     name: 'Warm Clothing',       image: '🧥', defaultUnitOfResource: 'items',  resourceClassifiedAs: ['individual-claimable'] });
+    recipes.addResourceSpec({ id: 'rs-const-tools',  name: 'Construction Tools',  image: '🔧', defaultUnitOfResource: 'sets',   resourceClassifiedAs: ['communal-demand'] });
+    recipes.addResourceSpec({ id: 'rs-seeds',        name: 'Reforestation Seeds', image: '🌱', defaultUnitOfResource: 'seeds',  resourceClassifiedAs: ['communal-demand'] });
+
     // ── INTENT ────────────────────────────────────────────────────────────────
+    // Humanitarian demand slots
+    const weeklyAll = { day_schedules: [{ days: ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] as DayOfWeek[], time_ranges: [{ start_time: '09:00', end_time: '17:00' }] }] };
+    planner.addIntent({ id: 'i-food',    action: 'transfer', image: '🍱', name: 'Emergency Food',      resourceConformsTo: 'rs-emrg-food',    resourceQuantity: { hasNumericalValue: 1500, hasUnit: 'meals'  }, receiver: 'ose', availability_window: weeklyAll });
+    planner.addIntent({ id: 'i-water',   action: 'transfer', image: '💧', name: 'Clean Water',         resourceConformsTo: 'rs-clean-water',  resourceQuantity: { hasNumericalValue: 1000, hasUnit: 'liters' }, receiver: 'ose', availability_window: weeklyAll });
+    planner.addIntent({ id: 'i-med',     action: 'transfer', image: '🩹', name: 'Medical Supplies',    resourceConformsTo: 'rs-med-supplies', resourceQuantity: { hasNumericalValue: 50,   hasUnit: 'boxes'  }, receiver: 'ose', availability_window: weeklyAll });
+    planner.addIntent({ id: 'i-books',   action: 'transfer', image: '📚', name: 'School Books',        resourceConformsTo: 'rs-school-books', resourceQuantity: { hasNumericalValue: 200,  hasUnit: 'books'  }, receiver: 'ose', availability_window: weeklyAll });
+    planner.addIntent({ id: 'i-shelter', action: 'transfer', image: '⛺', name: 'Shelter Tents',       resourceConformsTo: 'rs-shelter',      resourceQuantity: { hasNumericalValue: 30,   hasUnit: 'units'  }, receiver: 'ose', availability_window: weeklyAll });
+    planner.addIntent({ id: 'i-mentor',  action: 'transfer', image: '👩‍💻', name: 'Technical Mentoring', resourceConformsTo: 'rs-mentoring',    resourceQuantity: { hasNumericalValue: 40,   hasUnit: 'hours'  }, receiver: 'ose', availability_window: weeklyAll });
+    planner.addIntent({ id: 'i-cloth',   action: 'transfer', image: '🧥', name: 'Warm Clothing',       resourceConformsTo: 'rs-clothing',     resourceQuantity: { hasNumericalValue: 300,  hasUnit: 'items'  }, receiver: 'ose', availability_window: weeklyAll });
+    planner.addIntent({ id: 'i-tools',   action: 'transfer', image: '🔧', name: 'Construction Tools',  resourceConformsTo: 'rs-const-tools',  resourceQuantity: { hasNumericalValue: 20,   hasUnit: 'sets'   }, receiver: 'ose', availability_window: weeklyAll });
+    planner.addIntent({ id: 'i-seeds',   action: 'transfer', image: '🌱', name: 'Reforestation Seeds', resourceConformsTo: 'rs-seeds',        resourceQuantity: { hasNumericalValue: 5000, hasUnit: 'seeds'  }, receiver: 'ose', availability_window: weeklyAll });
+
     // Steel reorder: current stock (15m) is short of one full build (20m)
     planner.addIntent({
         id: 'i-steel',
@@ -281,15 +310,16 @@ export function seedExample(): void {
     commune.addToPool('communal', 1200);
 
     // Member accounts — varied contribution histories
-    // welfare_allocation_rate = 0.15 → welfare_fund = 800 × 0.15 = 120 SVC
-    // available_claimable     = 800 - 120 = 680 SVC  (distributed by contribution share)
-    // sum_unmet_capacity      = 0.25 (Sara) + 0.15 (Kai) = 0.40
+    // sum_met = 1+1+1+0.75+0.85 = 4.60,  sum_unmet = 0.25+0.15 = 0.40,  total_mass = 5.00
+    // welfare_allocation_rate = 0.40 / 5.00 = 8%
+    // welfare_fund = 800 × 0.08 = 64 SVC
+    // available_claimable = 800 - 64 = 736 SVC  (distributed by contribution share)
     //
-    // Leo   (310 hrs, full):  310/890 × 680 = 236.9 SVC
-    // Ruzgar(240 hrs, full):  240/890 × 680 = 183.5 SVC
-    // Maya  (185 hrs, full):  185/890 × 680 = 141.3 SVC
-    // Sara  ( 95 hrs, 0.75):   95/890 × 680 + 0.25×(120/0.40) =  72.5 + 75  = 147.5 SVC
-    // Kai   ( 60 hrs, 0.85):   60/890 × 680 + 0.15×(120/0.40) =  45.8 + 45  =  90.8 SVC
+    // Leo   (310 hrs, full):  310/890 × 736              = 256.4 SVC
+    // Ruzgar(240 hrs, full):  240/890 × 736              = 198.5 SVC
+    // Maya  (185 hrs, full):  185/890 × 736              = 152.9 SVC
+    // Sara  ( 95 hrs, 0.75):   95/890 × 736 + 0.25×(64/0.40) =  78.5 + 40 = 118.5 SVC
+    // Kai   ( 60 hrs, 0.85):   60/890 × 736 + 0.15×(64/0.40) =  49.6 + 24 =  73.6 SVC
     commune.ensureAccount('agent-ose').addContribution(240);
     commune.ensureAccount('agent-maya').addContribution(185);
     commune.ensureAccount('agent-leo').addContribution(310);
@@ -301,6 +331,44 @@ export function seedExample(): void {
     const kai = commune.ensureAccount('agent-kai');
     kai.addContribution(60);
     kai.contribution_capacity_factor  = 0.85;   // new joiner, still ramping up (15% unmet)
+
+    // ── COMMUNE: Demand policies ───────────────────────────────────────────────
+    upsertDemandPolicy({
+        id: 'pol-education', name: 'Education Materials',
+        specId: 'rs-education', unit: 'sets',
+        factorType: 'per_member', qtyPerMember: 1,
+        note: '1 set per person per learning cycle',
+        availability_window: {
+            month_schedules: [
+                { month: 3,  time_ranges: [{ start_time: '00:00', end_time: '23:59' }] },
+                { month: 6,  time_ranges: [{ start_time: '00:00', end_time: '23:59' }] },
+                { month: 9,  time_ranges: [{ start_time: '00:00', end_time: '23:59' }] },
+                { month: 12, time_ranges: [{ start_time: '00:00', end_time: '23:59' }] },
+            ],
+        },
+    });
+
+    // ── COMMUNE: Specific communal-demand Intents (time-bound procurement needs) ─
+    planner.addIntent({
+        id: 'i-medicine-q1',
+        action: 'transfer',
+        resourceConformsTo: 'rs-medicine',
+        resourceQuantity: { hasNumericalValue: 50, hasUnit: 'doses' },
+        availableQuantity: { hasNumericalValue: 50, hasUnit: 'doses' },
+        receiver: 'ose',
+        due: '2026-03-31T00:00:00.000Z',
+        note: 'Q1 medicine reserve — WHO minimum 10 doses/member × 5 members',
+    });
+    planner.addIntent({
+        id: 'i-sanitation-mar',
+        action: 'transfer',
+        resourceConformsTo: 'rs-sanitation',
+        resourceQuantity: { hasNumericalValue: 10, hasUnit: 'kits' },
+        availableQuantity: { hasNumericalValue: 10, hasUnit: 'kits' },
+        receiver: 'ose',
+        due: '2026-03-31T00:00:00.000Z',
+        note: 'March sanitation kits — 2 kits/member × 5 members',
+    });
 
     // ── OBSERVATION: Seed on-hand inventory ───────────────────────────────────
     // Raw materials — steel is short (15m on hand vs 20m needed)

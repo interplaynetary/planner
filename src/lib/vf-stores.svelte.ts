@@ -7,6 +7,8 @@ import { AgentStore }            from '$lib/agents';
 import { PlanStore }             from '$lib/planning/planning';
 import { Observer }              from '$lib/observation/observer';
 import { Commune }               from '$lib/observation/account';
+import type { DemandEntry }      from '$lib/observation/account';
+import type { CommuneDemandPolicy, DerivedDependentPolicy } from '$lib/observation/demand-policy';
 import type {
     ResourceSpecification,
     ProcessSpecification,
@@ -83,6 +85,23 @@ export const capacityBufferList      = $state<CapacityBuffer[]>([]);
 export const locationList            = $state<SpatialThing[]>([]);
 export const adjustmentFactorList    = $state<DemandAdjustmentFactor[]>([]);
 export const bufferProfileList       = $state<BufferProfile[]>([]);
+export const communeDemandState      = $state<DemandEntry[]>([]);
+export const communeDemandPolicies      = $state<CommuneDemandPolicy[]>([]);
+export const derivedDependentPolicies   = $state<DerivedDependentPolicy[]>([]);
+
+export interface MemberSnapshot {
+    agentId: string;
+    contribution_capacity_factor: number;
+    gross_contribution_credited: number;
+    contribution_claim: number;
+    solidarity_supplement: number;
+    total_claim_capacity: number;
+    claimed_capacity: number;
+    current_potential_claim_capacity: number;
+    current_actual_claim_capacity: number;
+    current_share_of_claims: number;
+}
+export const communeMembersState = $state<MemberSnapshot[]>([]);
 
 // ── refresh() — sync all $state arrays from the current store instances ──
 function syncArr<T>(target: T[], items: T[]): void {
@@ -96,6 +115,28 @@ export function syncCommune() {
     communeState.individual_claimable_pool_svc = commune.individual_claimable_pool_svc;
     communeState.social_welfare_fund = commune.social_welfare_fund;
     communeState.available_claimable_pool = commune.available_claimable_pool;
+
+    communeMembersState.splice(0, communeMembersState.length, ...commune.allAccounts().map(a => ({
+        agentId:                          a.agentId,
+        contribution_capacity_factor:     a.contribution_capacity_factor,
+        gross_contribution_credited:      a.gross_contribution_credited,
+        contribution_claim:               a.contribution_claim,
+        solidarity_supplement:            a.solidarity_supplement,
+        total_claim_capacity:             a.total_claim_capacity,
+        claimed_capacity:                 a.claimed_capacity,
+        current_potential_claim_capacity: a.current_potential_claim_capacity,
+        current_actual_claim_capacity:    a.current_actual_claim_capacity,
+        current_share_of_claims:          a.current_share_of_claims,
+    })));
+
+    const claimableSpecs = recipes.allResourceSpecs()
+        .filter(s => s.resourceClassifiedAs?.includes('individual-claimable'))
+        .map(s => ({
+            id: s.id,
+            unit: s.defaultUnitOfResource ?? 'units',
+            pricePerUnit: resourcePriceSvc.get(s.id) ?? commune.getResourcePrice(s.id),
+        }));
+    communeDemandState.splice(0, communeDemandState.length, ...commune.communeDemand(claimableSpecs));
 
     if (communeState.activeAgentId) {
         const acct = commune.accountFor(communeState.activeAgentId);
@@ -155,6 +196,8 @@ export function resetStores() {
     resourcePriceSvc.clear();
     adjustmentFactorList.splice(0, adjustmentFactorList.length);
     bufferProfileList.splice(0, bufferProfileList.length);
+    communeDemandPolicies.splice(0, communeDemandPolicies.length);
+    derivedDependentPolicies.splice(0, derivedDependentPolicies.length);
     communeState.activeAgentId = null;
     communeState.pools = {};
     communeState.totalSocialSvc = 0;
@@ -176,6 +219,32 @@ export function upsertAdjustmentFactor(f: DemandAdjustmentFactor): void {
     const idx = adjustmentFactorList.findIndex(a => a.id === f.id);
     if (idx >= 0) adjustmentFactorList.splice(idx, 1, f);
     else adjustmentFactorList.push(f);
+}
+
+/** Add or replace a demand policy by ID. */
+export function upsertDemandPolicy(p: CommuneDemandPolicy): void {
+    const idx = communeDemandPolicies.findIndex(a => a.id === p.id);
+    if (idx >= 0) communeDemandPolicies.splice(idx, 1, p);
+    else communeDemandPolicies.push(p);
+}
+
+/** Remove a demand policy by ID. */
+export function removeDemandPolicy(id: string): void {
+    const idx = communeDemandPolicies.findIndex(a => a.id === id);
+    if (idx >= 0) communeDemandPolicies.splice(idx, 1);
+}
+
+/** Add or replace a derived-dependent policy by ID. */
+export function upsertDerivedDependentPolicy(p: DerivedDependentPolicy): void {
+    const idx = derivedDependentPolicies.findIndex(a => a.id === p.id);
+    if (idx >= 0) derivedDependentPolicies.splice(idx, 1, p);
+    else derivedDependentPolicies.push(p);
+}
+
+/** Remove a derived-dependent policy by ID. */
+export function removeDerivedDependentPolicy(id: string): void {
+    const idx = derivedDependentPolicies.findIndex(a => a.id === id);
+    if (idx >= 0) derivedDependentPolicies.splice(idx, 1);
 }
 
 /** Add or replace a buffer profile by ID. */

@@ -377,3 +377,37 @@ export function hoursInWindowOnDate(window: TemporalExpression, dt: Date): numbe
 
     return 0;
 }
+
+// ─── Display helpers ──────────────────────────────────────────────────────────
+
+const _MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const _DAYS_ABBR: Record<DayOfWeek, string> = {
+    monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu',
+    friday:'Fri', saturday:'Sat', sunday:'Sun'
+};
+
+/**
+ * Produce a compact human-readable label for a TemporalExpression.
+ * Used by SlotCard, Slot.svelte, CommunalDemandSpecCard, etc.
+ */
+export function formatWhen(window?: TemporalExpression, due?: string): string {
+    if (window) {
+        if (isSpecificDateWindow(window)) {
+            if (window.specific_dates.length === 1) return window.specific_dates[0];
+            return `${window.specific_dates.length} dates`;
+        }
+        if (window.month_schedules?.length)
+            return `↻ ${window.month_schedules.map(ms => _MONTHS[ms.month - 1]).join(', ')}`;
+        if (window.week_schedules?.length) {
+            const weeks = [...new Set(window.week_schedules.flatMap(ws => ws.weeks))].sort((a,b)=>a-b).join(', ');
+            return `↻ weeks ${weeks}`;
+        }
+        if (window.day_schedules?.length) {
+            const days = [...new Set(window.day_schedules.flatMap(ds => ds.days))].map(d => _DAYS_ABBR[d] ?? d).join(', ');
+            return `↻ ${days}`;
+        }
+        return '↻ daily';
+    }
+    if (due) return `due ${due.slice(0, 10)}`;
+    return '';
+}

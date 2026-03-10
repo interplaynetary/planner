@@ -140,7 +140,7 @@
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: var(--zone-yellow);
+    color: var(--zone-green);
     flex-shrink: 0;
   }
 

@@ -43,6 +43,18 @@ export interface CommuneOptions {
     recipeStore?: RecipeStore;
 }
 
+/** Per-member, per-spec demand entry produced by Commune.communeDemand(). */
+export interface DemandEntry {
+    agentId: string;
+    specId: string;
+    unit: string;
+    pricePerUnit: number;
+    /** current_actual_claim_capacity for this member */
+    svcBudget: number;
+    /** floor(svcBudget / pricePerUnit) */
+    maxQty: number;
+}
+
 export class Commune {
     /**
      * Pool tracking for various resource classifications.
@@ -209,6 +221,32 @@ export class Commune {
             total += account.current_potential_claim_capacity;
         }
         return total;
+    }
+
+    /**
+     * Commune's independent demand for a set of specs, expressed as per-member
+     * max-affordable quantities given current claim capacities.
+     *
+     * @param specs - list of { id, unit, pricePerUnit } for individual-claimable specs
+     * @returns one DemandEntry per (account, spec) pair where pricePerUnit > 0
+     */
+    communeDemand(specs: { id: string; unit: string; pricePerUnit: number }[]): DemandEntry[] {
+        const result: DemandEntry[] = [];
+        for (const account of this.accounts.values()) {
+            const budget = account.current_actual_claim_capacity;
+            for (const { id, unit, pricePerUnit } of specs) {
+                if (pricePerUnit <= 0) continue;
+                result.push({
+                    agentId: account.agentId,
+                    specId: id,
+                    unit,
+                    pricePerUnit,
+                    svcBudget: budget,
+                    maxQty: Math.floor(budget / pricePerUnit),
+                });
+            }
+        }
+        return result;
     }
 
     /** Add SVC value to a specific pool when goods are produced. */
