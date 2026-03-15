@@ -711,6 +711,30 @@ export function planForScope(
 
         const supplyPlanId = `supply-${generateId()}`;
         planStore.addPlan({ id: supplyPlanId, name: `Supply plan for ${supplySlot.spec_id}` });
+
+        // For produce intents (scheduled_receipt), synthesise a process node so it
+        // shows up in the network diagram even when the spec is a terminal product
+        // with no downstream consumption recipe.  The node's outputOf intent is also
+        // picked up by the edge-drawing logic in ScopeNetworkDiagram, connecting it
+        // to any downstream consuming process created by dependentSupply below.
+        if (supplySlot.slot_type === 'scheduled_receipt') {
+            const specName = ctx.recipeStore.getResourceSpec(supplySlot.spec_id)?.name ?? supplySlot.spec_id;
+            const unit = ctx.recipeStore.getResourceSpec(supplySlot.spec_id)?.defaultUnitOfResource ?? 'unit';
+            const proc = processes.register({
+                name: `Produce ${specName}`,
+                plannedWithin: supplyPlanId,
+                finished: false,
+            });
+            planStore.addIntent({
+                action: 'produce',
+                outputOf: proc.id,
+                resourceConformsTo: supplySlot.spec_id,
+                resourceQuantity: { hasNumericalValue: supplySlot.quantity, hasUnit: unit },
+                plannedWithin: supplyPlanId,
+                finished: false,
+            });
+        }
+
         const result = dependentSupply({
             planId: supplyPlanId,
             supplySpecId: supplySlot.spec_id,

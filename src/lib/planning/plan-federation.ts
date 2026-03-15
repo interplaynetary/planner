@@ -359,6 +359,18 @@ export function planFederation(
         }
     }
 
+    // Write resolved shortfalls back to ALL copies of each deficit in byScope.
+    // deficitWork mutated shortfall in-place on local copies; byScope still has
+    // the original values — the resolvedPct stat reads from byScope so we must sync.
+    const finalShortfall = new Map<string, number>();
+    for (const d of deficitWork) finalShortfall.set(d.intentId, d.shortfall);
+    for (const result of byScope.values()) {
+        for (const d of result.deficits) {
+            const resolved = finalShortfall.get(d.intentId);
+            if (resolved !== undefined) d.shortfall = resolved;
+        }
+    }
+
     // Residual unresolved (survived all passes)
     for (const d of root.deficits) {
         if (d.shortfall > 1e-9) {

@@ -46,14 +46,49 @@
   function buildFederationRecipes(): RecipeStore {
     const rs = new RecipeStore();
 
-    // Resource specs
-    const specDefs: [string, string][] = [
-      ["wheat", "Wheat"], ["dairy", "Dairy"], ["tools", "Tools"], ["goods", "Goods"],
-      ["olive-oil", "Olive Oil"], ["citrus", "Citrus"], ["flour", "Flour"], ["bread", "Bread"],
-      ["fish", "Fish"], ["salt", "Salt"], ["metal", "Iron Metal"], ["ore", "Iron Ore"],
-      ["dough", "Dough"], ["brine", "Brine"], ["raw-flour", "Raw Flour"],
+    // Resource specs — [id, name, defaultUnitOfResource]
+    const specDefs: [string, string, string][] = [
+      ["wheat",           "Wheat",            "kg"  ],
+      ["dairy",           "Dairy",            "kg"  ],
+      ["tools",           "Tools",            "unit"],
+      ["goods",           "Goods",            "unit"],
+      ["olive-oil",       "Olive Oil",        "liter"],
+      ["citrus",          "Citrus",           "kg"  ],
+      ["flour",           "Flour",            "kg"  ],
+      ["bread",           "Bread",            "loaf"],
+      ["fish",            "Fish",             "kg"  ],
+      ["salt",            "Salt",             "kg"  ],
+      ["metal",           "Iron Metal",       "kg"  ],
+      ["ore",             "Iron Ore",         "kg"  ],
+      ["dough",           "Dough",            "kg"  ],
+      ["brine",           "Brine",            "liter"],
+      ["raw-flour",       "Raw Flour",        "kg"  ],
+      // Extended specs
+      ["porridge",        "Wheat Porridge",   "kg"  ],
+      ["butter",          "Butter",           "kg"  ],
+      ["cheese",          "Cheese",           "kg"  ],
+      ["nails",           "Iron Nails",       "unit"],
+      ["rope",            "Rope",             "m"   ],
+      ["soap",            "Soap",             "unit"],
+      ["juice",           "Citrus Juice",     "liter"],
+      ["citrus-preserve", "Citrus Preserve",  "jar" ],
+      ["pasta",           "Pasta",            "kg"  ],
+      ["raw-pasta",       "Raw Pasta",        "kg"  ],
+      ["flatbread",       "Flatbread",        "loaf"],
+      ["salted-fish",     "Salted Fish",      "kg"  ],
+      ["olive-bread",     "Olive Bread",      "loaf"],
+      // Capacity-chain specs
+      ["malt",            "Malt",             "kg"  ],
+      ["ale",             "Ale",              "liter"],
+      ["yogurt",          "Yogurt",           "kg"  ],
+      ["agri-tools",      "Agricultural Tools","unit"],
+      ["smoked-fish",     "Smoked Fish",      "kg"  ],
+      ["fish-chowder",    "Fish Chowder",     "kg"  ],
+      ["vinegar",         "Citrus Vinegar",   "liter"],
+      ["infused-oil",     "Infused Olive Oil","liter"],
+      ["citrus-loaf",     "Citrus Loaf",      "loaf"],
     ];
-    for (const [id, name] of specDefs) rs.addResourceSpec({ id, name });
+    for (const [id, name, defaultUnitOfResource] of specDefs) rs.addResourceSpec({ id, name, defaultUnitOfResource });
 
     // Process specs
     const procDefs: [string, string][] = [
@@ -64,6 +99,41 @@
       ["ps-flour-sifting", "Flour Sifting"], ["ps-dough-proofing", "Dough Proofing"],
       ["ps-baking", "Baking"], ["ps-fishing", "Fishing"],
       ["ps-salt-extraction", "Salt Extraction"],
+      // Extended process specs
+      ["ps-porridge-cooking", "Porridge Cooking"],
+      ["ps-churning", "Butter Churning"],
+      ["ps-cheese-making", "Cheese Making"],
+      ["ps-nail-forging", "Nail Forging"],
+      ["ps-rope-making", "Rope Making"],
+      ["ps-soap-making", "Soap Making"],
+      ["ps-juice-pressing", "Juice Pressing"],
+      ["ps-citrus-curing", "Citrus Curing"],
+      ["ps-pasta-rolling", "Pasta Rolling"],
+      ["ps-pasta-drying", "Pasta Drying"],
+      ["ps-flatbread-baking", "Flatbread Baking"],
+      ["ps-fish-salting", "Fish Salting"],
+      ["ps-brine-prep", "Brine Preparation"],
+      ["ps-olive-bread-baking", "Olive Bread Baking"],
+      // Demand-satisfying process specs (bread/tools/flour at multiple scopes)
+      ["ps-wheat-bread",      "Wheat Bread Baking"],
+      ["ps-mill-bread",       "Mill Bread Baking"],
+      ["ps-communal-bread",   "Communal Bread Baking"],
+      ["ps-hardtack",         "Hardtack Baking"],
+      ["ps-tool-assembly",    "Tool Assembly"],
+      ["ps-stone-grinding",   "Stone Grinding"],
+      ["ps-hand-sifting",     "Hand Sifting"],
+      ["ps-sea-fishing",      "Sea Fishing"],
+      // Capacity-chain process specs
+      ["ps-grain-mashing",    "Grain Mashing"],
+      ["ps-ale-fermentation", "Ale Fermentation"],
+      ["ps-yogurt-making",    "Yogurt Culturing"],
+      ["ps-agri-forging",     "Agricultural Forging"],
+      ["ps-fish-smoking",     "Fish Smoking"],
+      ["ps-chowder-cooking",  "Chowder Cooking"],
+      ["ps-citrus-fermentation", "Citrus Fermentation"],
+      ["ps-citrus-infusion",  "Citrus Infusion"],
+      ["ps-citrus-loaf-mix",  "Citrus Dough Mixing"],
+      ["ps-citrus-loaf-bake", "Citrus Loaf Baking"],
     ];
     for (const [id, name] of procDefs) rs.addProcessSpec({ id, name });
 
@@ -151,6 +221,303 @@
       rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 40, hasUnit: "hr" } });
       rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 150, hasUnit: "kg" } });
       rs.addRecipe({ id: "recipe-salt-extraction", name: "Salt Extraction", primaryOutput: "salt", recipeProcesses: [rp.id] });
+    }
+
+    // ── Extended recipes ─────────────────────────────────────────────────────
+
+    // commune-grain: wheat + dairy + salt + work → porridge
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-porridge-cooking", name: "Porridge Cooking", processConformsTo: "ps-porridge-cooking" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "wheat", resourceQuantity: { hasNumericalValue: 60, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 5, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 20, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "porridge", resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-wheat-porridge", name: "Wheat Porridge", primaryOutput: "porridge", recipeProcesses: [rp.id] });
+    }
+
+    // commune-dairy: dairy + work → butter
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-churning", name: "Butter Churning", processConformsTo: "ps-churning" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 16, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "butter", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-butter-churning", name: "Butter Churning", primaryOutput: "butter", recipeProcesses: [rp.id] });
+    }
+
+    // commune-dairy: dairy + salt + work → cheese
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-cheese-making", name: "Cheese Making", processConformsTo: "ps-cheese-making" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 4, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 24, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "cheese", resourceQuantity: { hasNumericalValue: 18, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-cheese-making", name: "Cheese Making", primaryOutput: "cheese", recipeProcesses: [rp.id] });
+    }
+
+    // commune-forge: ore → metal → nails
+    {
+      const rpSmelt = rs.addRecipeProcess({ id: "rp-nail-smelting", name: "Ore Smelting", processConformsTo: "ps-ore-smelting" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rpSmelt.id, resourceConformsTo: "ore", resourceQuantity: { hasNumericalValue: 60, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rpSmelt.id, effortQuantity: { hasNumericalValue: 16, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rpSmelt.id, resourceConformsTo: "metal", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" } });
+      const rpNail = rs.addRecipeProcess({ id: "rp-nail-forging", name: "Nail Forging", processConformsTo: "ps-nail-forging" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rpNail.id, resourceConformsTo: "metal", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rpNail.id, effortQuantity: { hasNumericalValue: 24, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rpNail.id, resourceConformsTo: "nails", resourceQuantity: { hasNumericalValue: 400, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-nail-forging", name: "Iron Nail Forging", primaryOutput: "nails", recipeProcesses: [rpSmelt.id, rpNail.id] });
+    }
+
+    // commune-workshop: work → rope
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-rope-making", name: "Rope Making", processConformsTo: "ps-rope-making" });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 30, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "rope", resourceQuantity: { hasNumericalValue: 50, hasUnit: "m" } });
+      rs.addRecipe({ id: "recipe-rope-making", name: "Rope Making", primaryOutput: "rope", recipeProcesses: [rp.id] });
+    }
+
+    // commune-olive: olive-oil + salt + work → soap
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-soap-making", name: "Soap Making", processConformsTo: "ps-soap-making" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 30, hasUnit: "liter" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 8, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 18, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "soap", resourceQuantity: { hasNumericalValue: 30, hasUnit: "bar" } });
+      rs.addRecipe({ id: "recipe-soap-making", name: "Olive Oil Soap", primaryOutput: "soap", recipeProcesses: [rp.id] });
+    }
+
+    // commune-citrus: citrus + work → juice
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-juice-pressing", name: "Juice Pressing", processConformsTo: "ps-juice-pressing" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 60, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 12, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "juice", resourceQuantity: { hasNumericalValue: 40, hasUnit: "liter" } });
+      rs.addRecipe({ id: "recipe-juice-pressing", name: "Citrus Juice", primaryOutput: "juice", recipeProcesses: [rp.id] });
+    }
+
+    // commune-citrus: citrus + salt + work → citrus-preserve
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-citrus-curing", name: "Citrus Curing", processConformsTo: "ps-citrus-curing" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 6, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 10, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "citrus-preserve", resourceQuantity: { hasNumericalValue: 40, hasUnit: "jar" } });
+      rs.addRecipe({ id: "recipe-citrus-curing", name: "Citrus Preserve", primaryOutput: "citrus-preserve", recipeProcesses: [rp.id] });
+    }
+
+    // commune-mill: flour + work → raw-pasta → pasta
+    {
+      const rp1 = rs.addRecipeProcess({ id: "rp-pasta-rolling", name: "Pasta Rolling", processConformsTo: "ps-pasta-rolling" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 60, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp1.id, effortQuantity: { hasNumericalValue: 18, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp1.id, resourceConformsTo: "raw-pasta", resourceQuantity: { hasNumericalValue: 55, hasUnit: "kg" } });
+      const rp2 = rs.addRecipeProcess({ id: "rp-pasta-drying", name: "Pasta Drying", processConformsTo: "ps-pasta-drying" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp2.id, resourceConformsTo: "raw-pasta", resourceQuantity: { hasNumericalValue: 55, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp2.id, resourceConformsTo: "pasta", resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-pasta-making", name: "Pasta Making", primaryOutput: "pasta", recipeProcesses: [rp1.id, rp2.id] });
+    }
+
+    // commune-mill: flour + salt + work → flatbread
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-flatbread-baking", name: "Flatbread Baking", processConformsTo: "ps-flatbread-baking" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 3, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 16, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "flatbread", resourceQuantity: { hasNumericalValue: 120, hasUnit: "loaf" } });
+      rs.addRecipe({ id: "recipe-flatbread", name: "Flatbread", primaryOutput: "flatbread", recipeProcesses: [rp.id] });
+    }
+
+    // commune-bakery: flour + olive-oil + salt + work → olive-bread
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-olive-bread-baking", name: "Olive Bread Baking", processConformsTo: "ps-olive-bread-baking" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 10, hasUnit: "liter" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 4, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 28, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "olive-bread", resourceQuantity: { hasNumericalValue: 120, hasUnit: "loaf" } });
+      rs.addRecipe({ id: "recipe-olive-bread", name: "Olive Bread", primaryOutput: "olive-bread", recipeProcesses: [rp.id] });
+    }
+
+    // commune-fisher: fish + salt + work → salted-fish
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-fish-salting", name: "Fish Salting", processConformsTo: "ps-fish-salting" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 8, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 14, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "salted-fish", resourceQuantity: { hasNumericalValue: 35, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-salted-fish", name: "Salted Fish", primaryOutput: "salted-fish", recipeProcesses: [rp.id] });
+    }
+
+    // commune-salter: salt + work → brine
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-brine-prep", name: "Brine Preparation", processConformsTo: "ps-brine-prep" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 8, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "brine", resourceQuantity: { hasNumericalValue: 60, hasUnit: "liter" } });
+      rs.addRecipe({ id: "recipe-brine-making", name: "Brine Making", primaryOutput: "brine", recipeProcesses: [rp.id] });
+    }
+
+    // ── Demand-satisfying recipes: bread/tools/flour across multiple scopes ──
+
+    // commune-grain → Whole Wheat Bread: uses grain's own wheat + salt from salter
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-wheat-bread", name: "Wheat Bread Baking", processConformsTo: "ps-wheat-bread" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "wheat", resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt",  resourceQuantity: { hasNumericalValue: 4,  hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work",    recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 20, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 70, hasUnit: "loaf" } });
+      rs.addRecipe({ id: "recipe-wheat-bread", name: "Whole Wheat Bread", primaryOutput: "bread", recipeProcesses: [rp.id] });
+    }
+
+    // commune-grain → Stone-Ground Flour: wheat + work → raw-flour → flour (local backup milling)
+    {
+      const rp1 = rs.addRecipeProcess({ id: "rp-stone-grinding", name: "Stone Grinding", processConformsTo: "ps-stone-grinding" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "wheat", resourceQuantity: { hasNumericalValue: 100, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work",    recipeInputOf: rp1.id, effortQuantity: { hasNumericalValue: 16, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp1.id, resourceConformsTo: "raw-flour", resourceQuantity: { hasNumericalValue: 75, hasUnit: "kg" } });
+      const rp2 = rs.addRecipeProcess({ id: "rp-hand-sifting", name: "Hand Sifting", processConformsTo: "ps-hand-sifting" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp2.id, resourceConformsTo: "raw-flour", resourceQuantity: { hasNumericalValue: 75, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp2.id, resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 65, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-stone-flour", name: "Stone-Ground Flour", primaryOutput: "flour", recipeProcesses: [rp1.id, rp2.id] });
+    }
+
+    // commune-mill → Mill Bread: mill uses its own flour surplus to bake bread
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-mill-bread", name: "Mill Bread Baking", processConformsTo: "ps-mill-bread" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 35, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt",  resourceQuantity: { hasNumericalValue: 3,  hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work",    recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 18, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 90, hasUnit: "loaf" } });
+      rs.addRecipe({ id: "recipe-mill-bread", name: "Mill Bread", primaryOutput: "bread", recipeProcesses: [rp.id] });
+    }
+
+    // commune-workshop → Communal Bread: workshop communal kitchen (flour from mill + salt)
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-communal-bread", name: "Communal Bread Baking", processConformsTo: "ps-communal-bread" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt",  resourceQuantity: { hasNumericalValue: 3,  hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work",    recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 16, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 75, hasUnit: "loaf" } });
+      rs.addRecipe({ id: "recipe-communal-bread", name: "Communal Bread", primaryOutput: "bread", recipeProcesses: [rp.id] });
+    }
+
+    // commune-workshop → Tool Assembly: metal from forge + goods + work → tools
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-tool-assembly", name: "Tool Assembly", processConformsTo: "ps-tool-assembly" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "metal", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg"   } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "goods", resourceQuantity: { hasNumericalValue: 5,  hasUnit: "unit" } });
+      rs.addRecipeFlow({ action: "work",    recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 30, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 30, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-tool-assembly", name: "Tool Assembly", primaryOutput: "tools", recipeProcesses: [rp.id] });
+    }
+
+    // commune-salter → Hardtack: maritime staple bread from flour + salt (no yeast needed)
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-hardtack", name: "Hardtack Baking", processConformsTo: "ps-hardtack" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt",  resourceQuantity: { hasNumericalValue: 6,  hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work",    recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 10, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 100, hasUnit: "loaf" } });
+      rs.addRecipe({ id: "recipe-hardtack", name: "Hardtack", primaryOutput: "bread", recipeProcesses: [rp.id] });
+    }
+
+    // commune-salter → Sea Fishing: maritime commune supplements fisher's output
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-sea-fishing", name: "Sea Fishing", processConformsTo: "ps-sea-fishing" });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 50, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-sea-fishing", name: "Sea Fishing", primaryOutput: "fish", recipeProcesses: [rp.id] });
+    }
+
+    // ── Capacity-chain recipes (cross-commune dependencies) ─────────────────
+
+    // commune-grain: wheat → malt → ale  (uses grain's 320 kg wheat capacity)
+    {
+      const rp1 = rs.addRecipeProcess({ id: "rp-grain-mashing", name: "Grain Mashing", processConformsTo: "ps-grain-mashing" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "wheat", resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp1.id, effortQuantity: { hasNumericalValue: 12, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp1.id, resourceConformsTo: "malt", resourceQuantity: { hasNumericalValue: 60, hasUnit: "kg" } });
+      const rp2 = rs.addRecipeProcess({ id: "rp-ale-fermentation", name: "Ale Fermentation", processConformsTo: "ps-ale-fermentation" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp2.id, resourceConformsTo: "malt", resourceQuantity: { hasNumericalValue: 60, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp2.id, effortQuantity: { hasNumericalValue: 6, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp2.id, resourceConformsTo: "ale", resourceQuantity: { hasNumericalValue: 80, hasUnit: "liter" } });
+      rs.addRecipe({ id: "recipe-grain-ale", name: "Grain Ale Brewing", primaryOutput: "ale", recipeProcesses: [rp1.id, rp2.id] });
+    }
+
+    // commune-dairy: dairy + work → yogurt  (uses dairy's 80 kg capacity)
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-yogurt-making", name: "Yogurt Culturing", processConformsTo: "ps-yogurt-making" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 8, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "yogurt", resourceQuantity: { hasNumericalValue: 28, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-yogurt", name: "Yogurt", primaryOutput: "yogurt", recipeProcesses: [rp.id] });
+    }
+
+    // commune-forge: ore → metal → agri-tools  (distinct from general tools; consumed by grain commune)
+    {
+      const rpSmelt = rs.addRecipeProcess({ id: "rp-agri-smelting", name: "Ore Smelting", processConformsTo: "ps-ore-smelting" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rpSmelt.id, resourceConformsTo: "ore", resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rpSmelt.id, effortQuantity: { hasNumericalValue: 20, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rpSmelt.id, resourceConformsTo: "metal", resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" } });
+      const rpForge = rs.addRecipeProcess({ id: "rp-agri-forging", name: "Agricultural Forging", processConformsTo: "ps-agri-forging" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rpForge.id, resourceConformsTo: "metal", resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rpForge.id, effortQuantity: { hasNumericalValue: 36, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rpForge.id, resourceConformsTo: "agri-tools", resourceQuantity: { hasNumericalValue: 25, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-agri-tools", name: "Agricultural Tools", primaryOutput: "agri-tools", recipeProcesses: [rpSmelt.id, rpForge.id] });
+    }
+
+    // commune-fisher: fish + work → smoked-fish  (uses fisher's 80 kg capacity)
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-fish-smoking", name: "Fish Smoking", processConformsTo: "ps-fish-smoking" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 20, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "smoked-fish", resourceQuantity: { hasNumericalValue: 22, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-smoked-fish", name: "Smoked Fish", primaryOutput: "smoked-fish", recipeProcesses: [rp.id] });
+    }
+
+    // commune-fisher: fish + dairy + salt + work → fish-chowder  (draws on dairy + salt from federation)
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-chowder-cooking", name: "Chowder Cooking", processConformsTo: "ps-chowder-cooking" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "fish",  resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg"  } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg"  } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt",  resourceQuantity: { hasNumericalValue: 4,  hasUnit: "kg"  } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 16, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "fish-chowder", resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-fish-chowder", name: "Fish Chowder", primaryOutput: "fish-chowder", recipeProcesses: [rp.id] });
+    }
+
+    // commune-citrus: citrus + work → vinegar  (fermentation; useful as preservative across federation)
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-citrus-fermentation", name: "Citrus Fermentation", processConformsTo: "ps-citrus-fermentation" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 6, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "vinegar", resourceQuantity: { hasNumericalValue: 25, hasUnit: "liter" } });
+      rs.addRecipe({ id: "recipe-citrus-vinegar", name: "Citrus Vinegar", primaryOutput: "vinegar", recipeProcesses: [rp.id] });
+    }
+
+    // commune-olive: olive-oil + citrus + work → infused-oil  (draws citrus from citrus commune)
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-citrus-infusion", name: "Citrus Infusion", processConformsTo: "ps-citrus-infusion" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 20, hasUnit: "liter" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "citrus",    resourceQuantity: { hasNumericalValue: 10, hasUnit: "kg"   } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 10, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "infused-oil", resourceQuantity: { hasNumericalValue: 18, hasUnit: "liter" } });
+      rs.addRecipe({ id: "recipe-infused-oil", name: "Infused Olive Oil", primaryOutput: "infused-oil", recipeProcesses: [rp.id] });
+    }
+
+    // commune-bakery: flour + citrus + dairy → citrus-dough → citrus-loaf
+    // (draws flour from mill, citrus from citrus commune, dairy from dairy commune)
+    {
+      const rp1 = rs.addRecipeProcess({ id: "rp-citrus-loaf-mix", name: "Citrus Dough Mixing", processConformsTo: "ps-citrus-loaf-mix" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "flour",  resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "dairy",  resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp1.id, resourceConformsTo: "dough", resourceQuantity: { hasNumericalValue: 60, hasUnit: "kg" } });
+      const rp2 = rs.addRecipeProcess({ id: "rp-citrus-loaf-bake", name: "Citrus Loaf Baking", processConformsTo: "ps-citrus-loaf-bake" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp2.id, resourceConformsTo: "dough", resourceQuantity: { hasNumericalValue: 60, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp2.id, effortQuantity: { hasNumericalValue: 22, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp2.id, resourceConformsTo: "citrus-loaf", resourceQuantity: { hasNumericalValue: 80, hasUnit: "loaf" } });
+      rs.addRecipe({ id: "recipe-citrus-loaf", name: "Citrus Loaf", primaryOutput: "citrus-loaf", recipeProcesses: [rp1.id, rp2.id] });
     }
 
     return rs;
@@ -291,17 +658,18 @@
   // Phase B of planForScope sees these as supply slots → generates SurplusSignal → lateral matching has a non-empty surplusPool.
   const produceIntents: Intent[] = [
     // Primary harvesters / extractors — no inputs needed
-    { id: "pi-grain-wheat",    action: "produce", outputOf: "proc-wheat-harvest",    resourceConformsTo: "wheat",     resourceQuantity: { hasNumericalValue: 320,  hasUnit: "kg"    }, inScopeOf: ["commune-grain"]    },
-    { id: "pi-dairy-dairy",    action: "produce", outputOf: "proc-dairy-prod",        resourceConformsTo: "dairy",     resourceQuantity: { hasNumericalValue: 80,   hasUnit: "kg"    }, inScopeOf: ["commune-dairy"]    },
-    { id: "pi-forge-tools",    action: "produce", outputOf: "proc-smithing",          resourceConformsTo: "tools",     resourceQuantity: { hasNumericalValue: 80,   hasUnit: "unit"  }, inScopeOf: ["commune-forge"]    },
-    { id: "pi-workshop-goods", action: "produce", outputOf: "proc-manufacturing",     resourceConformsTo: "goods",     resourceQuantity: { hasNumericalValue: 60,   hasUnit: "unit"  }, inScopeOf: ["commune-workshop"] },
-    { id: "pi-olive-oil",      action: "produce", outputOf: "proc-olive-press",       resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 100,  hasUnit: "liter" }, inScopeOf: ["commune-olive"]    },
-    { id: "pi-citrus-citrus",  action: "produce", outputOf: "proc-citrus-harvest",    resourceConformsTo: "citrus",    resourceQuantity: { hasNumericalValue: 150,  hasUnit: "kg"    }, inScopeOf: ["commune-citrus"]   },
+    // outputOf references the actual recipe process ID that produces this spec
+    { id: "pi-grain-wheat",    action: "produce", outputOf: "rp-wheat-harvest",   resourceConformsTo: "wheat",     resourceQuantity: { hasNumericalValue: 320,  hasUnit: "kg"    }, inScopeOf: ["commune-grain"]    },
+    { id: "pi-dairy-dairy",    action: "produce", outputOf: "rp-dairy-prod",       resourceConformsTo: "dairy",     resourceQuantity: { hasNumericalValue: 80,   hasUnit: "kg"    }, inScopeOf: ["commune-dairy"]    },
+    { id: "pi-forge-tools",    action: "produce", outputOf: "rp-smithing",         resourceConformsTo: "tools",     resourceQuantity: { hasNumericalValue: 80,   hasUnit: "unit"  }, inScopeOf: ["commune-forge"]    },
+    { id: "pi-workshop-goods", action: "produce", outputOf: "rp-manufacturing",    resourceConformsTo: "goods",     resourceQuantity: { hasNumericalValue: 60,   hasUnit: "unit"  }, inScopeOf: ["commune-workshop"] },
+    { id: "pi-olive-oil",      action: "produce", outputOf: "rp-olive-pressing",   resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 100,  hasUnit: "liter" }, inScopeOf: ["commune-olive"]    },
+    { id: "pi-citrus-citrus",  action: "produce", outputOf: "rp-citrus-harvest",   resourceConformsTo: "citrus",    resourceQuantity: { hasNumericalValue: 150,  hasUnit: "kg"    }, inScopeOf: ["commune-citrus"]   },
     // Processors — produce output from inputs sourced via lateral matching
-    { id: "pi-mill-flour",     action: "produce", outputOf: "proc-grain-milling",     resourceConformsTo: "flour",     resourceQuantity: { hasNumericalValue: 160,  hasUnit: "kg"    }, inScopeOf: ["commune-mill"]     },
-    { id: "pi-bakery-bread",   action: "produce", outputOf: "proc-bread-baking",      resourceConformsTo: "bread",     resourceQuantity: { hasNumericalValue: 200,  hasUnit: "loaf"  }, inScopeOf: ["commune-bakery"]   },
-    { id: "pi-fisher-fish",    action: "produce", outputOf: "proc-fishing",           resourceConformsTo: "fish",      resourceQuantity: { hasNumericalValue: 80,   hasUnit: "kg"    }, inScopeOf: ["commune-fisher"]   },
-    { id: "pi-salter-salt",    action: "produce", outputOf: "proc-salt-extraction",   resourceConformsTo: "salt",      resourceQuantity: { hasNumericalValue: 160,  hasUnit: "kg"    }, inScopeOf: ["commune-salter"]   },
+    { id: "pi-mill-flour",     action: "produce", outputOf: "rp-flour-sifting",    resourceConformsTo: "flour",     resourceQuantity: { hasNumericalValue: 160,  hasUnit: "kg"    }, inScopeOf: ["commune-mill"]     },
+    { id: "pi-bakery-bread",   action: "produce", outputOf: "rp-baking",           resourceConformsTo: "bread",     resourceQuantity: { hasNumericalValue: 200,  hasUnit: "loaf"  }, inScopeOf: ["commune-bakery"]   },
+    { id: "pi-fisher-fish",    action: "produce", outputOf: "rp-fishing",          resourceConformsTo: "fish",      resourceQuantity: { hasNumericalValue: 80,   hasUnit: "kg"    }, inScopeOf: ["commune-fisher"]   },
+    { id: "pi-salter-salt",    action: "produce", outputOf: "rp-salt-extraction",  resourceConformsTo: "salt",      resourceQuantity: { hasNumericalValue: 160,  hasUnit: "kg"    }, inScopeOf: ["commune-salter"]   },
   ];
 
   // Supply index = on-hand inventory + committed produce intents (Stratum 2a).
@@ -630,34 +998,6 @@
   <header class="stat-bar">
     <div class="page-title">
       <span class="title-label">FEDERATION PLANNING</span>
-    </div>
-    <div class="stats">
-      <div class="stat">
-        <span class="stat-value">{totalScopes}</span>
-        <span class="stat-label">SCOPES PLANNED</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value" class:red={totalUnresolved > 0}
-          >{totalUnresolved}</span
-        >
-        <span class="stat-label">UNRESOLVED</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value green">{totalSurplusUnits}</span>
-        <span class="stat-label">SURPLUS UNITS</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value blue">{totalTrades}</span>
-        <span class="stat-label">INTER-SCOPE SUPPORTS</span>
-      </div>
-      <div class="stat">
-        <span
-          class="stat-value"
-          class:green={resolvedPct === 100}
-          class:yellow={resolvedPct < 100}>{resolvedPct}%</span
-        >
-        <span class="stat-label">DEFICITS RESOLVED</span>
-      </div>
     </div>
   </header>
 

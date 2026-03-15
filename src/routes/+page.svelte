@@ -1,5 +1,6 @@
 <script lang="ts">
   import '$lib/components/ui/tokens.css';
+  import { base } from '$app/paths';
   import CommitmentRow   from '$lib/components/vf/CommitmentRow.svelte';
   import IntentRow       from '$lib/components/vf/IntentRow.svelte';
   import ProcessRow      from '$lib/components/vf/ProcessRow.svelte';
@@ -137,7 +138,8 @@
     'Make cheese from fresh dairy milk',
   ];
 
-  let networkTab = $state<'diagram' | 'knowledge' | 'plan' | 'observe'>('diagram');
+  let networkTab = $state<'diagram' | 'plan' | 'observe'>('diagram');
+  let showRecipes = $state(false);
   let aiPrompt = $state('');
   let generating = $state(false);
   let errorMsg = $state('');
@@ -181,34 +183,30 @@
   <!-- ── NETWORK DIAGRAM ────────────────────────────────────────────────────── -->
   <section class="band diagram">
     <div class="band-header">
-      <div class="tab-group">
-        <button class="tab-btn" class:tab-active={networkTab === 'diagram'} onclick={() => networkTab = 'diagram'}>NETWORK DIAGRAM</button>
-        <button class="tab-btn" class:tab-active={networkTab === 'knowledge'} onclick={() => networkTab = 'knowledge'}>KNOWLEDGE</button>
-        <button class="tab-btn" class:tab-active={networkTab === 'plan'} onclick={() => networkTab = 'plan'}>PLAN</button>
-        <button class="tab-btn" class:tab-active={networkTab === 'observe'} onclick={() => networkTab = 'observe'}>OBSERVE</button>
+      <div class="bh-left">
+        <div class="tab-group">
+          <button class="tab-btn" class:tab-active={networkTab === 'diagram'} onclick={() => networkTab = 'diagram'}>NETWORK DIAGRAM</button>
+          <button class="tab-btn" class:tab-active={networkTab === 'plan'} onclick={() => networkTab = 'plan'}>PLAN</button>
+          <button class="tab-btn" class:tab-active={networkTab === 'observe'} onclick={() => networkTab = 'observe'}>OBSERVE</button>
+        </div>
+        {#if networkTab === 'diagram'}
+          <span class="counts">
+            <span class="count">Processes({processList.length})</span>
+            <span class="count">Agents({agentList.length})</span>
+            <span class="count">Buffers({bufferZoneList.length})</span>
+          </span>
+        {/if}
       </div>
-      {#if networkTab === 'diagram'}
-        <span class="counts">
-          <span class="count">Processes({processList.length})</span>
-          <span class="count">Agents({agentList.length})</span>
-          <span class="count">Buffers({bufferZoneList.length})</span>
-        </span>
-      {:else if networkTab === 'knowledge'}
-        <span class="counts">
-          <span class="count">{generated.length} recipe{generated.length !== 1 ? 's' : ''} generated</span>
-        </span>
-      {/if}
+      <button class="recipe-ai-btn" class:open={showRecipes} onclick={() => showRecipes = !showRecipes} title="AI Recipe Workshop">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+          <path d="M8 1 L9.5 6 L14 6 L10.5 9 L12 14 L8 11 L4 14 L5.5 9 L2 6 L6.5 6 Z"/>
+        </svg>
+        RECIPE AI
+        {#if generated.length > 0}<span class="recipe-count-badge">{generated.length}</span>{/if}
+      </button>
     </div>
 
-    {#if networkTab === 'diagram'}
-      <div class="diagram-wrap">
-        <NetworkDiagram
-          onbufferselect={(id) => { selectedBzId = id; }}
-          selectedBzId={selectedBzId ?? undefined}
-          adjustments={adjustmentFactorList}
-        />
-      </div>
-    {:else if networkTab === 'knowledge'}
+    {#if showRecipes}
       <div class="workshop-wrap">
         <div class="prompt-area">
           <div class="chips">
@@ -229,7 +227,6 @@
             {generating ? 'GENERATING…' : 'GENERATE RECIPE'}
           </button>
         </div>
-
         <div class="cards-area">
           {#each generated as r (r.recipe.id)}
             <div class="recipe-card" class:rc-active={r.active} class:rc-inactive={!r.active}>
@@ -239,18 +236,14 @@
                   {r.active ? 'ACTIVE' : 'INACTIVE'}
                 </button>
               </div>
-              {#if r.recipe.note}
-                <div class="card-note">{r.recipe.note}</div>
-              {/if}
+              {#if r.recipe.note}<div class="card-note">{r.recipe.note}</div>{/if}
               <div class="section-lbl">PROCESSES</div>
               <div class="process-list">
                 {#each [...r.processes].sort((a, b) => (a.sequenceGroup ?? 99) - (b.sequenceGroup ?? 99)) as p (p.id)}
                   <div class="process-row">
                     <span class="proc-seq">{p.sequenceGroup ?? '—'}</span>
                     <span class="proc-name">{p.name}</span>
-                    {#if p.hasDuration}
-                      <span class="proc-dur">{p.hasDuration.hasNumericalValue} {p.hasDuration.hasUnit}</span>
-                    {/if}
+                    {#if p.hasDuration}<span class="proc-dur">{p.hasDuration.hasNumericalValue} {p.hasDuration.hasUnit}</span>{/if}
                   </div>
                 {/each}
               </div>
@@ -271,6 +264,16 @@
             </div>
           {/each}
         </div>
+      </div>
+    {/if}
+
+    {#if networkTab === 'diagram'}
+      <div class="diagram-wrap">
+        <NetworkDiagram
+          onbufferselect={(id) => { selectedBzId = id; }}
+          selectedBzId={selectedBzId ?? undefined}
+          adjustments={adjustmentFactorList}
+        />
       </div>
     {:else}
       <div class="diagram-wrap">
@@ -953,6 +956,54 @@
     color: #9f7aea;
     border-color: rgba(159, 122, 234, 0.35);
     background: rgba(159, 122, 234, 0.08);
+  }
+
+  .bh-left {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-md);
+    flex: 1;
+    flex-wrap: wrap;
+  }
+
+  .recipe-ai-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    padding: 2px 10px 2px 7px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: #b794f4;
+    background: rgba(159, 122, 234, 0.08);
+    border: 1px solid rgba(159, 122, 234, 0.35);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .recipe-ai-btn svg {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+  }
+
+  .recipe-ai-btn:hover,
+  .recipe-ai-btn.open {
+    background: rgba(159, 122, 234, 0.16);
+    border-color: rgba(159, 122, 234, 0.7);
+    box-shadow: 0 0 8px rgba(159, 122, 234, 0.25);
+    color: #d6bcfa;
+  }
+
+  .recipe-count-badge {
+    background: rgba(159, 122, 234, 0.3);
+    border-radius: 8px;
+    font-size: 9px;
+    padding: 0 5px;
+    line-height: 1.6;
   }
 
   /* ── Recipe Workshop ── */
