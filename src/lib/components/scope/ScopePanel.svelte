@@ -10,9 +10,14 @@
   let { report, scopeName, period }: Props = $props();
 
   const balanceColor = $derived(report.dollar_balance >= 0 ? '#68d391' : '#e53e3e');
-  const subRatioColor = $derived(
-    report.substitution_ratio >= 0.9 ? '#68d391'
-    : report.substitution_ratio >= 0.6 ? '#d69e2e'
+  const compRatioColor = $derived(
+    report.composition_ratio >= 0.9 ? '#68d391'
+    : report.composition_ratio >= 0.6 ? '#d69e2e'
+    : '#e53e3e'
+  );
+  const csrColor = $derived(
+    report.communal_satisfaction_ratio >= 1.0 ? '#68d391'
+    : report.communal_satisfaction_ratio >= 0.7 ? '#d69e2e'
     : '#e53e3e'
   );
 </script>
@@ -28,13 +33,14 @@
 
   <div class="stat-grid">
     <div class="cell">
-      <span class="cell-label">DOLLAR BALANCE</span>
+      <span class="cell-label">SCOPE BALANCE</span>
       <span class="cell-big" style="color: {balanceColor}">
         ${report.dollar_balance.toFixed(2)}
       </span>
       <span class="cell-sub">
-        {report.is_solvent ? 'revenues exceed costs — scope is viable' : 'costs exceed revenues — scope needs support'}
+        {report.is_solvent ? 'revenue covers scope costs' : 'scope costs exceed revenue — needs support'}
       </span>
+      <span class="cell-sub">excl. federation wage payments</span>
     </div>
 
     <div class="cell">
@@ -56,10 +62,19 @@
     </div>
 
     <div class="cell">
-      <span class="cell-label">SUBSTITUTION RATIO</span>
-      <span class="cell-big" style="color: {subRatioColor}">{report.substitution_ratio.toFixed(2)}</span>
-      <span class="cell-sub">social channel vs. market compensation per hour</span>
+      <span class="cell-label">COMMUNAL SAT. RATIO</span>
+      <span class="cell-big" style="color: {csrColor}">{report.communal_satisfaction_ratio.toFixed(2)}</span>
+      <span class="cell-sub">social plan value vs. market wage coverage</span>
       <span class="cell-sub">transition depth: {(report.fractions.transition_depth * 100).toFixed(1)}%</span>
+    </div>
+
+    <div class="cell">
+      <span class="cell-label">COMPOSITION RATIO</span>
+      <span class="cell-big" style="color: {compRatioColor}">
+        {report.market_real_wage_per_hour === 0 ? '—' : report.composition_ratio.toFixed(2)}
+      </span>
+      <span class="cell-sub">social goods per hr vs. federation dollar goods per hr</span>
+      <span class="cell-sub">{report.market_real_wage_per_hour === 0 ? 'wages phased out — CSR is primary metric' : report.composition_ratio >= 1.0 ? 'social plan matches dollar value' : 'social plan below dollar parity'}</span>
     </div>
   </div>
 </div>

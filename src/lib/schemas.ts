@@ -1051,6 +1051,7 @@ export const PlanSchema = z.object({
     created: z.string().datetime().optional(),
     hasIndependentDemand: z.array(z.string()).optional(),  // Commitment/Intent IDs (deliverables)
     refinementOf: z.string().optional(),                   // Scenario ID (this plan refines a scenario)
+    classifiedAs: z.array(z.string()).optional(),
 });
 export type Plan = z.infer<typeof PlanSchema>;
 

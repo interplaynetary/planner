@@ -30,16 +30,20 @@
   function handleSubmit() {
     if (!context || qtyInput <= 0) return;
     submitting = true;
+    const isWork = context.action === 'work';
     try {
       observer.record({
         id:     `ev-obs-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         action: context.action as any,
         ...(context.isInput ? { inputOf: context.processId } : { outputOf: context.processId }),
         resourceConformsTo: context.specId,
-        resourceQuantity: { hasNumericalValue: qtyInput, hasUnit: context.unit },
+        ...(isWork
+          ? { effortQuantity: { hasNumericalValue: qtyInput, hasUnit: context.unit } }
+          : { resourceQuantity: { hasNumericalValue: qtyInput, hasUnit: context.unit } }),
         hasPointInTime: new Date(tsInput).toISOString(),
-        ...(context.commitmentId ? { fulfills: context.commitmentId } : {}),
-        ...(notesInput ? { note: notesInput } : {}),
+        ...(context.commitmentId                     ? { fulfills: context.commitmentId }          : {}),
+        ...(isWork && context.providerAgentId        ? { provider: context.providerAgentId }       : {}),
+        ...(notesInput                               ? { note: notesInput }                         : {}),
       });
       refresh();
       notesInput = '';
@@ -83,7 +87,9 @@
     <!-- Recording form -->
     <form class="form" onsubmit={(ev) => { ev.preventDefault(); handleSubmit(); }}>
       <div class="form-row">
-        <label class="field-label" for="erp-qty">Quantity ({context.unit})</label>
+        <label class="field-label" for="erp-qty">
+          {context.action === 'work' ? 'Hours worked' : `Quantity (${context.unit})`}
+        </label>
         <div class="qty-row">
           <input
             id="erp-qty"

@@ -72,25 +72,27 @@
       isInput, commitmentId: row.commitmentId, commitment,
       existingEvents, fulfilledQty: row.fulfilledQty ?? 0,
       plannedQty: row.plannedQty ?? 0, unit: row.unit,
+      providerAgentId: row.providerAgentId,
     });
   }
 
   // ── Types ─────────────────────────────────────────────────────────────────
   interface ResRow {
-    specId:          string;
-    specName:        string;
-    action:          string;
-    qty:             string;
-    onhand:          number;
-    unit:            string;
-    bufferZone?:     BufferZone;
-    y:               number;
-    // observe mode fields (optional, zero overhead in plan mode)
-    commitmentId?:   string;
-    fulfilledQty?:   number;
-    plannedQty?:     number;
-    fulfillmentPct?: number;
-    eventCount?:     number;
+    specId:           string;
+    specName:         string;
+    action:           string;
+    qty:              string;
+    onhand:           number;
+    unit:             string;
+    bufferZone?:      BufferZone;
+    y:                number;
+    commitmentId?:    string;   // always set (not just observe mode)
+    fulfilledQty?:    number;
+    plannedQty?:      number;
+    fulfillmentPct?:  number;
+    eventCount?:      number;
+    providerAgentId?: string;   // for work rows
+    providerName?:    string;   // for work rows
   }
 
   interface ProcNode {
@@ -196,36 +198,55 @@
         ? commitmentList.filter(c => c.inputOf  === pid && c.resourceConformsTo)
         : commitmentList.filter(c => c.outputOf === pid && c.resourceConformsTo);
       return commits.map(c => {
-        const specId = c.resourceConformsTo!;
-        const spec   = resourceSpecs.find(s => s.id === specId);
-        const bz     = side === 'output' ? bufferZoneList.find(b => b.specId === specId) : undefined;
-        // Aggregate all matching resources; filter by location when bz has one
-        const pool = bz?.atLocation
-          ? resourceList.filter(r => r.conformsTo === specId && r.currentLocation === bz.atLocation)
-          : resourceList.filter(r => r.conformsTo === specId);
-        const onhand = pool.reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
-        const unit   = pool[0]?.onhandQuantity?.hasUnit ?? spec?.defaultUnitOfResource ?? '';
+        const specId  = c.resourceConformsTo!;
+        const spec    = resourceSpecs.find(s => s.id === specId);
+        const bz      = side === 'output' ? bufferZoneList.find(b => b.specId === specId) : undefined;
+        const isWork  = c.action === 'work';
 
-        // Observe mode: compute fulfillment from eventList (reactive, covers user-created events too)
-        let commitmentId: string | undefined;
+        // For work rows skip the inventory pool lookup
+        const pool = isWork ? [] : (
+          bz?.atLocation
+            ? resourceList.filter(r => r.conformsTo === specId && r.currentLocation === bz.atLocation)
+            : resourceList.filter(r => r.conformsTo === specId)
+        );
+        const onhand = pool.reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+        const unit   = isWork
+          ? (c.effortQuantity?.hasUnit ?? spec?.defaultUnitOfEffort ?? 'hr')
+          : (pool[0]?.onhandQuantity?.hasUnit ?? spec?.defaultUnitOfResource ?? '');
+        const qty    = isWork
+          ? (c.effortQuantity ? `${c.effortQuantity.hasNumericalValue} ${c.effortQuantity.hasUnit}` : '')
+          : (c.resourceQuantity ? `${c.resourceQuantity.hasNumericalValue} ${c.resourceQuantity.hasUnit}` : '');
+
+        const providerAgentId = isWork ? c.provider : undefined;
+        const providerName    = isWork && c.provider
+          ? (agentList.find(a => a.id === c.provider)?.name ?? c.provider)
+          : undefined;
+
+        // commitmentId is always set (enables unique keying + observe-mode click)
+        const commitmentId = c.id;
+
+        // Observe mode: compute fulfillment from eventList
         let fulfilledQty: number | undefined;
         let plannedQty: number | undefined;
         let fulfillmentPct: number | undefined;
         let eventCount: number | undefined;
         if (mode === 'observe') {
           const fillingEvents = eventList.filter(e => e.fulfills === c.id);
-          fulfilledQty  = fillingEvents.reduce((s, e) => s + (e.resourceQuantity?.hasNumericalValue ?? 0), 0);
-          plannedQty    = c.resourceQuantity?.hasNumericalValue ?? 0;
+          fulfilledQty  = isWork
+            ? fillingEvents.reduce((s, e) => s + (e.effortQuantity?.hasNumericalValue ?? 0), 0)
+            : fillingEvents.reduce((s, e) => s + (e.resourceQuantity?.hasNumericalValue ?? 0), 0);
+          plannedQty    = isWork
+            ? (c.effortQuantity?.hasNumericalValue ?? 0)
+            : (c.resourceQuantity?.hasNumericalValue ?? 0);
           fulfillmentPct = plannedQty > 0 ? Math.min(100, fulfilledQty / plannedQty * 100) : 0;
-          commitmentId  = c.id;
           eventCount    = fillingEvents.length;
         }
 
         return {
           specId,
-          specName:   spec?.name ?? specId.slice(0, 8),
-          action:     c.action,
-          qty:        c.resourceQuantity ? `${c.resourceQuantity.hasNumericalValue} ${c.resourceQuantity.hasUnit}` : '',
+          specName:  spec?.name ?? specId.slice(0, 8),
+          action:    c.action,
+          qty,
           onhand,
           unit,
           bufferZone: bz,
@@ -234,6 +255,8 @@
           plannedQty,
           fulfillmentPct,
           eventCount,
+          providerAgentId,
+          providerName,
         };
       });
     }
@@ -770,7 +793,7 @@
       {/if}
 
       <!-- ── Input resource cards (left of process) ──────────────────────── -->
-      {#each node.inputs as row (row.specId + 'in')}
+      {#each node.inputs as row ((row.commitmentId ?? row.specId) + 'in')}
         {@const ox    = node.x - IO_X}
         {@const acol  = ACTION_COLORS[row.action] ?? '#718096'}
         {@const cardX = ox - CARD_W / 2}
@@ -793,8 +816,8 @@
           width={CARD_W}
           height={CARD_H}
           rx={CARD_RX}
-          fill="rgba(74,85,104,0.25)"
-          stroke="rgba(160,174,192,0.4)"
+          fill={row.action === 'work' ? 'rgba(159,122,234,0.12)' : 'rgba(74,85,104,0.25)'}
+          stroke={row.action === 'work' ? 'rgba(159,122,234,0.45)' : 'rgba(160,174,192,0.4)'}
           stroke-width="1"
           style={mode === 'observe' ? 'cursor:pointer' : 'cursor:default'}
           role="img"
@@ -857,6 +880,10 @@
           <rect x={cardX + 3} y={cardY + CARD_H - 4} width={Math.max(0, barW)} height={3}
             rx="1" fill={fulfillColor(row.fulfillmentPct ?? 0)} opacity="0.9"
             style="pointer-events:none" />
+        {:else if row.providerName}
+          <text x={ox} y={cardY + 37} text-anchor="middle" font-size="6.5"
+            fill="rgba(159,122,234,0.7)" style="pointer-events:none"
+          >{row.providerName}</text>
         {:else if row.qty || row.onhand > 0}
           <text x={ox} y={cardY + 37} text-anchor="middle" font-size="7"
             fill="rgba(226,232,240,0.4)" style="pointer-events:none"
@@ -865,7 +892,7 @@
       {/each}
 
       <!-- ── Output resource cards + buffer funnels (right of process) ───── -->
-      {#each node.outputs as row (row.specId + 'out')}
+      {#each node.outputs as row ((row.commitmentId ?? row.specId) + 'out')}
         {@const ox    = node.x + IO_X}
         {@const bz    = row.bufferZone}
         {@const acol  = ACTION_COLORS[row.action] ?? '#718096'}

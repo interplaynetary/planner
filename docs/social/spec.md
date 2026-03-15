@@ -18,7 +18,7 @@
 
 `Moreover, it should be noted that in capitalism, it often only seems more “efficient” to outsource production to other countries because labor-time is (and is forcefully maintained to be, internationally and domestically) cheaper in those countries - people’s lives are literally valued less, this doesn't mean that these global supply chains are actually more efficient in terms of resource-usage or in terms of the actual total expenditure of human-labor-time.`
 
-`The aim is to formulate good-enough plans that satisfy all constraints (metabolic sustainability etc., and maximize all objectives), in such a way that is:`
+`The aim is to formulate good-enough plans that satisfy all constraints (metabolic sustainability etc.), and maximize all objectives, in such a way that is:`
 
 - _`Tractable`_
 - `massively parallel (planners can operate completely independently and simultaneously)`
@@ -200,7 +200,7 @@ _`Membership List auto-generated from those entities that are in Membership Inde
       - `Delegates with Imperative Mandates (Binding Instructions)`
       - `Observers of Social Planning Processes`
   - **`Communicate:`** `Publish all doings and shortcomings`
-  - **`Withdraw:`** `The right to withdraw from any commune/intermediate federation. This right is the expression of freedom of association among communes. Withdrawal is subject to: (1) withdrawal does not dissolve obligations incurred during membership — these must be honored through the planning process until settled, or a new federation plan voids previous obligations; (2) withdrawal severs the federation's authority over the commune for all future matters; (3) the metabolic consequences of withdrawal become visible in the planning process, enabling the commune to make an informed decision; (4) withdrawal from all intermediate federations does not constitute withdrawal from the Universal Commune, which guarantees universal membership.`
+  - **`Withdraw:`** `The right to withdraw from any commune/intermediate federation. This right is the expression of freedom of association among communes. Withdrawal is subject to: (1) withdrawal does not dissolve obligations incurred during membership — these must be honored through the planning process until settled, or a new federation plan voids previous obligations; (2) withdrawal severs the federation's authority over the commune for all future matters; (3) the consequences of withdrawal become visible in the planning process, enabling the commune to make an informed decision; (4) withdrawal from all intermediate federations does not constitute withdrawal from the Universal Commune, which guarantees universal membership.`
 - **`Responsibilities:`**
   - **`To electorate:`** `Publication of proceedings`
   - **`To federation:`** `Abide by federation decisions on matters within the federation's delegated authority. Where a federation decision conflicts with a commune's binding instructions on a matter outside the federation's authority, the commune may seek judicial review.`
@@ -220,7 +220,7 @@ _`Membership List auto-generated from those entities that are in Membership Inde
 - **`Rights:`**
   - **`Request`**
     - **`Membership`**`: in a commune.`
-  - **`Withdraw:`** `The right to withdraw from any intermediate federation. This right is the expression of freedom of association among communes. Withdrawal is subject to: (1) withdrawal does not dissolve obligations incurred during membership — these must be honored through the planning process until settled, or a new federation plan voids previous obligations; (2) withdrawal severs the federation's authority over the commune for all future matters; (3) the metabolic consequences of withdrawal become visible in the planning process, enabling the commune to make an informed decision; (4) withdrawal from all intermediate federations does not constitute withdrawal from the Universal Commune, which guarantees universal membership.`
+  - **`Withdraw:`** `The right to withdraw from any intermediate federation. This right is the expression of freedom of association among communes. Withdrawal is subject to: (1) withdrawal does not dissolve obligations incurred during membership — these must be honored through the planning process until settled, or a new federation plan voids previous obligations; (2) withdrawal severs the federation's authority over the commune for all future matters; (3) the consequences of withdrawal become visible in the planning process, enabling the commune to make an informed decision; (4) withdrawal from all intermediate federations does not constitute withdrawal from the Universal Commune, which guarantees universal membership.`
 - **`Responsibilities:`**
 
 **`Delegates:`**
@@ -236,7 +236,7 @@ _`Membership List auto-generated from those entities that are in Membership Inde
   - `Maximum term: 2 years before requiring re-election. No individual may serve more than 4 years in any 8-year period in the same federation level.`
 
 **`Affected Interest Group:`**  
-_`Any individual or commune materially affected by a decision under consideration has standing to participate in the deliberation. Material affect is determined by tracing the metabolic consequences through the planning network: who will bear costs, who will receive benefits, whose conditions of existence will be altered. Procedures for affected interest participation are defined by the relevant federation and must include: (1) notice to affected parties, (2) opportunity to present evidence and argument, (3) consideration in the final decision, with reasons given for acceptance or rejection of affected interests' positions.`_
+_`Any individual or commune materially affected by a decision under consideration has standing to participate in the deliberation. Material affect is determined by tracing the consequences through the planning network: who will bear costs, who will receive benefits, whose conditions of existence will be altered. Procedures for affected interest participation are defined by the relevant federation and must include: (1) notice to affected parties, (2) opportunity to present evidence and argument, (3) consideration in the final decision, with reasons given for acceptance or rejection of affected interests' positions.`_
 
 **`Planning-Based Dispute Resolution:`**  
 _`When a commune alleges that a federation decision exceeds proper authority, or when communes disagree on the terms of cooperation, the dispute shall be resolved through iterative planning, not adjudication.`_
@@ -245,23 +245,23 @@ _`The process:`_
 
 1. **`Delegates convene`** `with their communes' PlanStores and binding instructions.`
 2. **`They merge their PlanStores`** `and run the planner at the federation level, treating the disputed matter as an unmet demand to be satisfied.`
-3. **`The planner produces one or more feasible resolutions`** `— plans that satisfy all metabolic constraints and respect priority rankings to the greatest extent possible.`
+3. **`The planner produces one or more feasible resolutions`** `— plans that satisfy all constraints and respect priority rankings to the greatest extent possible.`
 4. **`Delegates return to their communes`** `with the proposed resolutions, along with full planning data showing the consequences for each party.`
 5. **`Communes deliberate`** `and either:`
    - `Reject all resolutions and propose modifications`
-   - `Withdraw from the disputed aspect of cooperation, accepting the metabolic consequences of withdrawal`
+   - `Withdraw from the disputed aspect of cooperation, accepting the consequences of withdrawal`
 6. **`If modifications are proposed, delegates reconvene`** `with updated instructions and PlanStores, and repeat from step 2.`
 7. **`If withdrawal occurs, the planning process automatically adjusts`** `— the withdrawing commune's commitments are treated as unmet demands to be satisfied by other means, and its expected receipts are written off as supply to be redirected.`
 
-_`There is no binding decision external to the planning process. There is no judge. There is only the metabolic logic of interdependence, made visible through the planner, and the free choice of associated producers to accept, modify, or withdraw from the terms of cooperation.`_
+_`There is no binding decision external to the planning process. There is no judge. There is only the logic of interdependence, made visible through the planner, and the free choice of associated producers to accept, modify, or withdraw from the terms of cooperation.`_
 
-_`Convergence is not guaranteed, but it is strongly encouraged by the metabolic consequences of non-cooperation. A commune that consistently blocks mutually beneficial plans will find itself isolated, its PlanStore showing growing deficits, its members facing harder choices.`_
+_`Convergence is not guaranteed, but it is strongly encouraged by the consequences of non-cooperation. A commune that consistently blocks mutually beneficial plans will find itself isolated, its PlanStore showing growing deficits, its members facing harder choices.`_
 
 **`On the Settlement of Obligations Upon Withdrawal:`**  
 _`When a commune withdraws from a federation, it remains responsible for obligations incurred during membership until those obligations are settled through the normal functioning of the planning system. The federation retains a record of outstanding commitments, which are treated as independent demands on the withdrawing commune. The withdrawing commune continues to receive resources it is owed until accounts are balanced within the existing plan, or a future plan voids (mutual) obligations. This is not punishment but the honoring of mutual commitments. The planning process itself—the two-pass system, the surgical retraction, the local/global inversion—handles the settlement without need for special enforcement mechanisms. Once all obligations are settled within a given plan, the commune's relationship to the federation ceases entirely, except for its continuing membership in the Universal Commune.`_
 
 **`On Enforcement:`**  
-_`There are no permanent enforcers. The primary enforcement mechanism of the Universal Commune Federation is the planning process itself: obligations that are not honored appear as unmet demands, deficits accumulate, and the metabolic consequences become visible to all. Communities that consistently fail to honor commitments will find cooperation difficult, and likely find their PlanStores showing growing imbalances.`_
+_`There are no permanent enforcers. The primary enforcement mechanism of the Universal Commune Federation is the planning process itself: obligations that are not honored appear as unmet demands, deficits accumulate, and the consequences become visible to all. Communities that consistently fail to honor commitments will find cooperation difficult, and likely find their PlanStores showing growing imbalances.`_
 
 _`In the rare cases where physical intervention is necessary to prevent imminent harm—violence, destruction of common resources, violation of bodily integrity—any citizen may act to prevent such harm. Such actions are immediately reviewable by the affected commune's assembly, which may confirm, modify, or repudiate them. Repeated need for physical intervention in a community indicates a failure of planning or of social relations, to be addressed through the planning process itself.`_
 
@@ -355,10 +355,10 @@ _`Infrastructure operators (Aggregators/Indexers/Planners etc.) are responsible 
 - **`Open Recipe Libraries:`** `Indexed by SNE, metabolic impact, and bioregional suitability.`
 - **`Key Components:`** `OpenSourceEcologies, Documentation, Translation, and other key recipes.`
 
-**`Transition in Low-Income Regions:`**
+**`Transition in Low-Income Regions:`** `Produce enormous wealth, but that wealth leaves. They work hard, but their own needs remain unsatisfied because what they produce is shipped elsewhere.`
 
-- **`Strategic Priority:`**
-- **`Effect:`**
+- **`Strategic Priority: Reorienting production from export markets toward local need satisfaction by connecting existing producers, retaining surplus locally, and building missing capacity — starting with food, basic goods, and infrastructure.`**
+- **`Effect: Withdraws from unequal exchange, builds alternative circuits of production and distribution, raises living standards through retained wealth, creates material pressure on high-income regions to restructure or face collapse of cheap imports, and transforms dependency into interdependence on equitable terms.`**
 
 **`Transition in High-Income Regions:`** `High-income regions face a specific contradiction: they import most real goods but have idle labor and resources.`
 
@@ -368,11 +368,11 @@ _`Infrastructure operators (Aggregators/Indexers/Planners etc.) are responsible 
 **`Scope Committees:`** `Scopes are spatial assemblages of economic resources — factories, farms, mines, transport networks, research institutions. Scope Committees are elected by workers within a scope to steward the transition of production.`
 
 - **`Rights:`**
-  - **`Decisions:`** `for all scope-participants on matters internal to the scope's production process, subject to federation decisions on matters of broader metabolic interdependence`
+  - **`Decisions:`** `for all scope-participants on matters internal to the scope's production process, subject to federation decisions on matters of broader interdependence`
   - **`Immediately-Revoke:`** `scope-participants (committee members), delegates to parent-scope assemblies, technical consultants`
   - **`Access:`** `Full visibility into all scope operations, including: business secrets, financial records, supply contracts, customer lists; technical specifications and recipes; maintenance schedules and equipment condition; labor processes and skill inventories; input sources and output destinations`
   - **`Communicate:`** `Publish all doings and shortcomings — to workers within the scope, to the parent federation, to the public`
-  - **`Inspect:`** `Send observers to suppliers, customers, and related scopes to trace metabolic connections`
+  - **`Inspect:`** `Send observers to suppliers, customers, and related scopes to trace connections`
   - **`Propose:`** `Alternative production plans, repurposing of equipment, disassembly recipes`
   - **`Withdraw:`** `The right to initiate withdrawal from a federation, subject to settlement of obligations`
 - **`Responsibilities:`**
@@ -387,7 +387,7 @@ _`Infrastructure operators (Aggregators/Indexers/Planners etc.) are responsible 
 | :----------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `Infiltration & Mapping` | `Workers use their access rights to document everything. Not passive observation — active investigation. Where do inputs come from? Where do outputs go? Who decides? What skills exist? What's hidden? Build the real PlanStore from below.`           |
 | `Exposure`               | `Publish business secrets. Make visible to all workers — and to society — the actual accounts: what capitalists extract, what gets wasted, what's squandered through anarchy and profit-seeking.`                                                       |
-| `Control`                | `Begin intervening. Not yet management, but oversight. Challenge decisions that harm workers or communities. Use metabolic visibility to show consequences. Build worker confidence and competence.`                                                    |
+| `Control`                | `Begin intervening. Not yet management, but oversight. Challenge decisions that harm workers or communities. Use visibility to show consequences. Build worker confidence and competence.`                                                              |
 | `Planning`               | `Develop alternative plans from within the scope. Show what could be produced, how work could be organized, what would change if workers managed. Use the same planning tools — PlanNetters, indexes, recipes — but now with real data from inside.`    |
 | `Management`             | `When conditions permit — when the old power is broken or withdrawn — transition from control to direct management. The committee becomes the managing body. The PlanStore becomes binding. The scope operates as a cooperative within the federation.` |
 
@@ -436,7 +436,7 @@ _`Communal satisfaction of need is distinguished from market satisfaction of nee
 
 _`This creates a positive feedback loop within the transition:`_
 
-1. _`As communal provision expands, communal_need_coverage[i]rises anduncovered_essential_expenses[i] falls.`_
+1. _`As communal provision expands, communal_need_coverage[i] rises and uncovered_essential_expenses[i] falls.`_
 2. _`The minimum viable dollar wage falls — workers can tolerate a lower dollar wage without real hardship because survival needs are no longer market-dependent.`_
 3. _`Lower minimum viable dollar wage reduces resistance to increasing social_output_fraction (which reduces market revenue and thus dollar wages).`_
 4. _`Faster transition deepens the social plan's productive capacity, enabling further communal provision — closing the loop.`_
@@ -478,22 +478,36 @@ _`At any rung before Conflict, if the social plan fails to deliver, the scope fa
   - **`New social provider:`** `The federation creates or seeds a new socially-organised source for this input. Slow to establish; deepens the social plan's productive base permanently.`
   - **`Supplier partial transition:`** `An existing supplier's own Scope Committee redirects a fraction of their output to the social plan. Both scopes advance their fractions together; their trajectories are coupled.`
   - **`Dollar bridge:`** `subsidy_received from the federation covers market input costs while input substitution capacity is being built. Does not increase social_input_fraction — inputs still come from market. A bridge, not a destination: dollar subsidies without concurrently expanding the social claim pool creates dependency, not transition.`
-- **`Dollar Solvency Constraint:`**
-  - `(market_revenue + social_cash_revenue + subsidy_received) ≥ (market_input_cost + social_input_cash_cost + dollar_wages + other_costs + contribution_sent)`
+- **`External Solvency Constraint (Generalized):`**
+  - `(market_revenue + social_cash_revenue + subsidy_received + other_external_inflow) ≥ (market_input_cost + social_input_cash_cost + dollar_wage_bill + other_costs + contribution_sent)`
+  - _`Where other_external_inflow includes barter, foreign currency other than dollars, etc.`_
 - **`Labor Validation:`**
   - `hours_worked[i] — pre-split total: the worker's full hours for the period before any social/market fraction is applied. All splits are derived calculations on top of this number.`
   - `validated_hours[i] = confirmed_output_fraction × hours_worked[i] (automatic once the recipient records receipt; bounded by the Planned Effort of the work-intent)`
-  - _`Validation originates with the social recipient, not the producing scope. Unconfirmed deliveries — due to quality failures, delivery shortfalls, or disputes — generate no claim. If confirmed_output_fraction lags social_output_fraction, workers' claim capacity falls below expectation, creating material pressure to resolve the gap.`_
-- **`Compensation Equations:`**
-  - **`Dollar Wage (from market revenue):`** `total_dollar_wages = (1 - social_output_fraction) × total_output_market_value × labor_share_of_revenue wage_rate_normalized[i] = hourly_rate[i] / average_hourly_rate (= 1 for all workers when rates are equal; captures pre-existing wage differentials carried over from capitalist operation) dollar_wage[i] = total_dollar_wages × (hours_worked[i] × wage_rate_normalized[i]) / Σ(hours_worked[j] × wage_rate_normalized[j]) If social_output_fraction increases but dollar wages do not decrease proportionally (because workers resist wage cuts), the scope becomes insolvent. Co-optation signal: if wage_rate_normalized for committee members diverges upward from workers', the committee is separating from those it represents.`
-  - **`Claim Capacity (from social pool):`** `claim_capacity[i] = validated_hours[i] × (available_claimable_pool / total_social_svc) + solidarity_supplement[i]`
+  - _`Validation is based on plan fulfillment, not revenue. The recipient confirms that the planned quantity was delivered — not that a particular price was obtained. Price outcomes affect collective funds, not individual validation.`_
+  - _`For exports, the federation (or appropriate collective body) acts as social recipient. It confirms: (1) that planned export quantities were delivered, (2) that external payment was received in whatever form. The resulting dollar or barter revenue enters the collective import fund, not individual wages. This mechanism works identically whether the recipient is a market customer (current-state), a commune (transition), or the federation managing exports (advanced transition) — the recipient becomes more collective over time, but the validation mechanism is unchanged.`_
+  - _`Validation originates with the recipient, not the producing scope. Unconfirmed deliveries — due to quality failures, delivery shortfalls, or disputes — generate no claim. If confirmed_output_fraction lags social_output_fraction, workers' claim capacity falls below expectation, creating material pressure to resolve the gap.`_
+- **`Compensation Equations — Revised:`**
+  - **`Dollar Wages (Transitional, Phase-Out Model):`** `dollar_wage_phase_out_factor = max(0, 1 − (communal_satisfaction_ratio / target_ratio)) total_dollar_wages = (1 − social_output_fraction) × total_output_market_value × labor_share_of_revenue × dollar_wage_phase_out_factor wage_rate_normalized[i] = hourly_rate[i] / average_hourly_rate dollar_wage[i] = total_dollar_wages × (hours_worked[i] × wage_rate_normalized[i]) / Σ(hours_worked[j] × wage_rate_normalized[j])` _`When communal_satisfaction_ratio reaches target_ratio (democratically determined), dollar_wage_phase_out_factor → 0 and dollar wages cease entirely. Workers have agreed: social provision now meets all essential needs; all external revenue becomes collective. The target_ratio is not a technical parameter — it is the democratic assertion that the social plan is sufficient.`_
+  - **`Claim Capacity (Unified — applies to ALL validated work):`** `total_social_svc = Σ validated_hours[i]   # includes export work validated by federation claim_capacity[i] = validated_hours[i] × (available_claimable_pool / total_social_svc) + solidarity_supplement[i]` _`Every hour of socially-validated work, regardless of destination (local social recipient or federation-validated export), generates the same claim capacity. This is the core: the social plan does not distinguish between producing for a neighbouring commune and producing for export — both are socially necessary, both are validated, both are compensated equally.`_
   - **`Communal Need Coverage:`** `communal_need_coverage[i] — the market cost equivalent of essential goods and services (housing, healthcare, childcare, food security, public transport) that the social plan provides communally to worker i, at no individual cost. These are collectively-provisioned through the social plan, not drawn from the individual claims pool. uncovered_essential_expenses[i] — remaining market cost of essentials not yet communally covered; falls as communal provision expands. effective_net_market_wage[i] = dollar_wage[i] − uncovered_essential_expenses[i] As communal_need_coverage[i] grows, uncovered_essential_expenses[i] falls and effective_net_market_wage[i] approaches dollar_wage[i] in discretionary character — the dollar wage increasingly covers preference, not survival. The minimum viable dollar wage falls with it, reducing resistance to social_output_fraction increases.`
-- **`The composition Ratio (Real Purchasing Power):`**
+- **`Federation External Fund:`**
+  - `scope_net_external_contribution = scope_external_revenue − (scope_external_subsidies_received + scope_allocated_share_of_common_external_costs)` _`Positive means the scope contributes net external currency to the federation fund. Negative means the scope draws subsidies. The fund is allocated by the federation according to democratically-determined priorities — not returned to the exporting scope.`_
+  - `federation_external_fund = Σ(scope_net_external_contribution) + federation_level_external_inflows + prior_period_surplus`
+  - `federation_import_capacity = federation_external_fund × import_purchasing_power`
+  - _`Import allocations are determined by need, not by which scope generated the revenue. The federation assembly sets priorities: medicine before spare parts, food before solar panels. A scope that exports heavily does not receive more imports — it contributes to the common fund, which covers collective needs.`_
+- **`Local Provision Value:`** `local_provision_value_per_worker = (average_claim_capacity × claim_purchasing_power) + average_communal_need_coverage` _`This answers: "What does the social plan provide to each worker from local production?" It is the primary measure of how much the transition has improved material conditions within the scope.`_
+- **`Scope Decision Metrics (for assembly deliberation):`**
+  - `if_shift_to_exports(Δlabor): estimated_net_external_contribution = Δexport_revenue − Δexternal_input_costs; federation_priority_impact = which current highest-priority import need this could fund`
+  - `if_shift_to_local(Δlabor): estimated_claim_pool_addition = Δlocal_claimable_output; estimated_communal_addition = Δcommunal_output`
+  - _`The assembly deliberation is not a ratio — it is a political question. "The federation reports medicine is critically underfunded. Our export shift could cover X% of that need. Our local claim pool is currently stable. Do we shift labor to exports this quarter?" This requires federation priority data, published each cycle by the federation Observer.`_
+- **`The Composition Ratio (Real Purchasing Power) — Modified for Phase-Out:`**
   - `claim_purchasing_power  = goods per 1 SVC unit in the local claim pool`
   - `dollar_purchasing_power = goods per $1 in local markets`
   - `social_real_wage_per_hour = average_claim_per_validated_hour × claim_purchasing_power`
   - `market_real_wage_per_hour = average_dollar_wage_per_hour     × dollar_purchasing_power`
   - `composition_ratio = [social_real_wage_per_hour × confirmed_output_fraction] / [market_real_wage_per_hour × (1 - social_output_fraction)]`
+  - _`As dollar wages phase out, market_real_wage_per_hour → 0, and the composition ratio becomes effectively infinite. At that point the relevant comparison shifts: the democratic question is no longer "are social wages matching market wages?" but "does the social plan generate sufficient value for all workers, and how should we allocate labor to best serve collective priorities?" The communal satisfaction ratio and scope net external contribution become the primary metrics.`_
   - _`Workers compare real goods received per hour of work on each side of the transition. Neither the per-hour rates alone (which omit purchasing power differences between SVC and dollars) nor the purchasing power terms alone (which omit the per-hour compensation rates) are sufficient — the correct ratio requires both. A gap between confirmed_output_fraction and social_output_fraction — unconfirmed deliveries — depresses the social side and creates material pressure to resolve outstanding confirmations.`_
   - _`Political usage:`_ `The substitution ratio is published for every scope. Workers can see whether their social compensation matches their market compensation, whether the gap is growing or shrinking, and how their scope compares to others. Transparency turns compensation into a democratic question: "Why is our substitution ratio 0.7 when the neighboring scope's is 1.1?" Assemblies debate, federations adjust, and the Observer recalculates.`
 - **`The Communal Satisfaction Ratio:`**
@@ -502,27 +516,44 @@ _`At any rung before Conflict, if the social plan fails to deliver, the scope fa
   - _`Where the substitution ratio compares compensation streams per hour of work, the communal satisfaction ratio compares total social plan value — claim pool access plus communal provision — against what the market wage must actually cover. As communal_need_coverage[i] grows, effective_net_market_wage[i] shrinks even without any change in dollar_wage[i]: the communal satisfaction ratio rises from expansion of provision alone, without any change in social_output_fraction.`_
   - _`The individual claims pool is not diminished by communal provision — it is a separate category. But its character changes: as communal coverage absorbs survival goods (housing, healthcare, childcare), the claims pool shifts from a survival instrument to a discretionary one. Workers use it for cultural goods, personal tools, travel, non-essential consumption. This shift in the character of the claims pool, visible in the Observer's data, is one of the clearest signs that a scope's transition is deepening.`_
 - **`Federation Role in Transition Composition:`**
-  - `For proposed (social_input_fraction_next, social_output_fraction_next), the Observer computes required subsidy_received to balance dollars.`
+  - `For proposed (social_input_fraction_next, social_output_fraction_next, export_plan_next), the Observer computes required subsidy_received to balance external accounts and projected composition ratio (if still relevant), projected collective trade-off ratio, and projected communal satisfaction ratio.`
   - `If composition_ratio_next << 1 or subsidy_received exceeds federation capacity, the federation must:`
     1. `Increase available claimable pool (reclassify goods to individual-claimable)`
     2. `Accept more confirmed outputs (if currently under-confirming)`
-    3. `Provide dollar subsidies (as a bridge, not a permanent solution)`
+    3. `Provide temporary external subsidies (bridge, not destination)`
     4. `Negotiate a slower social_output_fraction increase.`
+    5. `Facilitate import substitution — seed new social providers, coordinate supplier transitions`
+    6. `Manage export validation as social recipient — confirm delivery and validate labor accordingly`
   - _`Note: Dollar subsidies without concurrently expanding the social claim pool creates dependency, not transition.`_
 
-**`Observer's Report:`** `The Observer produces a report each planning cycle covering:`
+**`Observer's Report — Federation Level:`** `The federation Observer publishes each planning cycle: federation_external_fund balance; allocation_priorities (democratically set, ranked by need); per-scope scope_net_external_contribution (positive = contributing, negative = drawing subsidies); per-scope receipts from import allocation (by need, not by contribution); federation-wide communal_satisfaction_ratio, dollar_wage_phase_out_factor, claim_purchasing_power, import_dependence_ratio.`
 
-- **`Current State Snapshot:`** `social_input_fraction, social_output_fraction, confirmed_output_fraction; dollar_balance; total_dollar_wages; composition_ratio; communal_satisfaction_ratio; per-worker: hours_worked[i], dollar_wage[i], total_claim_capacity[i], communal_need_coverage[i], effective_net_market_wage[i]`
-- **`Transition Feasibility:`** `For each proposed (social_input_fraction_next, social_output_fraction_next), compute required subsidy_received_next to balance dollars and projected composition_ratio_next.`
-- **`Recommendation:`** `Proposed targets, subsidy_request, projected substitution ratio, resistance risk.`
+**`Observer's Report — Scope Level:`** `The scope Observer produces a report each planning cycle covering:`
 
-**`Committee Decision:`** `The elected workers review the Observer's report and decide:`
+- **`Current State Snapshot:`** `social_input_fraction, social_output_fraction, confirmed_output_fraction; scope_net_external_contribution (net contribution to federation fund); total_dollar_wages (if any) + dollar_wage_phase_out_factor; composition_ratio (if still relevant); communal_satisfaction_ratio; local_provision_value_per_worker; per-worker: hours_worked[i], dollar_wage[i] (if any), total_claim_capacity[i], communal_need_coverage[i], effective_net_market_wage[i]`
+- **`Federation Priority Context:`** `Current highest unfunded priorities from federation Observer; estimated federation_priority_impact if scope shifts Δlabor to exports; estimated local_provision_change if scope shifts Δlabor to local production.`
+- **`Transition Feasibility:`** `For each proposed (social_input_fraction_next, social_output_fraction_next, export_plan_next), compute projected communal_satisfaction_ratio, projected scope_net_external_contribution, and import substitution progress required.`
+- **`Recommendation:`** `Proposed targets, subsidy_request, projected ratios, resistance risk, import substitution priorities, solidarity assessment.`
 
-1. **`Targets:`** `social_input_fraction_target, social_output_fraction_target for next period`
-2. **`Request:`** `subsidy_request from federation (if needed)`
-3. **`Communication:`** `Send to federation: "We can increase social provision to social_output_fraction_target if you provide subsidy_request dollars and can absorb these outputs."`
+**`Scope Assembly Decision:`** `The elected workers review the Observer's report and deliberate:`
 
-**`Key Insight:`** `The transition is constrained by three things simultaneously: (1) Dollar balance — can the scope cover remaining dollar costs as market revenue shrinks? (2) Substitution ratio — do workers receive equivalent real purchasing power from social and market compensation? (3) Communal satisfaction ratio — does the social plan's total value (claims plus communal provision) remain sufficient relative to what the market wage must still cover? All three must be tracked at each step. The substitution ratio is where individual compensation resistance emerges. The communal satisfaction ratio is where the transition's political sustainability is built — as communal provision grows, the minimum viable dollar wage falls, and the political economy of transition shifts.`
+1. **`Understand federation priorities:`** `What does the whole federation need most urgently? (from federation Observer report)`
+2. **`Assess local conditions:`** `Is our claim pool stressed? Communal provision adequate? What does communal_satisfaction_ratio show?`
+3. **`Decide labor allocation:`** `export_labor_target, local_social_labor_target — based on collective priorities, not local benefit-capture`
+4. **`Set targets:`** `social_input_fraction_target, social_output_fraction_target, export_plan_target for next period`
+5. **`Requests:`** `subsidy_request from federation (if needed)`
+6. **`Communication:`** `Send to federation: "We commit to export_plan_target, generating estimated scope_net_external_contribution. We request subsidy_request support and confirm these outputs for federation validation."`
+7. **`Import substitution priorities:`** `Which inputs to target for replacement next period`
+
+**`Federation Assembly Decision:`** `Federation delegates review all scope reports and decide:`
+
+1. **`Set import priorities:`** `ranked by need, not by which scope contributed most`
+2. **`Allocate external fund:`** `according to priorities — medicine first, infrastructure second, etc.`
+3. **`Coordinate import substitution:`** `seed new social providers, couple supplier transitions across scopes`
+4. **`Validate exports:`** `confirm delivery as social recipient for all scopes, enabling labor validation`
+5. **`Publish federation metrics:`** `priorities, allocations, import_dependence_ratio, communal_satisfaction_ratio for next planning cycle`
+
+**`Key Insight:`** `The transition is constrained by four things simultaneously: (1) Federation external balance — can collective external revenue cover priority imports? (2) Import substitution progress — is external dependence falling fast enough to withstand potential blockade? (3) Communal satisfaction ratio — does social plan value exceed what dollars must still cover? (4) Solidarity coherence — are scopes allocating labor based on collective priorities, not local capture? The substitution ratio manages individual compensation resistance during phase-out. The communal satisfaction ratio builds political sustainability. Scope net external contribution determines each scope's solidarity position — contributing to or drawing from the common fund. Import substitution progress determines strategic survival. As dollar wages phase out completely, the relevant question is no longer "are workers compensated adequately?" (answered by CSR) but "are we building the material base for genuine federation?" — answered by import substitution progress and solidarity coherence together.`
 
 **`Global Claim Pool & Political Sustainability:`** `One hour of socially-validated labor anywhere yields the same baseline claim capacity. The claim pool makes visible what capitalist prices hide: that an hour producing food in Mozambique and an hour producing financial instruments in Luxembourg are not inherently unequal. Their apparent inequality under capitalism reflects not real value but the power to extract.`
 
@@ -545,4 +576,5 @@ _`The Paris Commune`_`, Karl Marx`
 _`Negotiated Coordination`_`, Pat Devine`  
 _`Towards a New Socialism`_`, Paul Cockshott`  
 _`People's Republic of Walmart,`_ `Leigh Phillips and Michael Rozworski`  
-`Project Cybersyn, Revolutionary Chile`
+_`Project Cybersyn, Revolutionary Chile`_
+_`OGAS, Soviet Union`_

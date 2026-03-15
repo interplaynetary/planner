@@ -5,7 +5,7 @@
  * Implements the Observer Procedure equations from docs/social/spec.md:
  *   - Physical flow fractions (social/confirmed), transition_depth, commitment_gap
  *   - Per-worker labor validation (hours → validated_hours → claim_capacity)
- *   - Dollar wage computation (wage_rate_normalized, dollar_wage)
+ *   - Dollar wage computation (federation_hourly_dollar_rate × hours, phase-out factor)
  *   - Communal need coverage (effective_net_market_wage, communal_need_coverage)
  *   - Purchasing power terms and real wages
  *   - Per-worker entitlement composition (social vs. market channel split)
@@ -25,6 +25,7 @@ import type { EconomicEvent } from '../schemas';
 export interface PurchasingPower {
     claim_purchasing_power: number;   // goods per 1 SVC unit in local claim pool
     dollar_purchasing_power: number;  // goods per $1 in local markets
+    import_purchasing_power: number;  // goods per $1 in international markets (default 1.0)
 }
 
 /** Dollar wages and operational costs for a scope in one period. */
@@ -39,9 +40,6 @@ export interface ScopeFinancials {
     total_dollar_wages: number;
     other_costs: number;
     contribution_sent: number;       // federation levy / solidarity contribution
-    // For wage formula
-    total_output_market_value: number;
-    labor_share_of_revenue: number;  // fraction of market revenue paid as wages
 }
 
 /** Dollar hourly rate for one worker (external payroll data, not VF). */
@@ -76,6 +74,7 @@ export interface ScopeTransitionConfig {
     // Market context
     purchasingPower: PurchasingPower;
     financials: ScopeFinancials;
+    target_communal_ratio: number;  // policy threshold; when CSR reaches this, wages phase out
 }
 
 // =============================================================================
@@ -132,9 +131,14 @@ export interface ScopeTransitionReport {
     social_real_wage_per_hour: number;
     market_real_wage_per_hour: number;
     // Ratios
-    /** Does the social channel adequately substitute for foregone market compensation? */
-    substitution_ratio: number;
+    /** Channel mix: social vs. market compensation per confirmed hour (same formula as substitution_ratio, reframed). */
+    composition_ratio: number;
     communal_satisfaction_ratio: number; // hours-weighted average across workers
+    // Phase-out
+    dollar_wage_phase_out_factor: number;
+    // Collective trade metrics
+    scope_net_external_contribution: number;
+    local_provision_value_per_worker: number;
     // Per-worker
     workers: WorkerTransitionState[];
 }
@@ -221,18 +225,6 @@ export function computeWageRateNormalized(
 }
 
 // --- Dollar wages ---
-
-/**
- * Total dollar wages attributable to the market portion of scope output.
- * = (1 - social_output_fraction) × total_output_market_value × labor_share_of_revenue
- */
-export function computeTotalDollarWages(
-    social_output_fraction: number,
-    total_output_market_value: number,
-    labor_share_of_revenue: number,
-): number {
-    return (1 - social_output_fraction) * total_output_market_value * labor_share_of_revenue;
-}
 
 /**
  * Distribute total dollar wages across workers by weighted hours share.
@@ -324,22 +316,55 @@ export function computeRealWages(
 // --- Substitution ratio ---
 
 /**
- * substitution_ratio = [social_rw × confirmed_output_fraction]
- *                    / [market_rw × (1 − social_output_fraction)]
+ * composition_ratio = (social_rw × confirmed_output_fraction) / market_rw
  *
- * Answers: for the hours redirected to social production, does the social channel
- * adequately substitute for the foregone market compensation?
- * Returns 0 when denominator is 0.
+ * Answers: per total hour worked, how do confirmed social goods compare to
+ * federation dollar goods? Returns 0 when denominator is 0.
  */
 export function computeSubstitutionRatio(
     social_real_wage_per_hour: number,
     confirmed_output_fraction: number,
     market_real_wage_per_hour: number,
-    social_output_fraction: number,
 ): number {
-    const denominator = market_real_wage_per_hour * (1 - social_output_fraction);
-    if (denominator === 0) return 0;
-    return (social_real_wage_per_hour * confirmed_output_fraction) / denominator;
+    if (market_real_wage_per_hour === 0) return 0;
+    return (social_real_wage_per_hour * confirmed_output_fraction) / market_real_wage_per_hour;
+}
+
+// --- Dollar wage phase-out factor ---
+
+/**
+ * Phase-out factor reduces formula-path wages as CSR approaches the policy target.
+ * Returns 0 when CSR >= target (fully phased out), 1 when target = 0.
+ */
+export function computeDollarWagePhaseOutFactor(
+    communal_satisfaction_ratio: number,
+    target_communal_ratio: number,
+): number {
+    if (target_communal_ratio <= 0) return 1;
+    return Math.max(0, 1 - communal_satisfaction_ratio / target_communal_ratio);
+}
+
+// --- Collective trade metrics ---
+
+/**
+ * Scope-level signals for the assembly deliberating on labor allocation between exports and local production.
+ *
+ * scope_net_external_contribution = market_revenue − market_input_cost − subsidy_received
+ *   Positive: scope contributes net external currency to the federation fund.
+ *   Negative: scope draws subsidies from the federation fund.
+ */
+export function computeCollectiveMetrics(
+    market_revenue: number,
+    market_input_cost: number,
+    subsidy_received: number,
+    avg_claim_capacity: number,
+    avg_communal_coverage: number,
+    claim_purchasing_power: number,
+): { scope_net_external_contribution: number; local_provision_value_per_worker: number } {
+    const scope_net_external_contribution = market_revenue - market_input_cost - subsidy_received;
+    const local_provision_value_per_worker =
+        avg_claim_capacity * claim_purchasing_power + avg_communal_coverage;
+    return { scope_net_external_contribution, local_provision_value_per_worker };
 }
 
 // --- Communal satisfaction ratio ---
@@ -370,9 +395,12 @@ export function computeCommunalSatisfactionRatio(
 // --- Dollar solvency ---
 
 /**
- * dollar_balance = (market_revenue + social_cash_revenue + subsidy_received)
- *                 − (market_input_cost + social_input_cash_cost + total_dollar_wages
- *                    + other_costs + contribution_sent)
+ * Scope-level dollar balance — dollar wages are a federation responsibility and
+ * are excluded from the scope's own accounts.
+ *
+ * scope_balance = (market_revenue + social_cash_revenue + subsidy_received)
+ *               − (market_input_cost + social_input_cash_cost
+ *                  + other_costs + contribution_sent)
  */
 export function computeDollarBalance(financials: ScopeFinancials): number {
     const inflows = financials.market_revenue
@@ -380,7 +408,6 @@ export function computeDollarBalance(financials: ScopeFinancials): number {
         + financials.subsidy_received;
     const outflows = financials.market_input_cost
         + financials.social_input_cash_cost
-        + financials.total_dollar_wages
         + financials.other_costs
         + financials.contribution_sent;
     return inflows - outflows;
@@ -411,6 +438,7 @@ export function computeScopeTransitionReport(
         total_social_svc,
         purchasingPower,
         financials,
+        target_communal_ratio,
     } = config;
 
     // 1. Extract hours per worker
@@ -425,38 +453,39 @@ export function computeScopeTransitionReport(
         confirmedReceiptEvents,
     );
 
-    // 3. Wage rate normalization
+    // 3. Wage rate normalization (stored on per-worker state for display)
     const hourlyRatesMap = new Map<string, number>(
         workerRates.map(w => [w.agentId, w.hourly_rate]),
     );
     const wage_rate_normalized = computeWageRateNormalized(hourlyRatesMap);
 
-    // 4. Total dollar wages (formula-derived; financials.total_dollar_wages is the actual payroll figure)
-    const formula_dollar_wages = computeTotalDollarWages(
-        fractions.social_output_fraction,
-        financials.total_output_market_value,
-        financials.labor_share_of_revenue,
-    );
-    // Use the formula result for per-worker distribution and real-wage computation
-    const total_dollar_wages = formula_dollar_wages;
-
-    // 5. Dollar wages per worker
-    const dollar_wages = computeDollarWagesPerWorker(
-        total_dollar_wages,
-        hours_worked,
-        wage_rate_normalized,
-    );
-
-    // 6. Validated hours
+    // 4. Validated hours (no dependency on dollar wages)
     const validated_hours = computeValidatedHours(hours_worked, fractions.confirmed_output_fraction);
 
-    // 7. Claim capacities
+    // 5. Claim capacities
     const claim_capacities = computeClaimCapacities(
         validated_hours,
         available_claimable_pool,
         total_social_svc,
         solidaritySupplements,
     );
+
+    // 6. Communal coverage map (needed for per-worker states)
+    const communalCoverageMap = new Map<string, WorkerCommunalCoverage>(
+        communalCoverage.map(c => [c.agentId, c]),
+    );
+
+    // 7. Dollar wages: explicit rates (federation_hourly_dollar_rate × hours per worker)
+    //    Phase-out factor is derived from CSR after per-worker states are built.
+    const dollar_wages = new Map<string, number>();
+    let total_dollar_wages = 0;
+    let dollar_wage_phase_out_factor = 1;
+
+    for (const [agentId, hours] of hours_worked) {
+        const wage = hours * (hourlyRatesMap.get(agentId) ?? 0);
+        dollar_wages.set(agentId, wage);
+        total_dollar_wages += wage;
+    }
 
     // 8. Scope aggregates
     const total_hours_worked = Array.from(hours_worked.values()).reduce((s, h) => s + h, 0);
@@ -475,19 +504,14 @@ export function computeScopeTransitionReport(
         purchasingPower,
     );
 
-    // 10. Substitution ratio
-    const substitution_ratio = computeSubstitutionRatio(
+    // 10. Composition ratio (social goods per confirmed hour vs. federation dollar goods per hour)
+    const composition_ratio = computeSubstitutionRatio(
         social_real_wage_per_hour,
         fractions.confirmed_output_fraction,
         market_real_wage_per_hour,
-        fractions.social_output_fraction,
     );
 
     // 11. Build per-worker states
-    const communalCoverageMap = new Map<string, WorkerCommunalCoverage>(
-        communalCoverage.map(c => [c.agentId, c]),
-    );
-
     const workers: WorkerTransitionState[] = [];
     for (const [agentId, hours] of hours_worked) {
         const hourly_rate = hourlyRatesMap.get(agentId) ?? 0;
@@ -542,8 +566,24 @@ export function computeScopeTransitionReport(
     const communal_satisfaction_ratio =
         total_hours_worked > 0 ? weightedSatisfactionSum / total_hours_worked : 0;
 
-    // 13. Dollar solvency (uses financials.total_dollar_wages for actual payroll)
+    // Derive phase-out factor from final CSR (report only; wages are the explicit federation rate)
+    dollar_wage_phase_out_factor = computeDollarWagePhaseOutFactor(communal_satisfaction_ratio, target_communal_ratio);
+
+    // 13. Scope solvency — wages are a federation cost; not included in scope balance
     const dollar_balance = computeDollarBalance(financials);
+
+    // 14. Collective trade metrics
+    const average_claim_capacity = total_claims / (workers.length || 1);
+    const average_communal_need_coverage =
+        workers.reduce((s, w) => s + w.communal_need_coverage, 0) / (workers.length || 1);
+    const { scope_net_external_contribution, local_provision_value_per_worker } = computeCollectiveMetrics(
+        financials.market_revenue,
+        financials.market_input_cost,
+        financials.subsidy_received,
+        average_claim_capacity,
+        average_communal_need_coverage,
+        purchasingPower.claim_purchasing_power,
+    );
 
     return {
         fractions,
@@ -556,8 +596,11 @@ export function computeScopeTransitionReport(
         average_claim_per_validated_hour,
         social_real_wage_per_hour,
         market_real_wage_per_hour,
-        substitution_ratio,
+        composition_ratio,
         communal_satisfaction_ratio,
+        dollar_wage_phase_out_factor,
+        scope_net_external_contribution,
+        local_provision_value_per_worker,
         workers,
     };
 }

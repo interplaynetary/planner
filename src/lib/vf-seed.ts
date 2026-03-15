@@ -24,9 +24,10 @@ import {
 
 export function seedExample(): void {
     // ── AGENTS ────────────────────────────────────────────────────────────────
-    agents.addAgent({ id: 'ose',        type: 'Organization', name: 'OSE Fab Lab'      });
-    agents.addAgent({ id: 'steel-co',   type: 'Organization', name: 'Midwest Steel'    });
-    agents.addAgent({ id: 'agent-ose',  type: 'Person',       name: 'Ruzgar'           });
+    agents.addAgent({ id: 'ose',          type: 'Organization', name: 'OSE Fab Lab'        });
+    agents.addAgent({ id: 'steel-co',     type: 'Organization', name: 'Midwest Steel'      });
+    agents.addAgent({ id: 'customer-co',  type: 'Organization', name: 'External Customer'  });
+    agents.addAgent({ id: 'agent-ose',    type: 'Person',       name: 'Ruzgar'             });
     agents.addAgent({ id: 'agent-maya', type: 'Person',       name: 'Maya'             });
     agents.addAgent({ id: 'agent-leo',  type: 'Person',       name: 'Leo'              });
     agents.addAgent({ id: 'agent-sara', type: 'Person',       name: 'Sara'             });
@@ -85,6 +86,10 @@ export function seedExample(): void {
     recipes.addProcessSpec({ id: 'ps-pu-assy',    name: 'Power Unit Assembly',  isControlPoint: true,                            bufferType: 'capacity' });
     recipes.addProcessSpec({ id: 'ps-hyd-assy',   name: 'Hydraulics Assembly'                                                                          });
     recipes.addProcessSpec({ id: 'ps-final-assy', name: 'Final Assembly',       isDecouplingPoint: true,                         bufferType: 'stock'    });
+
+    // ── KNOWLEDGE: Skill ResourceSpecs (resourceConformsTo for work commitments) ─
+    recipes.addResourceSpec({ id: 'rs-skill-welding',  name: 'Welding',  defaultUnitOfEffort: 'hr', resourceClassifiedAs: ['skill'] });
+    recipes.addResourceSpec({ id: 'rs-skill-assembly', name: 'Assembly', defaultUnitOfEffort: 'hr', resourceClassifiedAs: ['skill'] });
 
     // ── KNOWLEDGE: Recipe Processes ───────────────────────────────────────────
     recipes.addRecipeProcess({ id: 'rp-fab',   name: 'Fab Frame',         processConformsTo: 'ps-fab-frame',  hasDuration: { hasNumericalValue: 8, hasUnit: 'h' } });
@@ -233,6 +238,7 @@ export function seedExample(): void {
 
     // ── PLAN ──────────────────────────────────────────────────────────────────
     planner.addPlan({ id: 'sprint-1', name: 'Build Sprint 1' });
+    planner.addPlan({ id: 'plan-social', name: 'Social Distribution Plan', classifiedAs: ['tag:plan:social'] });
 
     registry.register({ id: 'proc-fab',   name: 'Fab Frame',      basedOn: 'ps-fab-frame',  plannedWithin: 'sprint-1' });
     registry.register({ id: 'proc-pu',    name: 'Assemble PU',    basedOn: 'ps-pu-assy',    plannedWithin: 'sprint-1' });
@@ -257,12 +263,31 @@ export function seedExample(): void {
     const cFinalPu     = planner.addCommitment({ id: 'c-final-pu',     action: 'consume', resourceConformsTo: 'rs-pu',       resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, inputOf:  'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
     const cFinalHyd    = planner.addCommitment({ id: 'c-final-hyd',    action: 'consume', resourceConformsTo: 'rs-hyd-assy', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, inputOf:  'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
     const cFinalWheels = planner.addCommitment({ id: 'c-final-wheels', action: 'consume', resourceConformsTo: 'rs-wheel',    resourceQuantity: { hasNumericalValue: 4, hasUnit: 'units' }, inputOf:  'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
-    const cFinalOut    = planner.addCommitment({ id: 'c-final-out',    action: 'produce', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, outputOf: 'proc-final', provider: 'ose', receiver: 'ose', plannedWithin: 'sprint-1' });
+    // Social delivery — custody stays in social plan; hub-midwest is steward
+    const cFinalOutSocial = planner.addCommitment({ id: 'c-final-out-social', action: 'transferCustody', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, outputOf: 'proc-final', provider: 'ose', receiver: 'hub-midwest',   plannedWithin: 'sprint-1', satisfies: 'i-lifetrac-hub' });
+    // Market sale — ownership exits the social plan
+    const cFinalOutMarket = planner.addCommitment({ id: 'c-final-out-market', action: 'transferAllRights', resourceConformsTo: 'rs-lifetrac', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' }, outputOf: 'proc-final', provider: 'ose', receiver: 'customer-co', plannedWithin: 'sprint-1' });
 
     // Register all commitments with observer for fulfillment tracking
     for (const c of [cFabSteel, cFabRod, cFabOut, cPuEngine, cPuPump, cPuOut,
                      cHydHose, cHydFluid, cHydOut, cFinalFrame, cFinalPu,
-                     cFinalHyd, cFinalWheels, cFinalOut]) {
+                     cFinalHyd, cFinalWheels, cFinalOutSocial, cFinalOutMarket]) {
+        observer.registerCommitment(c);
+    }
+
+    // ── WORK COMMITMENTS (labor inputs per process) ────────────────────────────
+    // proc-fab: 8h welding — Ruzgar + Maya
+    const cFabWorkRuzgar    = planner.addCommitment({ id: 'c-fab-work-ruzgar',    action: 'work', resourceConformsTo: 'rs-skill-welding',  effortQuantity: { hasNumericalValue: 8, hasUnit: 'hr' }, inputOf: 'proc-fab',   provider: 'agent-ose',  receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cFabWorkMaya      = planner.addCommitment({ id: 'c-fab-work-maya',      action: 'work', resourceConformsTo: 'rs-skill-welding',  effortQuantity: { hasNumericalValue: 8, hasUnit: 'hr' }, inputOf: 'proc-fab',   provider: 'agent-maya', receiver: 'ose', plannedWithin: 'sprint-1' });
+    // proc-pu: 4h assembly — Leo
+    const cPuWorkLeo        = planner.addCommitment({ id: 'c-pu-work-leo',        action: 'work', resourceConformsTo: 'rs-skill-assembly', effortQuantity: { hasNumericalValue: 4, hasUnit: 'hr' }, inputOf: 'proc-pu',    provider: 'agent-leo',  receiver: 'ose', plannedWithin: 'sprint-1' });
+    // proc-hyd: 3h assembly — Sara
+    const cHydWorkSara      = planner.addCommitment({ id: 'c-hyd-work-sara',      action: 'work', resourceConformsTo: 'rs-skill-assembly', effortQuantity: { hasNumericalValue: 3, hasUnit: 'hr' }, inputOf: 'proc-hyd',   provider: 'agent-sara', receiver: 'ose', plannedWithin: 'sprint-1' });
+    // proc-final: 6h assembly — Ruzgar + Leo
+    const cFinalWorkRuzgar  = planner.addCommitment({ id: 'c-final-work-ruzgar',  action: 'work', resourceConformsTo: 'rs-skill-assembly', effortQuantity: { hasNumericalValue: 6, hasUnit: 'hr' }, inputOf: 'proc-final', provider: 'agent-ose',  receiver: 'ose', plannedWithin: 'sprint-1' });
+    const cFinalWorkLeo     = planner.addCommitment({ id: 'c-final-work-leo',     action: 'work', resourceConformsTo: 'rs-skill-assembly', effortQuantity: { hasNumericalValue: 6, hasUnit: 'hr' }, inputOf: 'proc-final', provider: 'agent-leo',  receiver: 'ose', plannedWithin: 'sprint-1' });
+
+    for (const c of [cFabWorkRuzgar, cFabWorkMaya, cPuWorkLeo, cHydWorkSara, cFinalWorkRuzgar, cFinalWorkLeo]) {
         observer.registerCommitment(c);
     }
 
@@ -289,6 +314,17 @@ export function seedExample(): void {
     planner.addIntent({ id: 'i-cloth',   action: 'transfer', image: '🧥', name: 'Warm Clothing',       resourceConformsTo: 'rs-clothing',     resourceQuantity: { hasNumericalValue: 300,  hasUnit: 'items'  }, receiver: 'ose', availability_window: weeklyAll });
     planner.addIntent({ id: 'i-tools',   action: 'transfer', image: '🔧', name: 'Construction Tools',  resourceConformsTo: 'rs-const-tools',  resourceQuantity: { hasNumericalValue: 20,   hasUnit: 'sets'   }, receiver: 'ose', availability_window: weeklyAll });
     planner.addIntent({ id: 'i-seeds',   action: 'transfer', image: '🌱', name: 'Reforestation Seeds', resourceConformsTo: 'rs-seeds',        resourceQuantity: { hasNumericalValue: 5000, hasUnit: 'seeds'  }, receiver: 'ose', availability_window: weeklyAll });
+
+    // Social demand intent: hub-midwest requests LifeTrac via social plan
+    planner.addIntent({
+        id: 'i-lifetrac-hub',
+        action: 'transferCustody',
+        name: 'LifeTrac for Midwest Hub',
+        resourceConformsTo: 'rs-lifetrac',
+        resourceQuantity: { hasNumericalValue: 1, hasUnit: 'units' },
+        receiver: 'hub-midwest',
+        plannedWithin: 'plan-social',
+    });
 
     // Steel reorder: current stock (15m) is short of one full build (20m)
     planner.addIntent({
@@ -401,6 +437,37 @@ export function seedExample(): void {
         fulfills:   'c-fab-out',
         provider:   'ose',
         receiver:   'ose',
+        hasPointInTime: new Date().toISOString(),
+    });
+
+    // LifeTrac sale to external customer — seeds actualQty > 0 on the market output row
+    observer.record({
+        id: 'ev-lifetrac-sale',
+        action: 'transferAllRights',
+        resourceConformsTo: 'rs-lifetrac',
+        resourceQuantity:   { hasNumericalValue: 1, hasUnit: 'units' },
+        outputOf:   'proc-final',
+        fulfills:   'c-final-out-market',
+        provider:   'ose',
+        receiver:   'customer-co',
+        hasPointInTime: new Date().toISOString(),
+    });
+
+    // Work events for proc-fab (completed alongside the frame produce event)
+    observer.record({
+        id: 'ev-fab-work-ruzgar', action: 'work',
+        resourceConformsTo: 'rs-skill-welding',
+        effortQuantity: { hasNumericalValue: 8, hasUnit: 'hr' },
+        inputOf: 'proc-fab', provider: 'agent-ose',
+        fulfills: 'c-fab-work-ruzgar',
+        hasPointInTime: new Date().toISOString(),
+    });
+    observer.record({
+        id: 'ev-fab-work-maya', action: 'work',
+        resourceConformsTo: 'rs-skill-welding',
+        effortQuantity: { hasNumericalValue: 8, hasUnit: 'hr' },
+        inputOf: 'proc-fab', provider: 'agent-maya',
+        fulfills: 'c-fab-work-maya',
         hasPointInTime: new Date().toISOString(),
     });
 
