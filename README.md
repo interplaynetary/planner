@@ -394,6 +394,7 @@ All other Resources are owned by the Universal Commune Federation, with usage-ri
 Custody is the operational complement: `custodianScope` records which scope is currently stewarding the resource — who bears day-to-day liability under the custody protocol. A scope has custody of resources it does not own. Universal Commune ownership does not imply that the Universal Commune operationally holds the resource.
 
 The two change by different mechanisms:
+
 - `transferCustody` updates `custodianScope` (operational handoff between scopes; `primaryAccountable` is untouched — `accountableEffect: 'noEffect'`)
 - `transferAllRights` updates `primaryAccountable` (a de-socialization event — the resource exits the social plan into market exchange)
 
@@ -901,45 +902,6 @@ H3-cell based, two-pass DDMRP planning cycle:
 | `query.ts`                     | `VfQueries` — unified query API across Observer + PlanStore                                                                      |
 | `agents.ts`                    | `AgentStore` with relationship tracking                                                                                          |
 | `process-registry.ts`          | Shared `ProcessRegistry` — same Process instances in planning and observation layers                                             |
-
----
-
-## DDMRP Implementation Status
-
-### ✅ Implemented
-
-| Component                   | Coverage                                                                                                          |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| C1: Strategic Positioning   | Schema: `EconomicResource.stage` (decoupling points), `RecipeFlow.stage` (filter)                                 |
-| C2: Buffer Zone Calculation | `computeBufferZone()` — full Red/Yellow/Green formula; `BufferZoneStore`                                          |
-| C3: Dynamic Adjustments     | `DemandAdjustmentFactor`, `aggregateAdjustmentFactors()`, `recalibrateBufferZone()`, `zonesDueForRecalibration()` |
-| C4: Net Flow Position       | `computeNFP()` — signed NFP with on-hand, on-order, qualified demand; zone classification                         |
-| C4: ADU                     | `computeADU()` (past), `computeForwardADU()` (forward), `blendADU()`                                              |
-| C4: DLT                     | `recipeLeadTime()` (template), `criticalPath()` (instantiated plan)                                               |
-| C4: Supply Order Generation | `generateReplenishmentSignal()` — MOQ enforcement, TOG replenishment                                              |
-| C4: Demand Classification   | `qualifyDemand()` — OST horizon + spike threshold filter                                                          |
-| C5: Track & Trace           | `trace()` / `track()` — full backwards/forwards provenance                                                        |
-| C5: Execution Tracking      | `Observer`: `FulfillmentState`, `SatisfactionState`, `ClaimState`, `process_completed`                            |
-| C5: Signal Integrity        | `signalIntegrityReport()` — recommendation vs. actual qty + timing deviation                                      |
-| C5: Projected On-Hand       | `projectOnHand()` — day-by-day DLT horizon, stockout detection                                                    |
-| C5: Buffer Status           | `bufferStatus()` — on-hand vs TOR/TOY/TOG; `onhandAlert()`, `ltmAlert()`                                          |
-| Scheduling                  | `ScheduleBook`, `sortBySchedulingPriority()`, `prioritizedShare()`                                                |
-| BOM Explosion               | `dependentDemand()` — backward BFS; SNLT/SNE ranking; transport detection                                         |
-| Cost Accounting             | `rollupStandardCost()`, `rollupActualCost()`, `costVariance()`                                                    |
-| Value Distribution          | `distributeIncome()` — pluggable `ValueEquation` with depreciation scoring                                        |
-| Spatio-Temporal Indexes     | Full H3-indexed indexes for agents, demand, supply, commitments, events, resources                                |
-
-### 🔲 Gap Modules (planned)
-
-| Module                      | Description                                               |
-| --------------------------- | --------------------------------------------------------- |
-| Buffer Profile Registry UI  | Part-to-profile assignment management interface           |
-| Planning Screen / Dashboard | Priority-sorted queue with zone-colored NFP% columns      |
-| WIP Priority Dashboard      | Released MO dispatch list by live buffer status           |
-| Capacity-Time Translation   | TOG × `RecipeProcess.hasDuration` → work-center minutes   |
-| Control Point Scheduler     | Finite capacity scheduling across control points          |
-| Mixed-Mode Scheduler        | MTO/MTS composite priority (sequence group + NFP%)        |
-| Order Activity Dashboard    | Unified PO/MO/TO execution view with fulfillment progress |
 
 ---
 

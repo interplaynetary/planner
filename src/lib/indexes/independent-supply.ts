@@ -76,6 +76,9 @@ export interface SupplySlot {
 
     /** Source entity ID for traceability back to the VF graph */
     source_id: string;
+
+    /** Scope IDs this supply belongs to (from custodianScope / inScopeOf) */
+    scope_ids?: string[];
 }
 
 export interface IndependentSupplyIndex {
@@ -102,6 +105,9 @@ export interface IndependentSupplyIndex {
      * HexNode stats: sum_quantity = material, sum_hours = labor.
      */
     spatial_hierarchy: HexIndex<SupplySlot>;
+
+    /** scope_index — maps scope Agent ID → Set<slotId> */
+    scope_index: Map<string, Set<string>>;
 }
 
 // =============================================================================
@@ -129,6 +135,10 @@ function addSlot(
 
     if (slot.h3_cell) {
         addTo(index.cell_index, slot.h3_cell, slot.id);
+    }
+
+    for (const scopeId of slot.scope_ids ?? []) {
+        addTo(index.scope_index, scopeId, slot.id);
     }
 
     if (st && slot.h3_cell && h3Resolution !== undefined) {
@@ -165,6 +175,7 @@ export function buildIndependentSupplyIndex(
         spec_index: new Map(),
         cell_index: new Map(),
         spatial_hierarchy: createHexIndex<SupplySlot>(),
+        scope_index: new Map(),
     };
 
     // --- Stratum 1: Inventory (EconomicResources) ---
@@ -186,6 +197,7 @@ export function buildIndependentSupplyIndex(
             hours:     0,
             h3_cell:   h3Cell,
             source_id: resource.id,
+            scope_ids: resource.custodianScope ? [resource.custodianScope] : [],
         };
 
         addSlot(index, slot, resource.conformsTo ? [resource.conformsTo] : [], st, h3Resolution);
@@ -210,6 +222,7 @@ export function buildIndependentSupplyIndex(
             h3_cell:        h3Cell,
             available_from: intent.hasEnd ?? intent.due ?? intent.hasPointInTime,
             source_id:      intent.id,
+            scope_ids:      intent.inScopeOf ?? [],
         };
 
         addSlot(index, slot, intent.resourceConformsTo ? [intent.resourceConformsTo] : [], st, h3Resolution);
@@ -234,6 +247,7 @@ export function buildIndependentSupplyIndex(
             h3_cell:        h3Cell,
             available_from: commitment.hasEnd ?? commitment.due ?? commitment.hasPointInTime,
             source_id:      commitment.id,
+            scope_ids:      commitment.inScopeOf ?? [],
         };
 
         addSlot(index, slot, commitment.resourceConformsTo ? [commitment.resourceConformsTo] : [], st, h3Resolution);
@@ -259,6 +273,7 @@ export function buildIndependentSupplyIndex(
             h3_cell:   h3Cell,
             agent_id:  capacity.agent_id,
             source_id: capacity.id,
+            scope_ids: [],
         };
 
         // Register under each skill this agent offers in this context
@@ -340,4 +355,17 @@ export function getTotalSupplyQuantity(slots: SupplySlot[]): number {
  */
 export function getTotalSupplyHours(slots: SupplySlot[]): number {
     return slots.reduce((sum, s) => sum + s.hours, 0);
+}
+
+/**
+ * All supply slots belonging to a given scope Agent ID.
+ * Covers inventory (custodianScope) and scheduled receipts (inScopeOf).
+ * Labor slots are not scope-indexed.
+ */
+export function querySupplyByScope(
+    index: IndependentSupplyIndex,
+    scopeId: string,
+): SupplySlot[] {
+    const ids = index.scope_index.get(scopeId) ?? new Set<string>();
+    return [...ids].map(id => index.supply_slots.get(id)!).filter(Boolean);
 }

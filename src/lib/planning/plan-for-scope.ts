@@ -1,11 +1,13 @@
 /**
- * planForRegion — top-level planning orchestrator.
+ * planForScope — scope-based planning orchestrator.
  *
- * Ties together dependentDemand, dependentSupply, PlanNetter, and the
- * independent demand/supply indexes into a two-pass planning loop:
+ * Mirrors planForRegion but uses VF Agent scopes (Sₖ ⊆ V) as the planning
+ * unit instead of H3 geohash cells. This enables planning for communal /
+ * organisational units that are not geographically bounded.
  *
- *   Phase 0: Normalise H3 cells (deduplicate, drop dominated children)
- *   Phase 1: Extract demand/supply slots for the canonical cell cover
+ * Algorithm phases:
+ *   Phase 0: Normalise scope IDs (deduplicate, drop dominated descendants)
+ *   Phase 1: Extract demand/supply slots for the canonical scope cover
  *   Phase 2: Classify each demand slot
  *   Phase 3: Formulate
  *     Pass 1: Explode primary independent demands (class order → due date)
@@ -15,14 +17,12 @@
  *   Phase B: Forward-schedule unabsorbed supply (dependentSupply)
  *   Phase 4: Collect result
  *
- * Merge-planner path: when subStores are provided, merges leaf stores first,
- * runs conflict detection, and resolves inter-region contention surgically.
+ * planForRegion is preserved unchanged for backward compatibility.
  */
 
-import * as h3 from 'h3-js';
 import { nanoid } from 'nanoid';
 
-import type { Intent, Process } from '../schemas';
+import type { Intent } from '../schemas';
 import type { RecipeStore } from '../knowledge/recipes';
 import type { Observer } from '../observation/observer';
 import { PlanStore } from './planning';
@@ -33,48 +33,54 @@ import { dependentSupply } from '../algorithms/dependent-supply';
 import {
     type IndependentDemandIndex,
     type DemandSlot,
-    queryDemandByLocation,
+    queryDemandByScope,
 } from '../indexes/independent-demand';
 import {
     type IndependentSupplyIndex,
     type SupplySlot,
-    querySupplyByLocation,
+    querySupplyByScope,
     querySupplyBySpec,
 } from '../indexes/independent-supply';
+
+// Re-export shared types from plan-for-region so callers can import from one place
+export type {
+    MetabolicDebt,
+    SurplusSignal,
+    DemandSlotClass,
+    Conflict,
+} from './plan-for-region';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-export interface RegionPlanContext {
+export interface ScopePlanContext {
     recipeStore: RecipeStore;
     observer: Observer;
     demandIndex: IndependentDemandIndex;
     supplyIndex: IndependentSupplyIndex;
+    /**
+     * Scope hierarchy: childScopeId → parentScopeId.
+     * Used by normalizeScopes() to drop sub-scopes dominated by an ancestor
+     * already present in the scope list.
+     */
+    parentOf?: Map<string, string>;
     generateId?: () => string;
     agents?: { provider?: string; receiver?: string };
-    config?: {
-        insuranceFactor?: number;   // default 0.10 (currently unused — placeholder)
-    };
+    config?: { insuranceFactor?: number };
     /**
      * Buffer alerts for Pass 2 injection (spec P7).
-     * Keys are ResourceSpec IDs. The planner will inject a derived demand for
-     * any spec whose alert is 'red' (or 'yellow' if replenishment is still pending).
-     * Quantity = bufferZone.tog − onhand (the replenishment-to-target quantity).
+     * Keys are ResourceSpec IDs. The planner injects a derived demand for
+     * any spec whose alert is 'red' or 'yellow'.
+     * Quantity = tog − onhand (replenishment-to-target).
      * When absent, only tag:plan:replenishment-required specs are processed in Pass 2.
      */
     bufferAlerts?: Map<string, { onhand: number; tor: number; toy: number; tog: number; zone: 'red' | 'yellow' | 'green' | 'excess' }>;
 }
 
-export interface MetabolicDebt {
-    specId: string;
-    shortfall: number;
-    plannedWithin: string;   // replenishment planId; intentsForPlan resolves purchaseIntents
-}
-
-export interface DeficitSignal {
-    /** Plan ID where this demand was attempted. After merging sub-stores,
-     *  planStore.intentsForPlan(plannedWithin) → purchaseIntents showing what was missing. */
+/** Deficit signal for scope-based composition (replaces h3_cell with scopeId). */
+export interface ScopeDeficitSignal {
+    /** Plan ID where this demand was attempted. */
     plannedWithin: string;
     /** Stable identifier for this deficit (original intent_id or synthetic key). */
     intentId: string;
@@ -82,48 +88,46 @@ export interface DeficitSignal {
     action: string;
     shortfall: number;
     due?: string;
-    h3_cell?: string;
+    /** Scope ID instead of h3_cell */
+    scopeId?: string;
     source: 'unmet_demand' | 'metabolic_debt';
+    /**
+     * Original quantity demanded before any level resolved part of it.
+     * Defaults to `shortfall` when first emitted; preserved as the deficit
+     * propagates upward so consumers can see total vs. remaining.
+     */
+    originalShortfall?: number;
+    /**
+     * Chain of scope IDs where partial resolution occurred, innermost first.
+     * Each entry is a scope that satisfied some portion of this demand.
+     * Example: ["commune-A", "federation-X"] means commune-A resolved some,
+     * then federation-X resolved more, and the remainder propagates further.
+     */
+    resolvedAt?: string[];
 }
 
-export interface SurplusSignal {
-    /** Plan ID of the supply plan that produced this surplus.
-     *  planStore.intentsForPlan(plannedWithin) → output flow intents for traceability. */
-    plannedWithin: string;
-    specId: string;
-    quantity: number;
-    availableFrom?: string;
-    atLocation?: string;
-}
-
-/** Signal bundle for composition: pass from a child planForRegion call into a parent. */
-export interface PlanSignals {
-    deficits: DeficitSignal[];
+export interface ScopePlanSignals {
+    deficits: ScopeDeficitSignal[];
     surplus: SurplusSignal[];
 }
 
-export interface RegionPlanResult {
+export interface ScopePlanResult {
     planStore: PlanStore;
     purchaseIntents: Intent[];
-    surplus: SurplusSignal[];          // was { specId, quantity }[] — now with provenance
+    surplus: SurplusSignal[];
     unmetDemand: DemandSlot[];
     metabolicDebt: MetabolicDebt[];
     laborGaps: Intent[];
-    deficits: DeficitSignal[];         // unified deficit view for upward composition
+    deficits: ScopeDeficitSignal[];
 }
 
-export type DemandSlotClass =
-    | 'locally-satisfiable'
-    | 'transport-candidate'
-    | 'producible-with-imports'
-    | 'external-dependency';
-
-export interface Conflict {
-    type: 'inventory-overclaim' | 'capacity-contention';
-    resourceOrAgentId: string;
-    overclaimed: number;
-    candidates: string[];
-}
+// Import the concrete types we need from plan-for-region (not re-exported as values)
+import type {
+    MetabolicDebt,
+    SurplusSignal,
+    Conflict,
+    DemandSlotClass,
+} from './plan-for-region';
 
 // Internal record for per-slot tracking across passes
 interface SlotRecord {
@@ -136,7 +140,7 @@ interface SlotRecord {
 // HELPERS
 // =============================================================================
 
-const CLASS_ORDER: Record<DemandSlotClass, number> = {
+const CLASS_ORDER: Record<string, number> = {
     'locally-satisfiable':     0,
     'transport-candidate':     1,
     'producible-with-imports': 2,
@@ -144,107 +148,15 @@ const CLASS_ORDER: Record<DemandSlotClass, number> = {
 };
 
 // =============================================================================
-// PHASE 0 — NORMALISE CELLS
-// =============================================================================
-
-/**
- * Deduplicate and drop any H3 cell that is dominated by an ancestor already
- * present in the set. E.g. if both a parent and a child cell are in cells[],
- * the child is redundant for coverage purposes.
- */
-export function normalizeCells(cells: string[]): string[] {
-    const unique = [...new Set(cells)];
-    return unique.filter(cell => {
-        const res = h3.getResolution(cell);
-        for (let r = 0; r < res; r++) {
-            if (unique.includes(h3.cellToParent(cell, r))) return false;
-        }
-        return true;
-    });
-}
-
-// =============================================================================
-// PHASE 1 — EXTRACT
-// =============================================================================
-
-function extractSlots(
-    canonical: string[],
-    horizon: { from: Date; to: Date },
-    demandIndex: IndependentDemandIndex,
-    supplyIndex: IndependentSupplyIndex,
-): { demands: DemandSlot[]; supply: SupplySlot[] } {
-    const seenDemand = new Set<string>();
-    const seenSupply = new Set<string>();
-    const demands: DemandSlot[] = [];
-    const supply: SupplySlot[] = [];
-
-    for (const cell of canonical) {
-        for (const s of queryDemandByLocation(demandIndex, { h3_index: cell })) {
-            if (seenDemand.has(s.intent_id)) continue;
-            seenDemand.add(s.intent_id);
-            if (s.due) {
-                const due = new Date(s.due);
-                if (due < horizon.from || due > horizon.to) continue;
-            }
-            if (s.remaining_quantity > 0) {
-                demands.push(s);
-            }
-        }
-        for (const s of querySupplyByLocation(supplyIndex, { h3_index: cell })) {
-            if (seenSupply.has(s.id)) continue;
-            seenSupply.add(s.id);
-            supply.push(s);
-        }
-    }
-
-    return { demands, supply };
-}
-
-// =============================================================================
-// PHASE 2 — CLASSIFY
-// =============================================================================
-
-export function classifySlot(
-    slot: DemandSlot,
-    canonical: string[],
-    supplyIndex: IndependentSupplyIndex,
-    recipeStore: RecipeStore,
-): DemandSlotClass {
-    const specId = slot.spec_id ?? '';
-
-    // Is there supply of this spec within the canonical cells?
-    const localSupply = canonical.some(cell =>
-        querySupplyByLocation(supplyIndex, { h3_index: cell })
-            .some(s => s.spec_id === specId && s.quantity > 0)
-    );
-    if (localSupply) return 'locally-satisfiable';
-
-    // Is there supply elsewhere in the region?
-    const allSupply = querySupplyBySpec(supplyIndex, specId);
-    if (allSupply.length > 0) return 'transport-candidate';
-
-    // Is there a recipe that could produce it?
-    const recipes = recipeStore.recipesForOutput(specId);
-    if (recipes.length > 0) return 'producible-with-imports';
-
-    return 'external-dependency';
-}
-
-// =============================================================================
-// CONFLICT DETECTION (merge planner)
+// CONFLICT DETECTION (copied from plan-for-region — no external deps)
 // =============================================================================
 
 const NON_CONSUMING_ACTIONS = new Set(['use', 'work', 'cite', 'deliverService']);
 
-/**
- * Detect inventory-overclaim and capacity-contention conflicts in a merged
- * PlanStore. Called after the merge planner combines leaf sub-stores.
- */
-export function detectConflicts(planStore: PlanStore, observer: Observer): Conflict[] {
+function detectConflicts(planStore: PlanStore, observer: Observer): Conflict[] {
     const conflicts: Conflict[] = [];
 
     // --- Inventory overclaim ---
-    // Sum committed qty per resourceInventoriedAs across all consuming commitments
     const committedByResource = new Map<string, { total: number; candidates: string[] }>();
     for (const c of planStore.allCommitments()) {
         if (!c.resourceInventoriedAs) continue;
@@ -269,8 +181,7 @@ export function detectConflicts(planStore: PlanStore, observer: Observer): Confl
         }
     }
 
-    // --- Capacity contention ---
-    // Sum committed work effort per provider across all work commitments
+    // --- Capacity contention (stub — requires AgentIndex, not available here) ---
     const workByAgent = new Map<string, { total: number; candidates: string[] }>();
     for (const c of planStore.allCommitments()) {
         if (c.action !== 'work') continue;
@@ -282,7 +193,6 @@ export function detectConflicts(planStore: PlanStore, observer: Observer): Confl
         entry.candidates.push(c.inputOf ?? c.id);
         workByAgent.set(agentId, entry);
     }
-    // Also check intents (unilateral offers)
     for (const i of planStore.allIntents()) {
         if (i.action !== 'work') continue;
         if (!i.provider) continue;
@@ -293,31 +203,18 @@ export function detectConflicts(planStore: PlanStore, observer: Observer): Confl
         entry.candidates.push(i.inputOf ?? i.id);
         workByAgent.set(agentId, entry);
     }
-    for (const [agentId, { total, candidates }] of workByAgent) {
-        // Try to get agent capacity from observer if available
-        const agentResources = observer.conformingResources
-            ? observer.conformingResources('skill')
-            : [];
-        // Simple heuristic: flag if more than one candidate is competing
-        // (full capacity check would require AgentIndex, which isn't in ctx here)
-        if (candidates.length > 1 && total > 0) {
-            // Only emit if there are multiple processes competing (not a real overclaim check
-            // without capacity data, but flagged for merge resolution)
-            // Skip — capacity contention requires AgentIndex; not available here.
-            // Left as extension point.
-        }
-    }
+    // Emission deferred — AgentIndex required for limit lookup.
+    void workByAgent;
 
     return conflicts;
 }
 
 // =============================================================================
-// MERGE PLAN STORES
+// MERGE PLAN STORES (copied from plan-for-region — no external deps)
 // =============================================================================
 
 function mergePlanStores(subStores: PlanStore[], generateId?: () => string): PlanStore {
     const gen = generateId ?? (() => nanoid());
-    // Use a fresh ProcessRegistry so we can merge all processes from sub-stores
     const processes = new ProcessRegistry(gen);
     const merged = new PlanStore(processes, gen);
     for (const sub of subStores) {
@@ -326,39 +223,130 @@ function mergePlanStores(subStores: PlanStore[], generateId?: () => string): Pla
     return merged;
 }
 
-// (allocatedQtyForSlot removed — dependentSupply handles netting internally via netter.netSupply)
-
 // =============================================================================
-// PLAN FOR REGION
+// PHASE 0 — NORMALISE SCOPES
 // =============================================================================
 
 /**
- * Top-level planning orchestrator for an H3 cell region.
+ * Deduplicate scope IDs and drop any scope that is a descendant of another
+ * scope already present (dominated by ancestor = redundant for coverage).
  *
- * @param cells        H3 cell indices that define the region
+ * @param scopeIds  Input list (may contain duplicates or ancestor+descendant pairs)
+ * @param parentOf  Scope hierarchy map (childId → parentId). Optional; if absent,
+ *                  all unique scopeIds are returned as-is.
+ */
+export function normalizeScopes(scopeIds: string[], parentOf?: Map<string, string>): string[] {
+    const unique = [...new Set(scopeIds)];
+    if (!parentOf || parentOf.size === 0) return unique;
+    const uniqueSet = new Set(unique);
+    return unique.filter(scopeId => {
+        // Walk ancestors; if any ancestor is in the set, this scope is dominated.
+        let current = parentOf.get(scopeId);
+        while (current) {
+            if (uniqueSet.has(current)) return false;
+            current = parentOf.get(current);
+        }
+        return true;
+    });
+}
+
+// =============================================================================
+// PHASE 1 — EXTRACT
+// =============================================================================
+
+function extractScopeSlots(
+    canonical: string[],
+    horizon: { from: Date; to: Date },
+    demandIndex: IndependentDemandIndex,
+    supplyIndex: IndependentSupplyIndex,
+): { demands: DemandSlot[]; supply: SupplySlot[] } {
+    const seenDemand = new Set<string>();
+    const seenSupply = new Set<string>();
+    const demands: DemandSlot[] = [];
+    const supply: SupplySlot[] = [];
+
+    for (const scopeId of canonical) {
+        for (const s of queryDemandByScope(demandIndex, scopeId)) {
+            if (seenDemand.has(s.intent_id)) continue;
+            seenDemand.add(s.intent_id);
+            if (s.due) {
+                const due = new Date(s.due);
+                if (due < horizon.from || due > horizon.to) continue;
+            }
+            if (s.remaining_quantity > 0) {
+                demands.push(s);
+            }
+        }
+        for (const s of querySupplyByScope(supplyIndex, scopeId)) {
+            if (seenSupply.has(s.id)) continue;
+            seenSupply.add(s.id);
+            supply.push(s);
+        }
+    }
+
+    return { demands, supply };
+}
+
+// =============================================================================
+// PHASE 2 — CLASSIFY
+// =============================================================================
+
+export function classifyScopeSlot(
+    slot: DemandSlot,
+    canonical: string[],
+    supplyIndex: IndependentSupplyIndex,
+    recipeStore: RecipeStore,
+): DemandSlotClass {
+    const specId = slot.spec_id ?? '';
+
+    // Is there supply of this spec within the canonical scopes?
+    const localSupply = canonical.some(sid =>
+        querySupplyByScope(supplyIndex, sid).some(s => s.spec_id === specId && s.quantity > 0)
+    );
+    if (localSupply) return 'locally-satisfiable';
+
+    // Is there supply elsewhere (any scope)?
+    const allSupply = querySupplyBySpec(supplyIndex, specId);
+    if (allSupply.length > 0) return 'transport-candidate';
+
+    // Is there a recipe that could produce it?
+    const recipes = recipeStore.recipesForOutput(specId);
+    if (recipes.length > 0) return 'producible-with-imports';
+
+    return 'external-dependency';
+}
+
+// =============================================================================
+// PLAN FOR SCOPE
+// =============================================================================
+
+/**
+ * Top-level planning orchestrator for a set of VF Agent scopes.
+ *
+ * @param scopeIds     Agent IDs that define the planning scope (Sₖ ⊆ V)
  * @param horizon      Planning window (from/to dates)
  * @param ctx          Context (recipes, observer, indexes, etc.)
  * @param subStores    Optional leaf sub-stores for the merge planner path
  * @param childSignals Optional signals from sub-planners for upward composition
  */
-export function planForRegion(
-    cells: string[],
+export function planForScope(
+    scopeIds: string[],
     horizon: { from: Date; to: Date },
-    ctx: RegionPlanContext,
+    ctx: ScopePlanContext,
     subStores?: PlanStore[],
-    childSignals?: PlanSignals[],
-): RegionPlanResult {
+    childSignals?: ScopePlanSignals[],
+): ScopePlanResult {
     const generateId = ctx.generateId ?? (() => nanoid());
 
     // -------------------------------------------------------------------------
-    // Phase 0 — Normalise cells
+    // Phase 0 — Normalise scopes
     // -------------------------------------------------------------------------
-    const canonical = normalizeCells(cells);
+    const canonical = normalizeScopes(scopeIds, ctx.parentOf);
 
     // -------------------------------------------------------------------------
     // Phase 1 — Extract demand and supply slots
     // -------------------------------------------------------------------------
-    const { demands: rawDemands, supply: extractedSupply } = extractSlots(
+    const { demands: rawDemands, supply: extractedSupply } = extractScopeSlots(
         canonical,
         horizon,
         ctx.demandIndex,
@@ -368,15 +356,24 @@ export function planForRegion(
     // Inject child deficit signals as demand slots (composable upward routing).
     // metabolic_debt deficits are injected first so they sort earlier within the same
     // classification bucket, fulfilling spec §565 "elevated priority over unmetDemand".
-    // Must happen BEFORE classification so injected demands are classified.
+    //
+    // Also build a provenance map so that when this level emits its own deficit
+    // for a re-injected child demand, it can carry forward originalShortfall and
+    // resolvedAt from the child signal.
+    const childProvenanceByIntentId = new Map<string, Pick<ScopeDeficitSignal, 'originalShortfall' | 'resolvedAt'> & { originScopeId: string }>();
     if (childSignals && childSignals.length > 0) {
         const seenIntentId = new Set<string>();
         for (const pass of ['metabolic_debt', 'unmet_demand'] as const) {
             for (const signals of childSignals) {
                 for (const deficit of signals.deficits) {
                     if (deficit.source !== pass) continue;
-                    if (seenIntentId.has(deficit.intentId)) continue;  // same intent from two children
+                    if (seenIntentId.has(deficit.intentId)) continue;
                     seenIntentId.add(deficit.intentId);
+                    childProvenanceByIntentId.set(deficit.intentId, {
+                        originalShortfall: deficit.originalShortfall ?? deficit.shortfall,
+                        resolvedAt: deficit.resolvedAt ?? (deficit.scopeId ? [deficit.scopeId] : []),
+                        originScopeId: deficit.scopeId ?? '',
+                    });
                     rawDemands.push({
                         intent_id: deficit.intentId,
                         spec_id: deficit.specId,
@@ -388,7 +385,7 @@ export function planForRegion(
                         remaining_quantity: deficit.shortfall,
                         remaining_hours: 0,
                         due: deficit.due,
-                        h3_cell: deficit.h3_cell,
+                        // No h3_cell for scope-injected deficits
                     });
                 }
             }
@@ -400,7 +397,7 @@ export function planForRegion(
     // -------------------------------------------------------------------------
     const classified = rawDemands.map(slot => ({
         slot,
-        slotClass: classifySlot(slot, canonical, ctx.supplyIndex, ctx.recipeStore),
+        slotClass: classifyScopeSlot(slot, canonical, ctx.supplyIndex, ctx.recipeStore),
     }));
 
     // -------------------------------------------------------------------------
@@ -421,11 +418,11 @@ export function planForRegion(
     const allPurchaseIntents: Intent[] = [];
     const unmetDemand: DemandSlot[] = [];
     const replenDebts: MetabolicDebt[] = [];
-    const allDeficits: DeficitSignal[] = [];
+    const allDeficits: ScopeDeficitSignal[] = [];
 
     // Sort: classification order → due date ascending
     const sortedSlots = [...classified].sort((a, b) => {
-        const classDiff = CLASS_ORDER[a.slotClass] - CLASS_ORDER[b.slotClass];
+        const classDiff = (CLASS_ORDER[a.slotClass] ?? 3) - (CLASS_ORDER[b.slotClass] ?? 3);
         if (classDiff !== 0) return classDiff;
         const dueA = new Date(a.slot.due ?? 0).getTime();
         const dueB = new Date(b.slot.due ?? 0).getTime();
@@ -449,24 +446,35 @@ export function planForRegion(
             processes,
             observer: ctx.observer,
             netter,
-            atLocation: slot.h3_cell,
+            atLocation: slot.atLocation,   // use atLocation (SpatialThing ID), not h3_cell
             agents: ctx.agents,
             generateId,
         });
 
         pass1Records.push({ slot, result, slotClass });
         allPurchaseIntents.push(...result.purchaseIntents);
+
+        const childProvPass1 = childProvenanceByIntentId.get(slot.intent_id);
+        if (childProvPass1?.originScopeId) {
+            for (const commitment of result.commitments) {
+                commitment.inScopeOf = [
+                    ...(commitment.inScopeOf ?? []),
+                    childProvPass1.originScopeId,
+                ];
+            }
+        }
     }
 
-    // Emit DeficitSignals for all Pass 1 demands where the demand spec itself couldn't
-    // be sourced or produced (purchaseIntent for the demand spec means no recipe/inventory).
-    // Covers both injected deficits being re-propagated and regular demands that are
-    // unresolvable at this scope (external-dependency classification).
+    // Emit ScopeDeficitSignals for all Pass 1 demands where the spec couldn't be sourced.
     for (const record of pass1Records) {
         const unresolved = record.result.purchaseIntents
             .filter(i => i.resourceConformsTo === record.slot.spec_id)
             .reduce((s, i) => s + (i.resourceQuantity?.hasNumericalValue ?? 0), 0);
         if (unresolved > 1e-9) {
+            const childProv = childProvenanceByIntentId.get(record.slot.intent_id);
+            const resolvedHere = childProv
+                ? (childProv.originalShortfall ?? unresolved) - unresolved > 1e-9
+                : false;
             allDeficits.push({
                 plannedWithin: record.result.plan.id,
                 intentId: record.slot.intent_id,
@@ -474,8 +482,12 @@ export function planForRegion(
                 action: record.slot.action,
                 shortfall: unresolved,
                 due: record.slot.due,
-                h3_cell: record.slot.h3_cell,
+                scopeId: record.slot.inScopeOf?.[0] ?? canonical[0],
                 source: 'unmet_demand',
+                originalShortfall: childProv?.originalShortfall ?? unresolved,
+                resolvedAt: resolvedHere
+                    ? [...(childProv?.resolvedAt ?? []), canonical[0]]
+                    : childProv?.resolvedAt,
             });
         }
     }
@@ -498,25 +510,19 @@ export function planForRegion(
         }
     }
 
-    // P7: inject buffer-zone alert demands (red-zone replenishment to TOG)
+    // P7: inject buffer-zone alert demands (red/yellow-zone replenishment to TOG)
     if (ctx.bufferAlerts) {
         for (const [specId, alert] of ctx.bufferAlerts) {
             if (alert.zone === 'red' || alert.zone === 'yellow') {
                 const replenQty = Math.max(0, alert.tog - alert.onhand);
-                if (replenQty > 1e-9) {
-                    // Avoid double-counting with replenishment-required specs
-                    if (!derivedDemands.some(d => d.specId === specId)) {
-                        derivedDemands.push({ specId, qty: replenQty });
-                    }
+                if (replenQty > 1e-9 && !derivedDemands.some(d => d.specId === specId)) {
+                    derivedDemands.push({ specId, qty: replenQty });
                 }
             }
         }
     }
 
     // --- Pass 2: derived replenishment demands ---
-    // Use a production-only netter (no observer) so replenishment demands trigger
-    // recipe production rather than re-sourcing from existing inventory.
-    // The inventory was already consumed (or will be) by Pass 1 processes.
     const replenNetter = netter.fork({ observer: undefined });
 
     for (const { specId, qty } of derivedDemands) {
@@ -530,7 +536,7 @@ export function planForRegion(
             recipeStore: ctx.recipeStore,
             planStore,
             processes,
-            observer: undefined,   // no inventory netting — force production
+            observer: undefined,
             netter: replenNetter,
             agents: ctx.agents,
             generateId,
@@ -538,12 +544,6 @@ export function planForRegion(
 
         allPurchaseIntents.push(...result.purchaseIntents);
 
-        // MetabolicDebt: the portion of the replenishment spec that could not be
-        // produced by any recipe (i.e., dependentDemand created a purchaseIntent
-        // for specId itself — meaning no recipe exists for specId).
-        // We filter to purchaseIntents conforming to specId; other purchaseIntents
-        // are for sub-inputs (e.g. compost-material) and are NOT metabolic debt
-        // for the replenishment spec.
         const purchasedQty = result.purchaseIntents
             .filter(i => i.resourceConformsTo === specId)
             .reduce((s, i) => s + (i.resourceQuantity?.hasNumericalValue ?? 0), 0);
@@ -557,7 +557,7 @@ export function planForRegion(
         // Spec §551: external-dependency (class 3) retracted before locally-satisfiable (class 0);
         // latest due date first within each class.
         const retractOrder = [...pass1Records].sort((a, b) => {
-            const classDiff = CLASS_ORDER[b.slotClass] - CLASS_ORDER[a.slotClass];
+            const classDiff = (CLASS_ORDER[b.slotClass] ?? 3) - (CLASS_ORDER[a.slotClass] ?? 3);
             if (classDiff !== 0) return classDiff;
             return new Date(b.slot.due ?? 0).getTime() - new Date(a.slot.due ?? 0).getTime();
         });
@@ -567,12 +567,8 @@ export function planForRegion(
 
             netter.retract(candidate.result);
 
-            // Production-only netter for the replenishment retry: no observer so we
-            // do not re-net from inventory (the replenishment question is whether a
-            // production recipe exists, not whether inventory happens to still be around).
             const retryReplenNetter = netter.fork({ observer: undefined });
 
-            // Re-run Pass 2 with freed capacity to see if debt is resolved
             const resolvedDebt: string[] = [];
             for (const debt of replenDebts) {
                 const retryPlanId = `replenish-retry-${generateId()}`;
@@ -585,7 +581,7 @@ export function planForRegion(
                     recipeStore: ctx.recipeStore,
                     planStore,
                     processes,
-                    observer: undefined,  // no inventory netting for replenishment
+                    observer: undefined,
                     netter: retryReplenNetter,
                     agents: ctx.agents,
                     generateId,
@@ -596,7 +592,6 @@ export function planForRegion(
                     .filter(i => i.resourceConformsTo === debt.specId)
                     .reduce((s, i) => s + (i.resourceQuantity?.hasNumericalValue ?? 0), 0);
                 if (newPurchasedQty < debt.shortfall - 1e-9) {
-                    // Debt partially resolved (some locally produced now)
                     debt.shortfall = newPurchasedQty;
                 }
                 if (newPurchasedQty <= 1e-9) {
@@ -604,7 +599,6 @@ export function planForRegion(
                 }
             }
 
-            // Remove resolved debts
             replenDebts.splice(0, replenDebts.length, ...replenDebts.filter(
                 d => !resolvedDebt.includes(d.specId),
             ));
@@ -622,18 +616,28 @@ export function planForRegion(
                 processes,
                 observer: ctx.observer,
                 netter,
-                atLocation: candidate.slot.h3_cell,
+                atLocation: candidate.slot.atLocation,
                 agents: ctx.agents,
                 generateId,
             }) : null;
 
             if (reResult && reResult.allocated.length > 0) {
-                // Re-explode succeeded — keep the slot in pass1Records with updated result
+                // Re-explode succeeded — keep the slot with updated result
+                const backtrackChildProv = childProvenanceByIntentId.get(candidate.slot.intent_id);
+                if (backtrackChildProv?.originScopeId) {
+                    for (const commitment of reResult.commitments) {
+                        commitment.inScopeOf = [
+                            ...(commitment.inScopeOf ?? []),
+                            backtrackChildProv.originScopeId,
+                        ];
+                    }
+                }
                 pass1Records.push({ slot: candidate.slot, slotClass: candidate.slotClass, result: reResult });
             } else {
                 // Re-explode failed — demand is truly unmet
                 unmetDemand.push(candidate.slot);
 
+                const backtrackProv = childProvenanceByIntentId.get(candidate.slot.intent_id);
                 allDeficits.push({
                     plannedWithin: candidate.result.plan.id,
                     intentId: candidate.slot.intent_id,
@@ -641,18 +645,19 @@ export function planForRegion(
                     action: candidate.slot.action,
                     shortfall: candidate.slot.remaining_quantity,
                     due: candidate.slot.due,
-                    h3_cell: candidate.slot.h3_cell,
+                    scopeId: candidate.slot.inScopeOf?.[0] ?? canonical[0],
                     source: 'unmet_demand',
+                    originalShortfall: backtrackProv?.originalShortfall ?? candidate.slot.remaining_quantity,
+                    resolvedAt: backtrackProv?.resolvedAt,
                 });
             }
 
-            // Remove from pass1Records so we don't re-retract
             const idx = pass1Records.indexOf(candidate);
             if (idx >= 0) pass1Records.splice(idx, 1);
         }
     }
 
-    // Emit DeficitSignals for unresolved replenDebts (resolved entries were spliced out)
+    // Emit ScopeDeficitSignals for unresolved replenDebts
     for (const debt of replenDebts) {
         allDeficits.push({
             plannedWithin: debt.plannedWithin,
@@ -660,6 +665,7 @@ export function planForRegion(
             specId: debt.specId,
             action: 'produce',
             shortfall: debt.shortfall,
+            scopeId: canonical[0],
             source: 'metabolic_debt',
         });
     }
@@ -671,14 +677,14 @@ export function planForRegion(
 
     for (const supplySlot of extractedSupply) {
         if (!supplySlot.spec_id) continue;
-        if (supplySlot.slot_type === 'labor') continue; // labor handled by work intents
+        if (supplySlot.slot_type === 'labor') continue;
 
         const supplyPlanId = `supply-${generateId()}`;
         planStore.addPlan({ id: supplyPlanId, name: `Supply plan for ${supplySlot.spec_id}` });
         const result = dependentSupply({
             planId: supplyPlanId,
             supplySpecId: supplySlot.spec_id,
-            supplyQuantity: supplySlot.quantity,  // netter handles internal absorption
+            supplyQuantity: supplySlot.quantity,
             availableFrom: supplySlot.available_from
                 ? new Date(supplySlot.available_from)
                 : horizon.from,
@@ -717,11 +723,8 @@ export function planForRegion(
             for (const conflict of conflicts) {
                 if (conflict.type !== 'inventory-overclaim') continue;
 
-                // Find all processes competing for the contested resource
-                // Retract the lowest-criticality, latest-due candidate processes
                 const competingProcessIds = conflict.candidates.filter(Boolean);
 
-                // Score each competing process by due date
                 const scored = competingProcessIds.map(procId => {
                     const record = pass1Records.find(r =>
                         r.result.processes.some(p => p.id === procId),
@@ -743,6 +746,7 @@ export function planForRegion(
                     if (!record) continue;
                     netter.retract(record.result);
                     unmetDemand.push(record.slot);
+                    const mergeProv = childProvenanceByIntentId.get(record.slot.intent_id);
                     allDeficits.push({
                         plannedWithin: record.result.plan.id,
                         intentId: record.slot.intent_id,
@@ -750,8 +754,10 @@ export function planForRegion(
                         action: record.slot.action,
                         shortfall: record.slot.remaining_quantity,
                         due: record.slot.due,
-                        h3_cell: record.slot.h3_cell,
+                        scopeId: record.slot.inScopeOf?.[0] ?? canonical[0],
                         source: 'unmet_demand',
+                        originalShortfall: mergeProv?.originalShortfall ?? record.slot.remaining_quantity,
+                        resolvedAt: mergeProv?.resolvedAt,
                     });
 
                     // Re-explode at merge scope
@@ -773,9 +779,17 @@ export function planForRegion(
                             generateId,
                         });
                         allPurchaseIntents.push(...reResult.purchaseIntents);
+                        const mergeChildProv = childProvenanceByIntentId.get(slot.intent_id);
+                        if (mergeChildProv?.originScopeId) {
+                            for (const commitment of reResult.commitments) {
+                                commitment.inScopeOf = [
+                                    ...(commitment.inScopeOf ?? []),
+                                    mergeChildProv.originScopeId,
+                                ];
+                            }
+                        }
                     }
 
-                    // Check if conflict is resolved
                     const newConflicts = detectConflicts(planStore, ctx.observer);
                     const stillConflicted = newConflicts.some(
                         nc => nc.resourceOrAgentId === conflict.resourceOrAgentId,
@@ -795,7 +809,6 @@ export function planForRegion(
         i => i.action === 'work' && i.provider === undefined,
     );
 
-    // Derive metabolicDebt as a typed projection of allDeficits (deficits is the single source of truth)
     const metabolicDebt: MetabolicDebt[] = allDeficits
         .filter(d => d.source === 'metabolic_debt')
         .map(d => ({ specId: d.specId, shortfall: d.shortfall, plannedWithin: d.plannedWithin }));
@@ -815,7 +828,7 @@ export function planForRegion(
 // SIGNAL HELPERS
 // =============================================================================
 
-/** Extract PlanSignals from a completed RegionPlanResult for passing to a parent planner. */
-export function buildPlanSignals(result: RegionPlanResult): PlanSignals {
+/** Extract ScopePlanSignals from a completed ScopePlanResult for passing to a parent planner. */
+export function buildScopePlanSignals(result: ScopePlanResult): ScopePlanSignals {
     return { deficits: result.deficits, surplus: result.surplus };
 }

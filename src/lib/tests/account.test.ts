@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { Commune, Account } from "../observation/account";
+import { Commune, Account } from "../observation/teen_account";
 import type { EconomicEvent } from "../schemas";
 
 describe("Commune and Account (SNLT Logic)", () => {

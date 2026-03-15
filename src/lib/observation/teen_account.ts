@@ -126,11 +126,21 @@ export interface Satisfaction {
 export interface CommuneOptions {
     /** Initial consumption pool (SNLT units). Grows as goods are produced. */
     initialConsumptionPool?: number;
+    /**
+     * Fixed communal deduction rate ∈ [0,1].
+     * When provided, overrides the dynamic active_communal_snlt / total formula.
+     * Defaults to 0.5 (a typical assembly-set value).
+     * Set to undefined to use the fully dynamic model.
+     */
+    communalDeductionRate?: number;
 }
 
 export class Commune {
     /** Sum of SNLT of all goods currently available for order satisfaction. */
     public current_pool: number;
+
+    /** Optional fixed deduction rate override. Undefined = use dynamic model. */
+    private _fixedDeductionRate: number | undefined;
 
     private _orders: Order[] = [];
     private _satisfactions: Satisfaction[] = [];
@@ -138,6 +148,7 @@ export class Commune {
 
     constructor(options: CommuneOptions = {}) {
         this.current_pool = options.initialConsumptionPool ?? 0;
+        this._fixedDeductionRate = options.communalDeductionRate ?? 0.5;
     }
 
     // -------------------------------------------------------------------------
@@ -246,15 +257,21 @@ export class Commune {
     }
 
     /**
-     * Derived communal deduction rate (0–1).
-     *   active_communal_snlt / (active_communal_snlt + active_individual_snlt)
+     * Communal deduction rate (0–1).
      *
-     * Reflects the proportion of total expressed need that is communal.
-     * Rises as communal debt accumulates → individual purchasing power shrinks.
+     * When `communalDeductionRate` was provided at construction, returns that
+     * fixed value. Otherwise derives dynamically:
+     *   active_communal_snlt / (active_communal_snlt + active_individual_snlt)
      */
     get communal_deduction_rate(): number {
+        if (this._fixedDeductionRate !== undefined) return this._fixedDeductionRate;
         const total = this.active_communal_snlt + this.active_individual_snlt;
         return total === 0 ? 0 : this.active_communal_snlt / total;
+    }
+
+    /** Alias for `current_pool` (backward compatibility). */
+    get current_consumption_pool(): number {
+        return this.current_pool;
     }
 
     /** SNLT currently committed to validated communal orders. */
@@ -352,6 +369,8 @@ export class Account {
     public gross_labor_credited: number = 0;
     /** Running total of SNLT satisfied by this account (additive only). */
     public satisfied_snlt: number = 0;
+    /** Running total of SNLT claimed via claimGoods() (additive only). */
+    public claimed_capacity: number = 0;
 
     constructor(private commune: Commune, agentId: string) {
         this.agentId = agentId;
@@ -493,6 +512,24 @@ export class Account {
     /** Orders placed but not yet backed — expressed need without commitment. */
     get unvalidated_orders(): Order[] {
         return this.active_orders.filter(o => o.validated_snlt === 0);
+    }
+
+    // -------------------------------------------------------------------------
+    // CLAIM GOODS (simplified claim lifecycle)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Claim goods from the commune pool (simplified form of place+validate+satisfy).
+     *
+     * Checks that `current_actual_claim_capacity >= amount`.
+     * On success: deducts from the commune pool and records `claimed_capacity`.
+     * Returns false if capacity is insufficient (pool unchanged).
+     */
+    claimGoods(amount: number): boolean {
+        if (this.current_actual_claim_capacity < amount) return false;
+        this.commune.current_pool -= amount;
+        this.claimed_capacity += amount;
+        return true;
     }
 
     // -------------------------------------------------------------------------

@@ -437,6 +437,37 @@ export class Observer {
             }
         }
 
+        // --- transferCustody: update custodianScope on EconomicResource ---
+        // spec §385: Cₖ = { r : r.custodianScope = scope[k].id }
+        // The receiving scope (inScopeOf[0], or receiver agent as fallback) becomes the new
+        // custodian scope. If two resource records are used, the from-resource loses custody.
+        if (event.action === 'transferCustody') {
+            const newCustodianScope = event.inScopeOf?.[0] ?? event.receiver;
+            if (newCustodianScope) {
+                // Receiving resource (to-resource if split, otherwise the from-resource)
+                const receivingId = event.toResourceInventoriedAs ?? event.resourceInventoriedAs;
+                if (receivingId) {
+                    const receivingResource = this.resources.get(receivingId);
+                    if (receivingResource) {
+                        receivingResource.custodianScope = newCustodianScope;
+                        this.emit({ type: 'resource_updated', resource: receivingResource, event,
+                            changes: ['custodianScope'] });
+                        addAffected(receivingResource);
+                    }
+                }
+                // If split (two distinct resource records), clear custody from the from-resource
+                if (event.toResourceInventoriedAs && event.resourceInventoriedAs) {
+                    const fromResource = this.resources.get(event.resourceInventoriedAs);
+                    if (fromResource) {
+                        fromResource.custodianScope = undefined;
+                        this.emit({ type: 'resource_updated', resource: fromResource, event,
+                            changes: ['custodianScope:released'] });
+                        addAffected(fromResource);
+                    }
+                }
+            }
+        }
+
         // --- Separate: apply location from container or explicit toLocation ---
         // separate.locationEffect = 'noEffect' so applyResourceEffects won't touch location.
         // Post-effects: set the separated resource's location so it isn't locationless.

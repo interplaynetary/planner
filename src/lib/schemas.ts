@@ -773,6 +773,7 @@ export const EconomicResourceSchema = z.object({
     currentLocation: z.string().optional(),                // SpatialThing ID
     currentVirtualLocation: z.string().url().optional(),   // URI for digital/non-physical resources
     primaryAccountable: z.string().optional(),             // Agent ID (rights holder)
+    custodianScope: z.string().optional(),                 // Scope ID currently stewarding this resource (custody partition C); updated by transferCustody events
 
     // Stage/state (set by processes)
     stage: z.string().optional(),                          // ProcessSpecification ID
@@ -870,6 +871,12 @@ export const EconomicEventSchema = z.object({
      * DDMRP ref: Ptak & Smith Ch 7 §"ADU Exceptions".
      */
     excludeFromADU: z.boolean().optional(),
+
+    /**
+     * Dollar-denominated market value for transferCustody events.
+     * Used exclusively for entrustment limit enforcement; theft risk is market-denominated.
+     */
+    market_value: z.number().optional(),
 });
 export type EconomicEvent = z.infer<typeof EconomicEventSchema>;
 

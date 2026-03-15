@@ -79,6 +79,9 @@ export interface DemandSlot {
 
     /** Demand classification label (e.g. "intersite-transfer", "export") for display */
     classification?: string;
+
+    /** Scope IDs this demand is in (from intent.inScopeOf) */
+    inScopeOf?: string[];
 }
 
 export interface IndependentDemandIndex {
@@ -130,6 +133,9 @@ export interface IndependentDemandIndex {
      * HexNode.items contains intentIds; resolve via demands.
      */
     spatial_hierarchy: HexIndex<DemandSlot>;
+
+    /** scope_index — maps scope Agent ID → Set<intentId> */
+    scope_index: Map<string, Set<string>>;
 }
 
 // =============================================================================
@@ -169,6 +175,7 @@ export function buildIndependentDemandIndex(
         plan_demand_index: new Map(),
         space_time_index: new Map(),
         spatial_hierarchy: createHexIndex<DemandSlot>(),
+        scope_index: new Map(),
     };
 
     // --- Phase 1: compute fulfilled quantities per Intent ---
@@ -225,6 +232,8 @@ export function buildIndependentDemandIndex(
             due:                 intent.due ?? intent.hasEnd ?? intent.hasPointInTime,
             provider:            intent.provider,
             receiver:            intent.receiver,
+            atLocation:          intent.atLocation,
+            inScopeOf:           intent.inScopeOf,
         };
 
         index.demands.set(intent.id, slot);
@@ -233,6 +242,10 @@ export function buildIndependentDemandIndex(
         addTo(index.spec_index,        intent.resourceConformsTo, intent.id);
         addTo(index.action_index,      intent.action,            intent.id);
         addTo(index.space_time_index,  sig,                      intent.id);
+
+        for (const scopeId of intent.inScopeOf ?? []) {
+            addTo(index.scope_index, scopeId, intent.id);
+        }
 
         if (st && h3Cell) {
             addItemToHexIndex(
@@ -373,4 +386,16 @@ export function getTotalDemandQuantity(slots: DemandSlot[]): number {
 
 export function getTotalDemandHours(slots: DemandSlot[]): number {
     return slots.reduce((sum, s) => sum + s.remaining_hours, 0);
+}
+
+/**
+ * All demand slots in scope of a given scope Agent ID.
+ * Uses intent.inScopeOf[]; a slot appears once per scope it is in.
+ */
+export function queryDemandByScope(
+    index: IndependentDemandIndex,
+    scopeId: string,
+): DemandSlot[] {
+    const ids = index.scope_index.get(scopeId) ?? new Set<string>();
+    return [...ids].map(id => index.demands.get(id)!).filter(Boolean);
 }
