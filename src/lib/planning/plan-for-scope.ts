@@ -436,6 +436,36 @@ export function planForScope(
         const planId = `plan-${generateId()}`;
         planStore.addPlan({ id: planId, name: `Demand plan for ${slot.spec_id}` });
 
+        // transport-candidates must be sourced externally, not produced locally.
+        // Firing a production recipe here would resolve the demand at the wrong scope.
+        if (slotClass === 'transport-candidate') {
+            const purchaseIntent = planStore.addIntent({
+                action: 'transfer',
+                receiver: ctx.agents?.receiver,
+                resourceConformsTo: slot.spec_id,
+                resourceQuantity: {
+                    hasNumericalValue: slot.remaining_quantity,
+                    hasUnit: ctx.recipeStore.getResourceSpec(slot.spec_id)?.defaultUnitOfResource ?? 'unit',
+                },
+                due: slot.due,
+                plannedWithin: planId,
+                note: `Transport required: ${slot.spec_id} (supply exists in another scope)`,
+                finished: false,
+            });
+            const result: DependentDemandResult = {
+                plan: planStore.getPlan(planId)!,
+                processes: [],
+                commitments: [],
+                intents: [],
+                purchaseIntents: [purchaseIntent],
+                allocated: [],
+                allocatedScheduledIds: new Set(),
+            };
+            pass1Records.push({ slot, result, slotClass });
+            allPurchaseIntents.push(purchaseIntent);
+            continue;
+        }
+
         const result = dependentDemand({
             planId,
             demandSpecId: slot.spec_id,

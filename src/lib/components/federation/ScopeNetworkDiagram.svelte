@@ -42,7 +42,14 @@
 
   // ── Derived state — touch observerTick so re-derives after recording ────────
   const processes = $derived.by(() => { void observerTick; return planStore.processes.all(); });
-  const allCmts   = $derived.by(() => { void observerTick; return planStore.allCommitments(); });
+  // Include process-linked intents alongside commitments so the diagram renders
+  // even when no agents are set (intents are created instead of commitments).
+  const allCmts   = $derived.by(() => {
+    void observerTick;
+    const cmts = planStore.allCommitments();
+    const procIntents = planStore.allIntents().filter(i => i.inputOf || i.outputOf);
+    return [...cmts, ...procIntents];
+  });
   const observed  = $derived.by(() => { void observerTick; return observer.allResources(); });
 
   const onhandBySpec = $derived(
@@ -179,19 +186,23 @@
   });
 
   // ── netEdges ───────────────────────────────────────────────────────────────
-  const netEdges = $derived.by(() =>
-    rawEdges.flatMap(re => {
+  const netEdges = $derived.by(() => {
+    const seen = new Set<string>();
+    return rawEdges.flatMap(re => {
+      const key = `${re.fromId}-${re.toId}-${re.specId}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
       const src = netLayout.find(n => n.proc.id === re.fromId);
       const tgt = netLayout.find(n => n.proc.id === re.toId);
       if (!src || !tgt) return [];
       const outRow = src.outputs.find(r => r.specId === re.specId);
       const inRow  = tgt.inputs.find(r => r.specId === re.specId);
       if (!outRow || !inRow) return [];
-      return [{ specId: re.specId,
+      return [{ specId: re.specId, fromId: re.fromId, toId: re.toId,
         fromX: src.x + IO_X + CARD_W / 2, fromY: outRow.y,
         toX: tgt.x - IO_X - CARD_W / 2, toY: inRow.y }];
-    })
-  );
+    });
+  });
 
   // ── SVG dimensions ─────────────────────────────────────────────────────────
   const svgW = $derived(
@@ -251,7 +262,7 @@
         </marker>
       </defs>
 
-      {#each netEdges as e (e.fromX + '-' + e.toX + '-' + e.specId)}
+      {#each netEdges as e (e.fromId + '-' + e.toId + '-' + e.specId)}
         {@const dx = e.toX - e.fromX}
         <path d="M{e.fromX},{e.fromY} C{e.fromX + dx * 0.5},{e.fromY} {e.toX - dx * 0.5},{e.toY} {e.toX},{e.toY}"
           fill="none" stroke="rgba(226,232,240,0.28)" stroke-width="1.5" marker-end="url(#snd-arr)" />
@@ -297,7 +308,7 @@
         {/if}
 
         <!-- Input cards -->
-        {#each node.inputs as row (row.specId + '-' + row.action + '-in')}
+        {#each node.inputs as row (row.commitmentId)}
           {@const ox    = node.x - IO_X}
           {@const acol  = ACTION_COLORS[row.action] ?? '#718096'}
           {@const cardX = ox - CARD_W / 2}
@@ -334,7 +345,7 @@
         {/each}
 
         <!-- Output cards + buffer funnels -->
-        {#each node.outputs as row (row.specId + '-' + row.action + '-out')}
+        {#each node.outputs as row (row.commitmentId)}
           {@const ox    = node.x + IO_X}
           {@const bz    = row.bufferZone}
           {@const acol  = ACTION_COLORS[row.action] ?? '#718096'}

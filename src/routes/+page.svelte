@@ -118,6 +118,49 @@
   let selectedProfileCode = $state<string | null>(null);
   let selectedSpecId = $state<string | null>(null);
 
+  // ── AI RECIPE WORKSHOP ────────────────────────────────────────────────────
+  interface GeneratedRecipe {
+    recipe: { id: string; name: string; note?: string; primaryOutput?: string };
+    processes: { id: string; name: string; note?: string; hasDuration?: { hasNumericalValue: number; hasUnit: string }; sequenceGroup?: number }[];
+    flows: { id: string; action: string; resourceConformsTo?: string; resourceQuantity?: { hasNumericalValue: number; hasUnit: string }; effortQuantity?: { hasNumericalValue: number; hasUnit: string }; recipeInputOf?: string; recipeOutputOf?: string }[];
+    active: boolean;
+  }
+
+  const EXAMPLES = [
+    'Bake sourdough bread from flour, water, and salt',
+    'Forge iron tools from ore and charcoal via smelting and smithing',
+    'Press olive oil from fresh olives',
+    'Mill wheat into flour using stone grinding',
+    'Brew ale from malted barley, hops, and yeast',
+    'Cure fish with salt for preservation',
+    'Weave linen fabric from flax fibre',
+    'Make cheese from fresh dairy milk',
+  ];
+
+  let networkTab = $state<'diagram' | 'knowledge' | 'plan' | 'observe'>('diagram');
+  let aiPrompt = $state('');
+  let generating = $state(false);
+  let errorMsg = $state('');
+  let generated = $state<GeneratedRecipe[]>([]);
+
+  async function generateRecipe() {
+    if (!aiPrompt.trim() || generating) return;
+    generating = true;
+    errorMsg = '';
+    const res = await fetch('/api/generate-recipe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: aiPrompt }),
+    });
+    const payload = await res.json();
+    if (payload.success) {
+      generated = [{ ...payload.data, active: true }, ...generated];
+    } else {
+      errorMsg = payload.error ?? 'Generation failed';
+    }
+    generating = false;
+  }
+
   // All recipe processes and flows for the Knowledge band
   const allRecipeProcesses = $derived(
     recipeList.flatMap(r => recipes.processesForRecipe(r.id))
@@ -138,20 +181,102 @@
   <!-- ── NETWORK DIAGRAM ────────────────────────────────────────────────────── -->
   <section class="band diagram">
     <div class="band-header">
-      <span class="band-title" style="color: #9f7aea">NETWORK DIAGRAM</span>
-      <span class="counts">
-        <span class="count">Processes({processList.length})</span>
-        <span class="count">Agents({agentList.length})</span>
-        <span class="count">Buffers({bufferZoneList.length})</span>
-      </span>
+      <div class="tab-group">
+        <button class="tab-btn" class:tab-active={networkTab === 'diagram'} onclick={() => networkTab = 'diagram'}>NETWORK DIAGRAM</button>
+        <button class="tab-btn" class:tab-active={networkTab === 'knowledge'} onclick={() => networkTab = 'knowledge'}>KNOWLEDGE</button>
+        <button class="tab-btn" class:tab-active={networkTab === 'plan'} onclick={() => networkTab = 'plan'}>PLAN</button>
+        <button class="tab-btn" class:tab-active={networkTab === 'observe'} onclick={() => networkTab = 'observe'}>OBSERVE</button>
+      </div>
+      {#if networkTab === 'diagram'}
+        <span class="counts">
+          <span class="count">Processes({processList.length})</span>
+          <span class="count">Agents({agentList.length})</span>
+          <span class="count">Buffers({bufferZoneList.length})</span>
+        </span>
+      {:else if networkTab === 'knowledge'}
+        <span class="counts">
+          <span class="count">{generated.length} recipe{generated.length !== 1 ? 's' : ''} generated</span>
+        </span>
+      {/if}
     </div>
-    <div class="diagram-wrap">
-      <NetworkDiagram
-        onbufferselect={(id) => { selectedBzId = id; }}
-        selectedBzId={selectedBzId ?? undefined}
-        adjustments={adjustmentFactorList}
-      />
-    </div>
+
+    {#if networkTab === 'diagram'}
+      <div class="diagram-wrap">
+        <NetworkDiagram
+          onbufferselect={(id) => { selectedBzId = id; }}
+          selectedBzId={selectedBzId ?? undefined}
+          adjustments={adjustmentFactorList}
+        />
+      </div>
+    {:else if networkTab === 'knowledge'}
+      <div class="workshop-wrap">
+        <div class="prompt-area">
+          <div class="chips">
+            {#each EXAMPLES as ex (ex)}
+              <button class="chip" onclick={() => aiPrompt = ex}>{ex}</button>
+            {/each}
+          </div>
+          <textarea
+            bind:value={aiPrompt}
+            placeholder="Describe a production process…"
+            rows="3"
+            onkeydown={(e) => { if (e.ctrlKey && e.key === 'Enter') generateRecipe(); }}
+          ></textarea>
+          {#if errorMsg}
+            <div class="error-msg">{errorMsg}</div>
+          {/if}
+          <button class="generate-btn" onclick={generateRecipe} disabled={generating || !aiPrompt.trim()}>
+            {generating ? 'GENERATING…' : 'GENERATE RECIPE'}
+          </button>
+        </div>
+
+        <div class="cards-area">
+          {#each generated as r (r.recipe.id)}
+            <div class="recipe-card" class:rc-active={r.active} class:rc-inactive={!r.active}>
+              <div class="card-head">
+                <span class="card-name">{r.recipe.name}</span>
+                <button class="toggle-pill" class:pill-active={r.active} onclick={() => r.active = !r.active}>
+                  {r.active ? 'ACTIVE' : 'INACTIVE'}
+                </button>
+              </div>
+              {#if r.recipe.note}
+                <div class="card-note">{r.recipe.note}</div>
+              {/if}
+              <div class="section-lbl">PROCESSES</div>
+              <div class="process-list">
+                {#each [...r.processes].sort((a, b) => (a.sequenceGroup ?? 99) - (b.sequenceGroup ?? 99)) as p (p.id)}
+                  <div class="process-row">
+                    <span class="proc-seq">{p.sequenceGroup ?? '—'}</span>
+                    <span class="proc-name">{p.name}</span>
+                    {#if p.hasDuration}
+                      <span class="proc-dur">{p.hasDuration.hasNumericalValue} {p.hasDuration.hasUnit}</span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+              <div class="section-lbl">FLOWS</div>
+              <div class="flow-list">
+                {#each r.flows as f (f.id)}
+                  <div class="flow-row">
+                    <span class="action-badge ab-{f.action}">{f.action}</span>
+                    <span class="flow-spec">{f.resourceConformsTo ?? '—'}</span>
+                    {#if f.resourceQuantity}
+                      <span class="flow-qty">{f.resourceQuantity.hasNumericalValue} {f.resourceQuantity.hasUnit}</span>
+                    {:else if f.effortQuantity}
+                      <span class="flow-qty">{f.effortQuantity.hasNumericalValue} {f.effortQuantity.hasUnit}</span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {:else}
+      <div class="diagram-wrap">
+        <span class="empty" style="padding: var(--gap-md); display:block; opacity:0.4">{networkTab} panel — coming soon</span>
+      </div>
+    {/if}
   </section>
 
   <!-- ── DDMRP INSPECTION BAND ──────────────────────────────────────────────── -->
@@ -799,5 +924,267 @@
     flex: 1;
     min-width: 300px;
     max-width: 520px;
+  }
+
+  /* ── Tab group ── */
+  .tab-group {
+    display: flex;
+    gap: 2px;
+  }
+
+  .tab-btn {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    padding: 2px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: rgba(226, 232, 240, 0.4);
+    cursor: pointer;
+    border-radius: 3px;
+    letter-spacing: 0.05em;
+  }
+
+  .tab-btn:hover {
+    color: rgba(226, 232, 240, 0.8);
+    background: var(--bg-overlay);
+  }
+
+  .tab-btn.tab-active {
+    color: #9f7aea;
+    border-color: rgba(159, 122, 234, 0.35);
+    background: rgba(159, 122, 234, 0.08);
+  }
+
+  /* ── Recipe Workshop ── */
+  .workshop-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    height: 520px;
+    overflow: hidden;
+  }
+
+  .prompt-area {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-faint);
+    flex-shrink: 0;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .chip {
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    padding: 2px 8px;
+    background: transparent;
+    border: 1px solid rgba(214, 158, 46, 0.3);
+    color: rgba(214, 158, 46, 0.75);
+    cursor: pointer;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+
+  .chip:hover {
+    background: rgba(214, 158, 46, 0.08);
+    color: rgba(214, 158, 46, 1);
+  }
+
+  textarea {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    background: var(--bg-overlay);
+    border: 1px solid var(--border-dim);
+    color: #e2e8f0;
+    border-radius: 3px;
+    padding: 8px;
+    resize: vertical;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  textarea:focus {
+    outline: none;
+    border-color: rgba(126, 232, 162, 0.4);
+  }
+
+  .error-msg {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: #fc5858;
+    opacity: 0.9;
+  }
+
+  .generate-btn {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    padding: 5px 16px;
+    background: transparent;
+    border: 1px solid rgba(126, 232, 162, 0.4);
+    color: rgba(126, 232, 162, 0.85);
+    cursor: pointer;
+    border-radius: 3px;
+    align-self: flex-start;
+    letter-spacing: 0.08em;
+  }
+
+  .generate-btn:hover:not(:disabled) {
+    background: rgba(126, 232, 162, 0.08);
+    border-color: rgba(126, 232, 162, 0.7);
+  }
+
+  .generate-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .cards-area {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 14px 16px;
+    overflow-y: auto;
+    flex: 1;
+    align-content: flex-start;
+  }
+
+  .recipe-card {
+    font-family: var(--font-mono);
+    border-radius: 4px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 260px;
+    flex-shrink: 0;
+    transition: opacity 0.2s, box-shadow 0.2s;
+  }
+
+  .rc-active {
+    border: 1px solid rgba(126, 232, 162, 0.55);
+    background: rgba(126, 232, 162, 0.05);
+    box-shadow: 0 0 18px rgba(126, 232, 162, 0.14);
+  }
+
+  .rc-inactive {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+    opacity: 0.42;
+  }
+
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .card-name {
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: rgba(228, 238, 255, 0.9);
+  }
+
+  .toggle-pill {
+    font-family: var(--font-mono);
+    font-size: 0.48rem;
+    padding: 1px 7px;
+    border-radius: 20px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.45);
+    letter-spacing: 0.05em;
+  }
+
+  .toggle-pill.pill-active {
+    background: rgba(126, 232, 162, 0.12);
+    border-color: rgba(126, 232, 162, 0.4);
+    color: rgba(126, 232, 162, 0.9);
+  }
+
+  .card-note {
+    font-size: 0.52rem;
+    opacity: 0.55;
+    line-height: 1.4;
+  }
+
+  .section-lbl {
+    font-size: 0.45rem;
+    letter-spacing: 0.1em;
+    opacity: 0.4;
+    margin-top: 2px;
+  }
+
+  .process-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .process-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.52rem;
+  }
+
+  .proc-seq {
+    opacity: 0.4;
+    font-size: 0.48rem;
+    min-width: 10px;
+  }
+
+  .proc-name {
+    flex: 1;
+    color: rgba(228, 238, 255, 0.8);
+  }
+
+  .proc-dur {
+    opacity: 0.45;
+    font-size: 0.48rem;
+  }
+
+  .flow-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .flow-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.5rem;
+  }
+
+  .action-badge {
+    font-size: 0.44rem;
+    padding: 1px 5px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.5);
+    white-space: nowrap;
+  }
+
+  .ab-produce  { background: rgba(126, 232, 162, 0.12); color: #7ee8a2; }
+  .ab-consume  { background: rgba(252,  88,  88, 0.12); color: #fc5858; }
+  .ab-work     { background: rgba(118, 195, 245, 0.12); color: #76c3f5; }
+  .ab-transfer { background: rgba(232, 176,  78, 0.12); color: #e8b04e; }
+
+  .flow-spec {
+    flex: 1;
+    color: rgba(228, 238, 255, 0.75);
+  }
+
+  .flow-qty {
+    opacity: 0.45;
+    white-space: nowrap;
   }
 </style>

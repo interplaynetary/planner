@@ -1,15 +1,19 @@
 <script lang="ts">
   import type { FlowSelectCtx } from '$lib/components/vf/observe-types';
-  import { observer, refresh } from '$lib/vf-stores.svelte';
+  import type { Observer } from '$lib/observation/observer';
+  import { observer as globalObserver, refresh } from '$lib/vf-stores.svelte';
   import ActionBadge from '$lib/components/vf/ActionBadge.svelte';
   import EventRow from '$lib/components/vf/EventRow.svelte';
 
   interface Props {
-    context:  FlowSelectCtx | null;
-    onrecord: () => void;
-    onclose:  () => void;
+    context:   FlowSelectCtx | null;
+    onrecord:  () => void;
+    onclose:   () => void;
+    observer?: Observer;
   }
-  let { context, onrecord, onclose }: Props = $props();
+  let { context, onrecord, onclose, observer: propObserver }: Props = $props();
+
+  const obs = $derived(propObserver ?? globalObserver);
 
   let qtyInput   = $state(0);
   let tsInput    = $state('');
@@ -32,7 +36,7 @@
     submitting = true;
     const isWork = context.action === 'work';
     try {
-      observer.record({
+      obs.record({
         id:     `ev-obs-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         action: context.action as any,
         ...(context.isInput ? { inputOf: context.processId } : { outputOf: context.processId }),
@@ -45,7 +49,7 @@
         ...(isWork && context.providerAgentId        ? { provider: context.providerAgentId }       : {}),
         ...(notesInput                               ? { note: notesInput }                         : {}),
       });
-      refresh();
+      if (!propObserver) refresh();
       notesInput = '';
       onrecord();
     } catch (e: any) {

@@ -4,33 +4,21 @@
   import FederationEventLog from "$lib/components/federation/FederationEventLog.svelte";
   import InventoryBand from "$lib/components/federation/InventoryBand.svelte";
   import ScopeNetworkDiagram from "$lib/components/federation/ScopeNetworkDiagram.svelte";
-  import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
-  import type {
-    TradeProposal,
-    FederationEvent,
-  } from "$lib/planning/plan-federation";
-  import { StoreRegistry } from "$lib/planning/store-registry";
-  import { PlanStore } from "$lib/planning/planning";
-  import { ProcessRegistry } from "$lib/process-registry";
+  import ScopeRecipesPanel from "$lib/components/federation/ScopeRecipesPanel.svelte";
+  import EventRecorderPanel from "$lib/components/observation/EventRecorderPanel.svelte";
+  import type { FlowSelectCtx } from "$lib/components/vf/observe-types";
+  import type { TradeProposal, FederationEvent } from "$lib/planning/plan-federation";
   import { Observer } from "$lib/observation/observer";
-  import type { EconomicResource } from "$lib/schemas";
+  import type { EconomicResource, Intent, ResourceSpecification } from "$lib/schemas";
+  import ResourceDemandCard from "$lib/components/commune/ResourceDemandCard.svelte";
+  import { buildIndependentDemandIndex } from "$lib/indexes/independent-demand";
+  import { buildIndependentSupplyIndex, querySupplyByScope } from "$lib/indexes/independent-supply";
+  import { buildAgentIndex } from "$lib/indexes/agents";
+  import { planFederation } from "$lib/planning/plan-federation";
+  import { RecipeStore } from "$lib/knowledge/recipes";
 
   // ---------------------------------------------------------------------------
-  // Mock data — 16-scope federation (5 federations + UC):
-  //
-  //   universal-commune
-  //   ├── northern-federation  ── commune-grain (wheat)  commune-dairy (dairy)
-  //   ├── eastern-federation   ── commune-forge (tools)  commune-workshop (goods)
-  //   ├── southern-federation  ── commune-olive (oil)    commune-citrus (fruit+fish)
-  //   ├── western-federation   ── commune-mill (flour)   commune-bakery (bread)
-  //   └── coastal-federation   ── commune-fisher (fish)  commune-salter (salt)
-  //
-  // 5 INTER-SCOPE SUPPORTs (cross-federation peer exchanges):
-  //   commune-grain  (N) → commune-mill    (W): wheat × 200
-  //   commune-forge  (E) → commune-grain   (N): tools × 15
-  //   commune-dairy  (N) → commune-bakery  (W): dairy × 30
-  //   commune-mill   (W) → commune-forge   (E): flour × 30
-  //   commune-fisher (C) → commune-citrus  (S): fish  × 40
+  // specNames
   // ---------------------------------------------------------------------------
 
   const specNames: Record<string, string> = {
@@ -51,1080 +39,169 @@
     brine: "Brine",
   };
 
-  // ---- Northern: commune-grain -----------------------------------------------
-  const grainReg = new ProcessRegistry();
-  const grainStore = new PlanStore(grainReg);
-  const grainPlan = grainStore.addPlan({ name: "Grain Harvest 2026-Q1" });
-  const grainProc = grainReg.register({
-    name: "Wheat Harvest",
-    plannedWithin: grainPlan.id,
-  });
-  grainStore.addCommitment({
-    plannedWithin: grainPlan.id,
-    action: "produce",
-    outputOf: grainProc.id,
-    provider: "commune-grain",
-    resourceConformsTo: "wheat",
-    resourceQuantity: { hasNumericalValue: 300, hasUnit: "kg" },
-  });
-  grainStore.addCommitment({
-    plannedWithin: grainPlan.id,
-    action: "work",
-    inputOf: grainProc.id,
-    provider: "agent-farmer",
-    effortQuantity: { hasNumericalValue: 80, hasUnit: "hr" },
-  });
-  grainStore.addCommitment({
-    plannedWithin: grainPlan.id,
-    action: "transfer",
-    provider: "commune-grain",
-    receiver: "commune-mill",
-    resourceConformsTo: "wheat",
-    resourceQuantity: { hasNumericalValue: 200, hasUnit: "kg" },
-  });
+  // ---------------------------------------------------------------------------
+  // RecipeStore — commune production templates
+  // ---------------------------------------------------------------------------
 
-  // ---- Northern: commune-dairy -----------------------------------------------
-  const dairyReg = new ProcessRegistry();
-  const dairyStore = new PlanStore(dairyReg);
-  const dairyPlan = dairyStore.addPlan({ name: "Dairy Production 2026-Q1" });
-  const dairyProc = dairyReg.register({
-    name: "Dairy Production",
-    plannedWithin: dairyPlan.id,
-  });
-  dairyStore.addCommitment({
-    plannedWithin: dairyPlan.id,
-    action: "produce",
-    outputOf: dairyProc.id,
-    provider: "commune-dairy",
-    resourceConformsTo: "dairy",
-    resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" },
-  });
-  dairyStore.addCommitment({
-    plannedWithin: dairyPlan.id,
-    action: "transfer",
-    provider: "commune-dairy",
-    receiver: "commune-bakery",
-    resourceConformsTo: "dairy",
-    resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" },
-  });
+  function buildFederationRecipes(): RecipeStore {
+    const rs = new RecipeStore();
 
-  // ---- Eastern: commune-forge (2-step: Ore Smelting → Smithing) --------------
-  const forgeReg = new ProcessRegistry();
-  const forgeStore = new PlanStore(forgeReg);
-  const forgePlan = forgeStore.addPlan({ name: "Forge Output 2026-Q1" });
-  const smeltProc = forgeReg.register({
-    name: "Ore Smelting",
-    plannedWithin: forgePlan.id,
-  });
-  const smithProc = forgeReg.register({
-    name: "Smithing",
-    plannedWithin: forgePlan.id,
-  });
-  // Smelting: ore + work → metal
-  forgeStore.addCommitment({
-    plannedWithin: forgePlan.id,
-    action: "consume",
-    inputOf: smeltProc.id,
-    resourceConformsTo: "ore",
-    resourceQuantity: { hasNumericalValue: 120, hasUnit: "kg" },
-  });
-  forgeStore.addCommitment({
-    plannedWithin: forgePlan.id,
-    action: "work",
-    inputOf: smeltProc.id,
-    provider: "agent-iron",
-    effortQuantity: { hasNumericalValue: 32, hasUnit: "hr" },
-  });
-  forgeStore.addCommitment({
-    plannedWithin: forgePlan.id,
-    action: "produce",
-    outputOf: smeltProc.id,
-    resourceConformsTo: "metal",
-    resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" },
-  });
-  // Smithing: metal + work → tools
-  forgeStore.addCommitment({
-    plannedWithin: forgePlan.id,
-    action: "consume",
-    inputOf: smithProc.id,
-    resourceConformsTo: "metal",
-    resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" },
-  });
-  forgeStore.addCommitment({
-    plannedWithin: forgePlan.id,
-    action: "work",
-    inputOf: smithProc.id,
-    provider: "agent-smith",
-    effortQuantity: { hasNumericalValue: 48, hasUnit: "hr" },
-  });
-  forgeStore.addCommitment({
-    plannedWithin: forgePlan.id,
-    action: "produce",
-    outputOf: smithProc.id,
-    provider: "commune-forge",
-    resourceConformsTo: "tools",
-    resourceQuantity: { hasNumericalValue: 80, hasUnit: "unit" },
-  });
-  // Standalone transfers (inter-scope supports)
-  forgeStore.addCommitment({
-    plannedWithin: forgePlan.id,
-    action: "transfer",
-    provider: "commune-forge",
-    receiver: "commune-grain",
-    resourceConformsTo: "tools",
-    resourceQuantity: { hasNumericalValue: 15, hasUnit: "unit" },
-  });
-  // Lateral receipt: commune-mill supplies flour to commune-forge
-  forgeStore.addCommitment({
-    plannedWithin: forgePlan.id,
-    action: "transfer",
-    provider: "commune-mill",
-    receiver: "commune-forge",
-    resourceConformsTo: "flour",
-    resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" },
-  });
+    // Resource specs
+    const specDefs: [string, string][] = [
+      ["wheat", "Wheat"], ["dairy", "Dairy"], ["tools", "Tools"], ["goods", "Goods"],
+      ["olive-oil", "Olive Oil"], ["citrus", "Citrus"], ["flour", "Flour"], ["bread", "Bread"],
+      ["fish", "Fish"], ["salt", "Salt"], ["metal", "Iron Metal"], ["ore", "Iron Ore"],
+      ["dough", "Dough"], ["brine", "Brine"], ["raw-flour", "Raw Flour"],
+    ];
+    for (const [id, name] of specDefs) rs.addResourceSpec({ id, name });
 
-  // ---- Eastern: commune-workshop ---------------------------------------------
-  const workshopReg = new ProcessRegistry();
-  const workshopStore = new PlanStore(workshopReg);
-  const workshopPlan = workshopStore.addPlan({
-    name: "Workshop Output 2026-Q1",
-  });
-  const workshopProc = workshopReg.register({
-    name: "Manufacturing",
-    plannedWithin: workshopPlan.id,
-  });
-  workshopStore.addCommitment({
-    plannedWithin: workshopPlan.id,
-    action: "produce",
-    outputOf: workshopProc.id,
-    provider: "commune-workshop",
-    resourceConformsTo: "goods",
-    resourceQuantity: { hasNumericalValue: 60, hasUnit: "unit" },
-  });
+    // Process specs
+    const procDefs: [string, string][] = [
+      ["ps-wheat-harvest", "Wheat Harvest"], ["ps-dairy-prod", "Dairy Production"],
+      ["ps-ore-smelting", "Ore Smelting"], ["ps-smithing", "Smithing"],
+      ["ps-manufacturing", "Manufacturing"], ["ps-olive-pressing", "Olive Pressing"],
+      ["ps-citrus-harvest", "Citrus Harvest"], ["ps-grain-milling", "Grain Milling"],
+      ["ps-flour-sifting", "Flour Sifting"], ["ps-dough-proofing", "Dough Proofing"],
+      ["ps-baking", "Baking"], ["ps-fishing", "Fishing"],
+      ["ps-salt-extraction", "Salt Extraction"],
+    ];
+    for (const [id, name] of procDefs) rs.addProcessSpec({ id, name });
 
-  // ---- Southern: commune-olive -----------------------------------------------
-  const oliveReg = new ProcessRegistry();
-  const oliveStore = new PlanStore(oliveReg);
-  const olivePlan = oliveStore.addPlan({ name: "Olive Harvest 2026-Q1" });
-  const oliveProc = oliveReg.register({
-    name: "Olive Pressing",
-    plannedWithin: olivePlan.id,
-  });
-  oliveStore.addCommitment({
-    plannedWithin: olivePlan.id,
-    action: "produce",
-    outputOf: oliveProc.id,
-    provider: "commune-olive",
-    resourceConformsTo: "olive-oil",
-    resourceQuantity: { hasNumericalValue: 100, hasUnit: "liter" },
-  });
+    // recipe-grain-harvest: work → wheat 300 kg
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-wheat-harvest", name: "Wheat Harvest", processConformsTo: "ps-wheat-harvest" });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 80, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "wheat", resourceQuantity: { hasNumericalValue: 300, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-grain-harvest", name: "Grain Harvest", primaryOutput: "wheat", recipeProcesses: [rp.id] });
+    }
+    // recipe-dairy-prod: work → dairy 80 kg
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-dairy-prod", name: "Dairy Production", processConformsTo: "ps-dairy-prod" });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 40, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-dairy-prod", name: "Dairy Production", primaryOutput: "dairy", recipeProcesses: [rp.id] });
+    }
+    // recipe-ore-smithing: ore+work → metal → tools
+    {
+      const rp1 = rs.addRecipeProcess({ id: "rp-ore-smelting", name: "Ore Smelting", processConformsTo: "ps-ore-smelting" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "ore", resourceQuantity: { hasNumericalValue: 120, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp1.id, effortQuantity: { hasNumericalValue: 32, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp1.id, resourceConformsTo: "metal", resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" } });
+      const rp2 = rs.addRecipeProcess({ id: "rp-smithing", name: "Smithing", processConformsTo: "ps-smithing" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp2.id, resourceConformsTo: "metal", resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp2.id, effortQuantity: { hasNumericalValue: 48, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp2.id, resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 80, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-ore-smithing", name: "Ore Smithing", primaryOutput: "tools", recipeProcesses: [rp1.id, rp2.id] });
+    }
+    // recipe-manufacturing: work → goods 60 unit
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-manufacturing", name: "Manufacturing", processConformsTo: "ps-manufacturing" });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 60, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "goods", resourceQuantity: { hasNumericalValue: 60, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-manufacturing", name: "Manufacturing", primaryOutput: "goods", recipeProcesses: [rp.id] });
+    }
+    // recipe-olive-press: work → olive-oil 100 liter
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-olive-pressing", name: "Olive Pressing", processConformsTo: "ps-olive-pressing" });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 50, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 100, hasUnit: "liter" } });
+      rs.addRecipe({ id: "recipe-olive-press", name: "Olive Pressing", primaryOutput: "olive-oil", recipeProcesses: [rp.id] });
+    }
+    // recipe-citrus-harvest: work → citrus 150 kg
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-citrus-harvest", name: "Citrus Harvest", processConformsTo: "ps-citrus-harvest" });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 60, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 150, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-citrus-harvest", name: "Citrus Harvest", primaryOutput: "citrus", recipeProcesses: [rp.id] });
+    }
+    // recipe-grain-milling: wheat → raw-flour → flour
+    {
+      const rp1 = rs.addRecipeProcess({ id: "rp-grain-milling", name: "Grain Milling", processConformsTo: "ps-grain-milling" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "wheat", resourceQuantity: { hasNumericalValue: 200, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp1.id, effortQuantity: { hasNumericalValue: 24, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp1.id, resourceConformsTo: "raw-flour", resourceQuantity: { hasNumericalValue: 160, hasUnit: "kg" } });
+      const rp2 = rs.addRecipeProcess({ id: "rp-flour-sifting", name: "Flour Sifting", processConformsTo: "ps-flour-sifting" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp2.id, resourceConformsTo: "raw-flour", resourceQuantity: { hasNumericalValue: 160, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp2.id, resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 150, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-grain-milling", name: "Grain Milling", primaryOutput: "flour", recipeProcesses: [rp1.id, rp2.id] });
+    }
+    // recipe-bread-baking: flour+dairy+salt → dough → bread
+    {
+      const rp1 = rs.addRecipeProcess({ id: "rp-dough-proofing", name: "Dough Proofing", processConformsTo: "ps-dough-proofing" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp1.id, resourceConformsTo: "dough", resourceQuantity: { hasNumericalValue: 90, hasUnit: "kg" } });
+      const rp2 = rs.addRecipeProcess({ id: "rp-baking", name: "Baking", processConformsTo: "ps-baking" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp2.id, resourceConformsTo: "dough", resourceQuantity: { hasNumericalValue: 90, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp2.id, effortQuantity: { hasNumericalValue: 40, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp2.id, resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 200, hasUnit: "loaf" } });
+      rs.addRecipe({ id: "recipe-bread-baking", name: "Bread Baking", primaryOutput: "bread", recipeProcesses: [rp1.id, rp2.id] });
+    }
+    // recipe-fishing: work → fish 80 kg
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-fishing", name: "Fishing", processConformsTo: "ps-fishing" });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 60, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-fishing", name: "Fishing", primaryOutput: "fish", recipeProcesses: [rp.id] });
+    }
+    // recipe-salt-extraction: work → salt 150 kg
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-salt-extraction", name: "Salt Extraction", processConformsTo: "ps-salt-extraction" });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 40, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 150, hasUnit: "kg" } });
+      rs.addRecipe({ id: "recipe-salt-extraction", name: "Salt Extraction", primaryOutput: "salt", recipeProcesses: [rp.id] });
+    }
 
-  // ---- Southern: commune-citrus ----------------------------------------------
-  const citrusReg = new ProcessRegistry();
-  const citrusStore = new PlanStore(citrusReg);
-  const citrusPlan = citrusStore.addPlan({ name: "Citrus Harvest 2026-Q1" });
-  const citrusProc = citrusReg.register({
-    name: "Citrus Harvest",
-    plannedWithin: citrusPlan.id,
-  });
-  citrusStore.addCommitment({
-    plannedWithin: citrusPlan.id,
-    action: "produce",
-    outputOf: citrusProc.id,
-    provider: "commune-citrus",
-    resourceConformsTo: "citrus",
-    resourceQuantity: { hasNumericalValue: 150, hasUnit: "kg" },
-  });
-  // Lateral receipt: commune-fisher supplies fish to commune-citrus
-  citrusStore.addCommitment({
-    plannedWithin: citrusPlan.id,
-    action: "transfer",
-    provider: "commune-fisher",
-    receiver: "commune-citrus",
-    resourceConformsTo: "fish",
-    resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" },
-  });
+    return rs;
+  }
 
-  // ---- Western: commune-mill (2-step: Grain Milling → Flour Sifting) ---------
-  const millReg = new ProcessRegistry();
-  const millStore = new PlanStore(millReg);
-  const millPlan = millStore.addPlan({ name: "Mill Production 2026-Q1" });
-  const millingProc = millReg.register({
-    name: "Grain Milling",
-    plannedWithin: millPlan.id,
-  });
-  const siftingProc = millReg.register({
-    name: "Flour Sifting",
-    plannedWithin: millPlan.id,
-  });
-  // Milling: wheat + work → raw-flour
-  millStore.addCommitment({
-    plannedWithin: millPlan.id,
-    action: "consume",
-    inputOf: millingProc.id,
-    resourceConformsTo: "wheat",
-    resourceQuantity: { hasNumericalValue: 200, hasUnit: "kg" },
-  });
-  millStore.addCommitment({
-    plannedWithin: millPlan.id,
-    action: "work",
-    inputOf: millingProc.id,
-    provider: "agent-miller",
-    effortQuantity: { hasNumericalValue: 24, hasUnit: "hr" },
-  });
-  millStore.addCommitment({
-    plannedWithin: millPlan.id,
-    action: "produce",
-    outputOf: millingProc.id,
-    resourceConformsTo: "raw-flour",
-    resourceQuantity: { hasNumericalValue: 160, hasUnit: "kg" },
-  });
-  // Sifting: raw-flour → flour
-  millStore.addCommitment({
-    plannedWithin: millPlan.id,
-    action: "consume",
-    inputOf: siftingProc.id,
-    resourceConformsTo: "raw-flour",
-    resourceQuantity: { hasNumericalValue: 160, hasUnit: "kg" },
-  });
-  millStore.addCommitment({
-    plannedWithin: millPlan.id,
-    action: "produce",
-    outputOf: siftingProc.id,
-    resourceConformsTo: "flour",
-    resourceQuantity: { hasNumericalValue: 150, hasUnit: "kg" },
-  });
-  // Standalone transfers (inter-scope supports)
-  millStore.addCommitment({
-    plannedWithin: millPlan.id,
-    action: "transfer",
-    provider: "commune-mill",
-    receiver: "commune-bakery",
-    resourceConformsTo: "flour",
-    resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" },
-  });
-  millStore.addCommitment({
-    plannedWithin: millPlan.id,
-    action: "transfer",
-    provider: "commune-mill",
-    receiver: "commune-forge",
-    resourceConformsTo: "flour",
-    resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" },
-  });
+  const recipeStore = buildFederationRecipes();
 
-  // ---- Western: commune-bakery (2-step: Dough Proofing → Bread Baking) ------
-  const bakeryReg = new ProcessRegistry();
-  const bakeryStore = new PlanStore(bakeryReg);
-  const bakeryPlan = bakeryStore.addPlan({ name: "Bakery Production 2026-Q1" });
-  const proofProc = bakeryReg.register({
-    name: "Dough Proofing",
-    plannedWithin: bakeryPlan.id,
-  });
-  const bakingProc = bakeryReg.register({
-    name: "Bread Baking",
-    plannedWithin: bakeryPlan.id,
-  });
-  // Proofing: flour + dairy → dough
-  bakeryStore.addCommitment({
-    plannedWithin: bakeryPlan.id,
-    action: "consume",
-    inputOf: proofProc.id,
-    resourceConformsTo: "flour",
-    resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" },
-  });
-  bakeryStore.addCommitment({
-    plannedWithin: bakeryPlan.id,
-    action: "consume",
-    inputOf: proofProc.id,
-    resourceConformsTo: "dairy",
-    resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" },
-  });
-  bakeryStore.addCommitment({
-    plannedWithin: bakeryPlan.id,
-    action: "produce",
-    outputOf: proofProc.id,
-    resourceConformsTo: "dough",
-    resourceQuantity: { hasNumericalValue: 90, hasUnit: "kg" },
-  });
-  // Baking: dough + work → bread
-  bakeryStore.addCommitment({
-    plannedWithin: bakeryPlan.id,
-    action: "consume",
-    inputOf: bakingProc.id,
-    resourceConformsTo: "dough",
-    resourceQuantity: { hasNumericalValue: 90, hasUnit: "kg" },
-  });
-  bakeryStore.addCommitment({
-    plannedWithin: bakeryPlan.id,
-    action: "work",
-    inputOf: bakingProc.id,
-    provider: "agent-baker",
-    effortQuantity: { hasNumericalValue: 40, hasUnit: "hr" },
-  });
-  bakeryStore.addCommitment({
-    plannedWithin: bakeryPlan.id,
-    action: "produce",
-    outputOf: bakingProc.id,
-    resourceConformsTo: "bread",
-    resourceQuantity: { hasNumericalValue: 200, hasUnit: "loaf" },
-  });
+  // ---------------------------------------------------------------------------
+  // Per-scope observed resources (inventory — all have custodianScope set)
+  // ---------------------------------------------------------------------------
 
-  // ---- Coastal: commune-fisher -----------------------------------------------
-  const fisherReg = new ProcessRegistry();
-  const fisherStore = new PlanStore(fisherReg);
-  const fisherPlan = fisherStore.addPlan({ name: "Fishing 2026-Q1" });
-  const fishingProc = fisherReg.register({
-    name: "Fishing",
-    plannedWithin: fisherPlan.id,
-  });
-  fisherStore.addCommitment({
-    plannedWithin: fisherPlan.id,
-    action: "produce",
-    outputOf: fishingProc.id,
-    provider: "commune-fisher",
-    resourceConformsTo: "fish",
-    resourceQuantity: { hasNumericalValue: 120, hasUnit: "kg" },
-  });
-  fisherStore.addCommitment({
-    plannedWithin: fisherPlan.id,
-    action: "transfer",
-    provider: "commune-fisher",
-    receiver: "commune-citrus",
-    resourceConformsTo: "fish",
-    resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" },
-  });
-
-  // ---- Coastal: commune-salter (2-step: Brine Extraction → Solar Evaporation) -
-  const salterReg = new ProcessRegistry();
-  const salterStore = new PlanStore(salterReg);
-  const salterPlan = salterStore.addPlan({ name: "Salt Production 2026-Q1" });
-  const brineProc = salterReg.register({
-    name: "Brine Extraction",
-    plannedWithin: salterPlan.id,
-  });
-  const evapProc = salterReg.register({
-    name: "Solar Evaporation",
-    plannedWithin: salterPlan.id,
-  });
-  // Brine extraction
-  salterStore.addCommitment({
-    plannedWithin: salterPlan.id,
-    action: "produce",
-    outputOf: brineProc.id,
-    resourceConformsTo: "brine",
-    resourceQuantity: { hasNumericalValue: 500, hasUnit: "liter" },
-  });
-  // Evaporation: brine → salt
-  salterStore.addCommitment({
-    plannedWithin: salterPlan.id,
-    action: "consume",
-    inputOf: evapProc.id,
-    resourceConformsTo: "brine",
-    resourceQuantity: { hasNumericalValue: 500, hasUnit: "liter" },
-  });
-  salterStore.addCommitment({
-    plannedWithin: salterPlan.id,
-    action: "produce",
-    outputOf: evapProc.id,
-    resourceConformsTo: "salt",
-    resourceQuantity: { hasNumericalValue: 200, hasUnit: "kg" },
-  });
-  // Standalone transfer (inter-scope support)
-  salterStore.addCommitment({
-    plannedWithin: salterPlan.id,
-    action: "transfer",
-    provider: "commune-salter",
-    receiver: "commune-fisher",
-    resourceConformsTo: "salt",
-    resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" },
-  });
-
-  // ---- Per-scope observed resources ------------------------------------------
+  // Safety-stock levels only — kept low so demand exceeds on-hand and recipes fire
   const mockResources = new Map<string, EconomicResource[]>([
-    [
-      "commune-grain",
-      [
-        {
-          id: "res-grain-wheat",
-          name: "Wheat Reserve",
-          conformsTo: "wheat",
-          accountingQuantity: { hasNumericalValue: 100, hasUnit: "kg" },
-          onhandQuantity: { hasNumericalValue: 100, hasUnit: "kg" },
-          primaryAccountable: "commune-grain",
-        },
-      ],
-    ],
-    [
-      "commune-dairy",
-      [
-        {
-          id: "res-dairy-dairy",
-          name: "Dairy Stock",
-          conformsTo: "dairy",
-          accountingQuantity: { hasNumericalValue: 50, hasUnit: "kg" },
-          onhandQuantity: { hasNumericalValue: 50, hasUnit: "kg" },
-          primaryAccountable: "commune-dairy",
-        },
-      ],
-    ],
-    [
-      "commune-forge",
-      [
-        {
-          id: "res-forge-tools",
-          name: "Tool Stock",
-          conformsTo: "tools",
-          accountingQuantity: { hasNumericalValue: 65, hasUnit: "unit" },
-          onhandQuantity: { hasNumericalValue: 65, hasUnit: "unit" },
-          primaryAccountable: "commune-forge",
-        },
-      ],
-    ],
-    [
-      "commune-workshop",
-      [
-        {
-          id: "res-workshop-goods",
-          name: "Goods Stock",
-          conformsTo: "goods",
-          accountingQuantity: { hasNumericalValue: 60, hasUnit: "unit" },
-          onhandQuantity: { hasNumericalValue: 60, hasUnit: "unit" },
-          primaryAccountable: "commune-workshop",
-        },
-      ],
-    ],
-    [
-      "commune-olive",
-      [
-        {
-          id: "res-olive-oil",
-          name: "Olive Oil",
-          conformsTo: "olive-oil",
-          accountingQuantity: { hasNumericalValue: 100, hasUnit: "liter" },
-          onhandQuantity: { hasNumericalValue: 100, hasUnit: "liter" },
-          primaryAccountable: "commune-olive",
-        },
-      ],
-    ],
-    [
-      "commune-citrus",
-      [
-        {
-          id: "res-citrus-fruit",
-          name: "Citrus Fruits",
-          conformsTo: "citrus",
-          accountingQuantity: { hasNumericalValue: 150, hasUnit: "kg" },
-          onhandQuantity: { hasNumericalValue: 150, hasUnit: "kg" },
-          primaryAccountable: "commune-citrus",
-        },
-      ],
-    ],
-    [
-      "commune-mill",
-      [
-        {
-          id: "res-mill-flour",
-          name: "Flour Surplus",
-          conformsTo: "flour",
-          accountingQuantity: { hasNumericalValue: 40, hasUnit: "kg" },
-          onhandQuantity: { hasNumericalValue: 40, hasUnit: "kg" },
-          primaryAccountable: "commune-mill",
-        },
-      ],
-    ],
-    [
-      "commune-bakery",
-      [
-        {
-          id: "res-bakery-bread",
-          name: "Bread Stock",
-          conformsTo: "bread",
-          accountingQuantity: { hasNumericalValue: 200, hasUnit: "loaf" },
-          onhandQuantity: { hasNumericalValue: 200, hasUnit: "loaf" },
-          primaryAccountable: "commune-bakery",
-        },
-      ],
-    ],
-    [
-      "commune-fisher",
-      [
-        {
-          id: "res-fisher-fish",
-          name: "Fish Stock",
-          conformsTo: "fish",
-          accountingQuantity: { hasNumericalValue: 80, hasUnit: "kg" },
-          onhandQuantity: { hasNumericalValue: 80, hasUnit: "kg" },
-          primaryAccountable: "commune-fisher",
-        },
-      ],
-    ],
-    [
-      "commune-salter",
-      [
-        {
-          id: "res-salter-salt",
-          name: "Salt Reserve",
-          conformsTo: "salt",
-          accountingQuantity: { hasNumericalValue: 150, hasUnit: "kg" },
-          onhandQuantity: { hasNumericalValue: 150, hasUnit: "kg" },
-          primaryAccountable: "commune-salter",
-        },
-      ],
-    ],
+    ["commune-grain", [{ id: "res-grain-wheat", name: "Wheat Reserve", conformsTo: "wheat",
+      accountingQuantity: { hasNumericalValue: 40, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 40, hasUnit: "kg" },
+      primaryAccountable: "commune-grain", custodianScope: "commune-grain" }]],
+    ["commune-dairy", [{ id: "res-dairy-dairy", name: "Dairy Stock", conformsTo: "dairy",
+      accountingQuantity: { hasNumericalValue: 15, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 15, hasUnit: "kg" },
+      primaryAccountable: "commune-dairy", custodianScope: "commune-dairy" }]],
+    ["commune-forge", [
+      { id: "res-forge-tools", name: "Tool Stock", conformsTo: "tools",
+        accountingQuantity: { hasNumericalValue: 10, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 10, hasUnit: "unit" },
+        primaryAccountable: "commune-forge", classifiedAs: ["individual-claimable"], custodianScope: "commune-forge" },
+      { id: "res-forge-ore", name: "Iron Ore", conformsTo: "ore",
+        accountingQuantity: { hasNumericalValue: 200, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 200, hasUnit: "kg" },
+        primaryAccountable: "commune-forge", custodianScope: "commune-forge" },
+    ]],
+    ["commune-workshop", [{ id: "res-workshop-goods", name: "Goods Stock", conformsTo: "goods",
+      accountingQuantity: { hasNumericalValue: 8, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 8, hasUnit: "unit" },
+      primaryAccountable: "commune-workshop", custodianScope: "commune-workshop" }]],
+    ["commune-olive", [{ id: "res-olive-oil", name: "Olive Oil", conformsTo: "olive-oil",
+      accountingQuantity: { hasNumericalValue: 18, hasUnit: "liter" }, onhandQuantity: { hasNumericalValue: 18, hasUnit: "liter" },
+      primaryAccountable: "commune-olive", custodianScope: "commune-olive" }]],
+    ["commune-citrus", [{ id: "res-citrus-fruit", name: "Citrus Fruits", conformsTo: "citrus",
+      accountingQuantity: { hasNumericalValue: 30, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 30, hasUnit: "kg" },
+      primaryAccountable: "commune-citrus", classifiedAs: ["individual-claimable"], custodianScope: "commune-citrus" }]],
+    ["commune-mill", [{ id: "res-mill-flour", name: "Flour Reserve", conformsTo: "flour",
+      accountingQuantity: { hasNumericalValue: 12, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 12, hasUnit: "kg" },
+      primaryAccountable: "commune-mill", custodianScope: "commune-mill" }]],
+    ["commune-bakery", [{ id: "res-bakery-bread", name: "Bread Stock", conformsTo: "bread",
+      accountingQuantity: { hasNumericalValue: 25, hasUnit: "loaf" }, onhandQuantity: { hasNumericalValue: 25, hasUnit: "loaf" },
+      primaryAccountable: "commune-bakery", classifiedAs: ["individual-claimable"], custodianScope: "commune-bakery" }]],
+    ["commune-fisher", [{ id: "res-fisher-fish", name: "Fish Stock", conformsTo: "fish",
+      accountingQuantity: { hasNumericalValue: 20, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 20, hasUnit: "kg" },
+      primaryAccountable: "commune-fisher", custodianScope: "commune-fisher" }]],
+    ["commune-salter", [{ id: "res-salter-salt", name: "Salt Reserve", conformsTo: "salt",
+      accountingQuantity: { hasNumericalValue: 35, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 35, hasUnit: "kg" },
+      primaryAccountable: "commune-salter", classifiedAs: ["individual-claimable"], custodianScope: "commune-salter" }]],
   ]);
 
-  // ---- Scope plan results ----------------------------------------------------
-  const emptyResult = (): ScopePlanResult => ({
-    planStore: new PlanStore(new ProcessRegistry()),
-    purchaseIntents: [],
-    surplus: [],
-    unmetDemand: [],
-    metabolicDebt: [],
-    laborGaps: [],
-    deficits: [],
-  });
-
-  const mockByScope = new Map<string, ScopePlanResult>([
-    // Hubs — no direct signals
-    ["universal-commune", emptyResult()],
-    ["northern-federation", emptyResult()],
-    ["eastern-federation", emptyResult()],
-    ["southern-federation", emptyResult()],
-    ["western-federation", emptyResult()],
-    ["coastal-federation", emptyResult()],
-
-    // Northern communes
-    [
-      "commune-grain",
-      {
-        planStore: grainStore,
-        purchaseIntents: [],
-        surplus: [
-          {
-            plannedWithin: grainPlan.id,
-            specId: "wheat",
-            quantity: 100,
-            availableFrom: "2026-03-18",
-          },
-        ],
-        unmetDemand: [],
-        metabolicDebt: [],
-        laborGaps: [],
-        deficits: [
-          {
-            plannedWithin: grainPlan.id,
-            intentId: "intent-grain-tools",
-            specId: "tools",
-            action: "transfer",
-            shortfall: 0,
-            originalShortfall: 15,
-            resolvedAt: ["commune-forge"],
-            source: "unmet_demand",
-          },
-        ],
-      },
-    ],
-    [
-      "commune-dairy",
-      {
-        planStore: dairyStore,
-        purchaseIntents: [],
-        surplus: [
-          {
-            plannedWithin: dairyPlan.id,
-            specId: "dairy",
-            quantity: 50,
-            availableFrom: "2026-03-17",
-          },
-        ],
-        unmetDemand: [],
-        metabolicDebt: [],
-        laborGaps: [],
-        deficits: [],
-      },
-    ],
-
-    // Eastern communes
-    [
-      "commune-forge",
-      {
-        planStore: forgeStore,
-        purchaseIntents: [],
-        surplus: [
-          {
-            plannedWithin: forgePlan.id,
-            specId: "tools",
-            quantity: 65,
-            availableFrom: "2026-03-20",
-          },
-        ],
-        unmetDemand: [],
-        metabolicDebt: [],
-        laborGaps: [],
-        deficits: [
-          {
-            plannedWithin: forgePlan.id,
-            intentId: "intent-forge-flour",
-            specId: "flour",
-            action: "transfer",
-            shortfall: 0,
-            originalShortfall: 30,
-            resolvedAt: ["commune-mill"],
-            source: "unmet_demand",
-          },
-        ],
-      },
-    ],
-    [
-      "commune-workshop",
-      {
-        planStore: workshopStore,
-        purchaseIntents: [],
-        surplus: [
-          {
-            plannedWithin: workshopPlan.id,
-            specId: "goods",
-            quantity: 60,
-            availableFrom: "2026-03-22",
-          },
-        ],
-        unmetDemand: [],
-        metabolicDebt: [],
-        laborGaps: [],
-        deficits: [],
-      },
-    ],
-
-    // Southern communes
-    [
-      "commune-olive",
-      {
-        planStore: oliveStore,
-        purchaseIntents: [],
-        surplus: [
-          {
-            plannedWithin: olivePlan.id,
-            specId: "olive-oil",
-            quantity: 100,
-            availableFrom: "2026-03-25",
-          },
-        ],
-        unmetDemand: [],
-        metabolicDebt: [],
-        laborGaps: [],
-        deficits: [],
-      },
-    ],
-    [
-      "commune-citrus",
-      {
-        planStore: citrusStore,
-        purchaseIntents: [],
-        surplus: [
-          {
-            plannedWithin: citrusPlan.id,
-            specId: "citrus",
-            quantity: 150,
-            availableFrom: "2026-03-24",
-          },
-        ],
-        unmetDemand: [],
-        metabolicDebt: [],
-        laborGaps: [],
-        deficits: [
-          {
-            plannedWithin: citrusPlan.id,
-            intentId: "intent-citrus-fish",
-            specId: "fish",
-            action: "transfer",
-            shortfall: 0,
-            originalShortfall: 40,
-            resolvedAt: ["commune-fisher"],
-            source: "unmet_demand",
-          },
-        ],
-      },
-    ],
-
-    // Western communes
-    [
-      "commune-mill",
-      {
-        planStore: millStore,
-        purchaseIntents: [],
-        surplus: [
-          {
-            plannedWithin: millPlan.id,
-            specId: "flour",
-            quantity: 40,
-            availableFrom: "2026-03-20",
-          },
-        ],
-        unmetDemand: [],
-        metabolicDebt: [],
-        laborGaps: [],
-        deficits: [
-          {
-            plannedWithin: millPlan.id,
-            intentId: "intent-mill-wheat",
-            specId: "wheat",
-            action: "transfer",
-            shortfall: 0,
-            originalShortfall: 200,
-            resolvedAt: ["commune-grain"],
-            source: "unmet_demand",
-          },
-        ],
-      },
-    ],
-    [
-      "commune-bakery",
-      {
-        planStore: bakeryStore,
-        purchaseIntents: [],
-        surplus: [
-          {
-            plannedWithin: bakeryPlan.id,
-            specId: "bread",
-            quantity: 200,
-            availableFrom: "2026-03-22",
-          },
-        ],
-        unmetDemand: [],
-        metabolicDebt: [],
-        laborGaps: [],
-        deficits: [
-          {
-            plannedWithin: bakeryPlan.id,
-            intentId: "intent-bakery-flour",
-            specId: "flour",
-            action: "transfer",
-            shortfall: 0,
-            originalShortfall: 80,
-            resolvedAt: ["commune-mill"],
-            source: "unmet_demand",
-          },
-          {
-            plannedWithin: bakeryPlan.id,
-            intentId: "intent-bakery-dairy",
-            specId: "dairy",
-            action: "transfer",
-            shortfall: 0,
-            originalShortfall: 30,
-            resolvedAt: ["commune-dairy"],
-            source: "unmet_demand",
-          },
-        ],
-      },
-    ],
-
-    // Coastal communes
-    [
-      "commune-fisher",
-      {
-        planStore: fisherStore,
-        purchaseIntents: [],
-        surplus: [
-          {
-            plannedWithin: fisherPlan.id,
-            specId: "fish",
-            quantity: 80,
-            availableFrom: "2026-03-19",
-          },
-        ],
-        unmetDemand: [],
-        metabolicDebt: [],
-        laborGaps: [],
-        deficits: [],
-      },
-    ],
-    [
-      "commune-salter",
-      {
-        planStore: salterStore,
-        purchaseIntents: [],
-        surplus: [
-          {
-            plannedWithin: salterPlan.id,
-            specId: "salt",
-            quantity: 150,
-            availableFrom: "2026-03-18",
-          },
-        ],
-        unmetDemand: [],
-        metabolicDebt: [],
-        laborGaps: [],
-        deficits: [],
-      },
-    ],
-  ]);
-
-  const mockPlanOrder = [
-    "commune-grain",
-    "commune-dairy",
-    "commune-forge",
-    "commune-workshop",
-    "commune-olive",
-    "commune-citrus",
-    "commune-mill",
-    "commune-bakery",
-    "commune-fisher",
-    "commune-salter",
-    "northern-federation",
-    "eastern-federation",
-    "southern-federation",
-    "western-federation",
-    "coastal-federation",
-    "universal-commune",
-  ];
-
-  const parentMap: Record<string, string> = {
-    "northern-federation": "universal-commune",
-    "eastern-federation": "universal-commune",
-    "southern-federation": "universal-commune",
-    "western-federation": "universal-commune",
-    "coastal-federation": "universal-commune",
-    "commune-grain": "northern-federation",
-    "commune-dairy": "northern-federation",
-    "commune-forge": "eastern-federation",
-    "commune-workshop": "eastern-federation",
-    "commune-olive": "southern-federation",
-    "commune-citrus": "southern-federation",
-    "commune-mill": "western-federation",
-    "commune-bakery": "western-federation",
-    "commune-fisher": "coastal-federation",
-    "commune-salter": "coastal-federation",
-  };
-
-  function mockParentOf(id: string): string | undefined {
-    return parentMap[id];
-  }
-
-  // 5 cross-federation inter-scope supports
-  const mockTradeProposals: TradeProposal[] = [
-    {
-      id: "trade-grain-mill",
-      fromScopeId: "commune-grain",
-      toScopeId: "commune-mill",
-      specId: "wheat",
-      quantity: 200,
-      status: "proposed",
-    },
-    {
-      id: "trade-forge-grain",
-      fromScopeId: "commune-forge",
-      toScopeId: "commune-grain",
-      specId: "tools",
-      quantity: 15,
-      status: "proposed",
-    },
-    {
-      id: "trade-dairy-bakery",
-      fromScopeId: "commune-dairy",
-      toScopeId: "commune-bakery",
-      specId: "dairy",
-      quantity: 30,
-      status: "accepted",
-    },
-    {
-      id: "trade-mill-forge",
-      fromScopeId: "commune-mill",
-      toScopeId: "commune-forge",
-      specId: "flour",
-      quantity: 30,
-      status: "proposed",
-    },
-    {
-      id: "trade-fisher-citrus",
-      fromScopeId: "commune-fisher",
-      toScopeId: "commune-citrus",
-      specId: "fish",
-      quantity: 40,
-      status: "settled",
-    },
-  ];
-
-  // Federation event log
-  const mockEvents: FederationEvent[] = [
-    // Round 0: bottom-up pass (leaves → federations → UC)
-    { kind: "scope-planned", round: 0, scopeId: "commune-grain" },
-    { kind: "scope-planned", round: 0, scopeId: "commune-dairy" },
-    { kind: "scope-planned", round: 0, scopeId: "commune-forge" },
-    { kind: "scope-planned", round: 0, scopeId: "commune-workshop" },
-    { kind: "scope-planned", round: 0, scopeId: "commune-olive" },
-    { kind: "scope-planned", round: 0, scopeId: "commune-citrus" },
-    { kind: "scope-planned", round: 0, scopeId: "commune-mill" },
-    { kind: "scope-planned", round: 0, scopeId: "commune-bakery" },
-    { kind: "scope-planned", round: 0, scopeId: "commune-fisher" },
-    { kind: "scope-planned", round: 0, scopeId: "commune-salter" },
-    { kind: "scope-planned", round: 0, scopeId: "northern-federation" },
-    { kind: "scope-planned", round: 0, scopeId: "eastern-federation" },
-    { kind: "scope-planned", round: 0, scopeId: "southern-federation" },
-    { kind: "scope-planned", round: 0, scopeId: "western-federation" },
-    { kind: "scope-planned", round: 0, scopeId: "coastal-federation" },
-    { kind: "scope-planned", round: 0, scopeId: "universal-commune" },
-    // Round 1: surplus pool
-    {
-      kind: "surplus-offered",
-      round: 1,
-      scopeId: "commune-grain",
-      specId: "wheat",
-      quantity: 100,
-    },
-    {
-      kind: "surplus-offered",
-      round: 1,
-      scopeId: "commune-dairy",
-      specId: "dairy",
-      quantity: 50,
-    },
-    {
-      kind: "surplus-offered",
-      round: 1,
-      scopeId: "commune-forge",
-      specId: "tools",
-      quantity: 65,
-    },
-    {
-      kind: "surplus-offered",
-      round: 1,
-      scopeId: "commune-workshop",
-      specId: "goods",
-      quantity: 60,
-    },
-    {
-      kind: "surplus-offered",
-      round: 1,
-      scopeId: "commune-olive",
-      specId: "olive-oil",
-      quantity: 100,
-    },
-    {
-      kind: "surplus-offered",
-      round: 1,
-      scopeId: "commune-citrus",
-      specId: "citrus",
-      quantity: 150,
-    },
-    {
-      kind: "surplus-offered",
-      round: 1,
-      scopeId: "commune-mill",
-      specId: "flour",
-      quantity: 40,
-    },
-    {
-      kind: "surplus-offered",
-      round: 1,
-      scopeId: "commune-bakery",
-      specId: "bread",
-      quantity: 200,
-    },
-    {
-      kind: "surplus-offered",
-      round: 1,
-      scopeId: "commune-fisher",
-      specId: "fish",
-      quantity: 80,
-    },
-    {
-      kind: "surplus-offered",
-      round: 1,
-      scopeId: "commune-salter",
-      specId: "salt",
-      quantity: 150,
-    },
-    // Round 1: cross-federation deficits announced
-    {
-      kind: "deficit-announced",
-      round: 1,
-      scopeId: "commune-mill",
-      specId: "wheat",
-      quantity: 200,
-    },
-    {
-      kind: "deficit-announced",
-      round: 1,
-      scopeId: "commune-grain",
-      specId: "tools",
-      quantity: 15,
-    },
-    {
-      kind: "deficit-announced",
-      round: 1,
-      scopeId: "commune-bakery",
-      specId: "dairy",
-      quantity: 30,
-    },
-    {
-      kind: "deficit-announced",
-      round: 1,
-      scopeId: "commune-forge",
-      specId: "flour",
-      quantity: 30,
-    },
-    {
-      kind: "deficit-announced",
-      round: 1,
-      scopeId: "commune-citrus",
-      specId: "fish",
-      quantity: 40,
-    },
-    // Round 1: lateral matches resolved
-    {
-      kind: "lateral-match",
-      round: 1,
-      scopeId: "commune-grain",
-      targetScopeId: "commune-mill",
-      specId: "wheat",
-      quantity: 200,
-    },
-    {
-      kind: "lateral-match",
-      round: 1,
-      scopeId: "commune-forge",
-      targetScopeId: "commune-grain",
-      specId: "tools",
-      quantity: 15,
-    },
-    {
-      kind: "lateral-match",
-      round: 1,
-      scopeId: "commune-dairy",
-      targetScopeId: "commune-bakery",
-      specId: "dairy",
-      quantity: 30,
-    },
-    {
-      kind: "lateral-match",
-      round: 1,
-      scopeId: "commune-mill",
-      targetScopeId: "commune-forge",
-      specId: "flour",
-      quantity: 30,
-    },
-    {
-      kind: "lateral-match",
-      round: 1,
-      scopeId: "commune-fisher",
-      targetScopeId: "commune-citrus",
-      specId: "fish",
-      quantity: 40,
-    },
-  ];
-
-  const mockRegistry = new StoreRegistry();
-
-  // Per-scope observers seeded from mockResources
-  const mockObservers = new Map<string, Observer>();
-  for (const [scopeId, resources] of mockResources) {
-    const obs = new Observer();
-    for (const r of resources) obs.seedResource(r);
-    mockObservers.set(scopeId, obs);
-  }
-
-  // ---- Buffer zones per scope -----------------------------------------------
+  // ---- Buffer zones per scope (spec-based, unchanged) -----------------------
   const mockBufferZones = new Map([
     ["commune-forge", [{ specId: "tools", tor: 25, toy: 50, tog: 80 }]],
     ["commune-mill", [{ specId: "flour", tor: 30, toy: 70, tog: 150 }]],
@@ -1134,64 +211,127 @@
     ["commune-fisher", [{ specId: "fish", tor: 20, toy: 50, tog: 120 }]],
   ]);
 
-  // ---- Capacity buffers per scope --------------------------------------------
-  const mockCapacityBuffers = new Map([
-    [
-      "commune-forge",
-      [
-        {
-          processId: smeltProc.id,
-          currentLoadHours: 30,
-          totalCapacityHours: 40,
-        },
-        {
-          processId: smithProc.id,
-          currentLoadHours: 46,
-          totalCapacityHours: 50,
-        },
-      ],
-    ],
-    [
-      "commune-mill",
-      [
-        {
-          processId: millingProc.id,
-          currentLoadHours: 18,
-          totalCapacityHours: 30,
-        },
-        {
-          processId: siftingProc.id,
-          currentLoadHours: 27,
-          totalCapacityHours: 30,
-        },
-      ],
-    ],
-    [
-      "commune-bakery",
-      [
-        {
-          processId: proofProc.id,
-          currentLoadHours: 32,
-          totalCapacityHours: 48,
-        },
-        {
-          processId: bakingProc.id,
-          currentLoadHours: 46,
-          totalCapacityHours: 48,
-        },
-      ],
-    ],
-    [
-      "commune-grain",
-      [
-        {
-          processId: grainProc.id,
-          currentLoadHours: 70,
-          totalCapacityHours: 100,
-        },
-      ],
-    ],
+  const parentMap: Record<string, string> = {
+    "agri-federation": "universal-commune",
+    "manufacturing-federation": "universal-commune",
+    "horticulture-federation": "universal-commune",
+    "food-processing-federation": "universal-commune",
+    "maritime-federation": "universal-commune",
+    "commune-grain": "agri-federation",
+    "commune-dairy": "agri-federation",
+    "commune-forge": "manufacturing-federation",
+    "commune-workshop": "manufacturing-federation",
+    "commune-olive": "horticulture-federation",
+    "commune-citrus": "horticulture-federation",
+    "commune-mill": "food-processing-federation",
+    "commune-bakery": "food-processing-federation",
+    "commune-fisher": "maritime-federation",
+    "commune-salter": "maritime-federation",
+  };
+
+  function mockParentOf(id: string): string | undefined {
+    return parentMap[id];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Demand intents — infra cross-scope needs + claimable demands
+  // ---------------------------------------------------------------------------
+
+  let demandIntents = $state<Intent[]>([
+    // Infra: 5 cross-federation exchanges
+    { id: "di-mill-wheat",   action: "transfer", resourceConformsTo: "wheat", resourceQuantity: { hasNumericalValue: 200, hasUnit: "kg"   }, inScopeOf: ["commune-mill"],    due: "2026-04-01" },
+    { id: "di-grain-tools",  action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 15,  hasUnit: "unit" }, inScopeOf: ["commune-grain"],   due: "2026-04-01" },
+    { id: "di-bakery-dairy", action: "transfer", resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 30,  hasUnit: "kg"   }, inScopeOf: ["commune-bakery"],  due: "2026-04-01" },
+    { id: "di-forge-flour",  action: "transfer", resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 30,  hasUnit: "kg"   }, inScopeOf: ["commune-forge"],   due: "2026-04-01" },
+    { id: "di-citrus-fish",  action: "transfer", resourceConformsTo: "fish",  resourceQuantity: { hasNumericalValue: 40,  hasUnit: "kg"   }, inScopeOf: ["commune-citrus"],  due: "2026-04-01" },
+    // Claimable: bread
+    { id: "ci-grain-bread",    action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 30, hasUnit: "loaf" }, inScopeOf: ["commune-grain"],    due: "2026-04-01" },
+    { id: "ci-dairy-bread",    action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 20, hasUnit: "loaf" }, inScopeOf: ["commune-dairy"],    due: "2026-04-01" },
+    { id: "ci-forge-bread",    action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 20, hasUnit: "loaf" }, inScopeOf: ["commune-forge"],    due: "2026-04-01" },
+    { id: "ci-workshop-bread", action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 25, hasUnit: "loaf" }, inScopeOf: ["commune-workshop"], due: "2026-04-01" },
+    { id: "ci-olive-bread",    action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 20, hasUnit: "loaf" }, inScopeOf: ["commune-olive"],    due: "2026-04-01" },
+    { id: "ci-fisher-bread",   action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 25, hasUnit: "loaf" }, inScopeOf: ["commune-fisher"],   due: "2026-04-01" },
+    { id: "ci-salter-bread",   action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 20, hasUnit: "loaf" }, inScopeOf: ["commune-salter"],   due: "2026-04-01" },
+    // Claimable: salt
+    { id: "ci-grain-salt",     action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg"   }, inScopeOf: ["commune-grain"],    due: "2026-04-01" },
+    { id: "ci-workshop-salt",  action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 18, hasUnit: "kg"   }, inScopeOf: ["commune-workshop"], due: "2026-04-01" },
+    { id: "ci-olive-salt",     action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 12, hasUnit: "kg"   }, inScopeOf: ["commune-olive"],    due: "2026-04-01" },
+    { id: "ci-citrus-salt",    action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg"   }, inScopeOf: ["commune-citrus"],   due: "2026-04-01" },
+    { id: "ci-mill-salt",      action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 10, hasUnit: "kg"   }, inScopeOf: ["commune-mill"],     due: "2026-04-01" },
+    { id: "ci-bakery-salt",    action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg"   }, inScopeOf: ["commune-bakery"],   due: "2026-04-01" },
+    // Claimable: tools
+    { id: "ci-dairy-tools",    action: "transfer", resourceConformsTo: "tools",  resourceQuantity: { hasNumericalValue:  8, hasUnit: "unit" }, inScopeOf: ["commune-dairy"],    due: "2026-04-01" },
+    { id: "ci-mill-tools",     action: "transfer", resourceConformsTo: "tools",  resourceQuantity: { hasNumericalValue: 10, hasUnit: "unit" }, inScopeOf: ["commune-mill"],     due: "2026-04-01" },
+    { id: "ci-fisher-tools",   action: "transfer", resourceConformsTo: "tools",  resourceQuantity: { hasNumericalValue: 12, hasUnit: "unit" }, inScopeOf: ["commune-fisher"],   due: "2026-04-01" },
+    { id: "ci-bakery-tools",   action: "transfer", resourceConformsTo: "tools",  resourceQuantity: { hasNumericalValue:  8, hasUnit: "unit" }, inScopeOf: ["commune-bakery"],   due: "2026-04-01" },
+    { id: "ci-citrus-tools",   action: "transfer", resourceConformsTo: "tools",  resourceQuantity: { hasNumericalValue:  6, hasUnit: "unit" }, inScopeOf: ["commune-citrus"],   due: "2026-04-01" },
+    // Claimable: citrus
+    { id: "ci-forge-citrus",   action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg"   }, inScopeOf: ["commune-forge"],    due: "2026-04-01" },
+    { id: "ci-workshop-citrus",action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg"   }, inScopeOf: ["commune-workshop"], due: "2026-04-01" },
+    { id: "ci-mill-citrus",    action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg"   }, inScopeOf: ["commune-mill"],     due: "2026-04-01" },
+    { id: "ci-fisher-citrus",  action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg"   }, inScopeOf: ["commune-fisher"],   due: "2026-04-01" },
+    { id: "ci-salter-citrus",  action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 18, hasUnit: "kg"   }, inScopeOf: ["commune-salter"],   due: "2026-04-01" },
+    { id: "ci-bakery-citrus",  action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 22, hasUnit: "kg"   }, inScopeOf: ["commune-bakery"],   due: "2026-04-01" },
+    // Cross-scope: connect mill → bakery flour flow
+    { id: "di-bakery-flour",   action: "transfer", resourceConformsTo: "flour",  resourceQuantity: { hasNumericalValue: 80,  hasUnit: "kg"   }, inScopeOf: ["commune-bakery"],   due: "2026-04-01" },
   ]);
+
+  // ---------------------------------------------------------------------------
+  // Combined Observer + indexes
+  // ---------------------------------------------------------------------------
+
+  const combinedObserver = new Observer();
+  const allInventory = [...mockResources.values()].flat();
+  for (const r of allInventory) combinedObserver.seedResource(r);
+
+  const parentOfMap = new Map(Object.entries(parentMap));
+  const emptyAgentIndex = buildAgentIndex([], [], new Map());
+
+  // Produce intents: each commune's committed production run.
+  // Phase B of planForScope sees these as supply slots → generates SurplusSignal → lateral matching has a non-empty surplusPool.
+  const produceIntents: Intent[] = [
+    // Primary harvesters / extractors — no inputs needed
+    { id: "pi-grain-wheat",    action: "produce", outputOf: "proc-wheat-harvest",    resourceConformsTo: "wheat",     resourceQuantity: { hasNumericalValue: 320,  hasUnit: "kg"    }, inScopeOf: ["commune-grain"]    },
+    { id: "pi-dairy-dairy",    action: "produce", outputOf: "proc-dairy-prod",        resourceConformsTo: "dairy",     resourceQuantity: { hasNumericalValue: 80,   hasUnit: "kg"    }, inScopeOf: ["commune-dairy"]    },
+    { id: "pi-forge-tools",    action: "produce", outputOf: "proc-smithing",          resourceConformsTo: "tools",     resourceQuantity: { hasNumericalValue: 80,   hasUnit: "unit"  }, inScopeOf: ["commune-forge"]    },
+    { id: "pi-workshop-goods", action: "produce", outputOf: "proc-manufacturing",     resourceConformsTo: "goods",     resourceQuantity: { hasNumericalValue: 60,   hasUnit: "unit"  }, inScopeOf: ["commune-workshop"] },
+    { id: "pi-olive-oil",      action: "produce", outputOf: "proc-olive-press",       resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 100,  hasUnit: "liter" }, inScopeOf: ["commune-olive"]    },
+    { id: "pi-citrus-citrus",  action: "produce", outputOf: "proc-citrus-harvest",    resourceConformsTo: "citrus",    resourceQuantity: { hasNumericalValue: 150,  hasUnit: "kg"    }, inScopeOf: ["commune-citrus"]   },
+    // Processors — produce output from inputs sourced via lateral matching
+    { id: "pi-mill-flour",     action: "produce", outputOf: "proc-grain-milling",     resourceConformsTo: "flour",     resourceQuantity: { hasNumericalValue: 160,  hasUnit: "kg"    }, inScopeOf: ["commune-mill"]     },
+    { id: "pi-bakery-bread",   action: "produce", outputOf: "proc-bread-baking",      resourceConformsTo: "bread",     resourceQuantity: { hasNumericalValue: 200,  hasUnit: "loaf"  }, inScopeOf: ["commune-bakery"]   },
+    { id: "pi-fisher-fish",    action: "produce", outputOf: "proc-fishing",           resourceConformsTo: "fish",      resourceQuantity: { hasNumericalValue: 80,   hasUnit: "kg"    }, inScopeOf: ["commune-fisher"]   },
+    { id: "pi-salter-salt",    action: "produce", outputOf: "proc-salt-extraction",   resourceConformsTo: "salt",      resourceQuantity: { hasNumericalValue: 160,  hasUnit: "kg"    }, inScopeOf: ["commune-salter"]   },
+  ];
+
+  // Supply index = on-hand inventory + committed produce intents (Stratum 2a).
+  // Phase B sees produce intents as forward-scheduled outputs → SurplusSignal generation.
+  const supplyIndex = buildIndependentSupplyIndex(allInventory, produceIntents, [], emptyAgentIndex, new Map());
+
+  // Reactive demand index — re-derives whenever demandIntents changes
+  const demandIndex = $derived(buildIndependentDemandIndex(demandIntents, [], [], new Map()));
+
+  // ---------------------------------------------------------------------------
+  // planFederation — reactive, re-runs when demandIndex changes
+  // ---------------------------------------------------------------------------
+
+  const federationResult = $derived.by(() => planFederation(
+    [
+      "commune-grain", "commune-dairy", "commune-forge", "commune-workshop",
+      "commune-olive", "commune-citrus", "commune-mill", "commune-bakery",
+      "commune-fisher", "commune-salter",
+      "agri-federation", "manufacturing-federation", "horticulture-federation",
+      "food-processing-federation", "maritime-federation", "universal-commune",
+    ],
+    { from: new Date("2026-03-15"), to: new Date("2026-06-30") },
+    {
+      recipeStore,
+      observer: combinedObserver,
+      demandIndex,
+      supplyIndex,
+      parentOf: parentOfMap,
+    },
+  ));
 
   // ---------------------------------------------------------------------------
   // Hub analytics — coherence, self-sufficiency, net flows
@@ -1199,40 +339,27 @@
 
   // Leaf communes for each hub (direct members only; UC flattens all leaves)
   const federationLeaves: Record<string, string[]> = {
-    "northern-federation": ["commune-grain", "commune-dairy"],
-    "eastern-federation": ["commune-forge", "commune-workshop"],
-    "southern-federation": ["commune-olive", "commune-citrus"],
-    "western-federation": ["commune-mill", "commune-bakery"],
-    "coastal-federation": ["commune-fisher", "commune-salter"],
+    "agri-federation": ["commune-grain", "commune-dairy"],
+    "manufacturing-federation": ["commune-forge", "commune-workshop"],
+    "horticulture-federation": ["commune-olive", "commune-citrus"],
+    "food-processing-federation": ["commune-mill", "commune-bakery"],
+    "maritime-federation": ["commune-fisher", "commune-salter"],
     "universal-commune": [
-      "commune-grain",
-      "commune-dairy",
-      "commune-forge",
-      "commune-workshop",
-      "commune-olive",
-      "commune-citrus",
-      "commune-mill",
-      "commune-bakery",
-      "commune-fisher",
-      "commune-salter",
+      "commune-grain", "commune-dairy", "commune-forge", "commune-workshop",
+      "commune-olive", "commune-citrus", "commune-mill", "commune-bakery",
+      "commune-fisher", "commune-salter",
     ],
   };
   const hubIds = new Set(Object.keys(federationLeaves));
-  function isHub(id: string): boolean {
-    return hubIds.has(id);
-  }
-
-  function getLeaves(hubId: string): string[] {
-    return federationLeaves[hubId] ?? [];
-  }
+  function isHub(id: string): boolean { return hubIds.has(id); }
+  function getLeaves(hubId: string): string[] { return federationLeaves[hubId] ?? []; }
 
   // % of leaf deficits fully resolved
   function computeCoherence(hubId: string): number {
     const leaves = getLeaves(hubId);
-    let total = 0,
-      resolved = 0;
+    let total = 0, resolved = 0;
     for (const id of leaves) {
-      for (const d of mockByScope.get(id)?.deficits ?? []) {
+      for (const d of federationResult.byScope.get(id)?.deficits ?? []) {
         total++;
         if (d.shortfall === 0) resolved++;
       }
@@ -1244,32 +371,25 @@
   function computeSufficiency(hubId: string): number {
     if (hubId === "universal-commune") return 1;
     const leafSet = new Set(getLeaves(hubId));
-    let total = 0,
-      internal = 0;
+    let total = 0, internal = 0;
     for (const id of leafSet) {
-      for (const d of mockByScope.get(id)?.deficits ?? []) {
+      for (const d of federationResult.byScope.get(id)?.deficits ?? []) {
         total++;
         const resolvers = d.resolvedAt ?? [];
-        if (resolvers.length > 0 && resolvers.every((s) => leafSet.has(s)))
-          internal++;
+        if (resolvers.length > 0 && resolvers.every((s) => leafSet.has(s))) internal++;
       }
     }
     return total === 0 ? 1 : internal / total;
   }
 
   // Aggregate net surplus pool across leaves (by spec)
-  function computeSurplusPool(
-    hubId: string,
-  ): { specId: string; quantity: number }[] {
+  function computeSurplusPool(hubId: string): { specId: string; quantity: number }[] {
     const map = new Map<string, number>();
     for (const id of getLeaves(hubId)) {
-      for (const s of mockByScope.get(id)?.surplus ?? [])
+      for (const s of federationResult.byScope.get(id)?.surplus ?? [])
         map.set(s.specId, (map.get(s.specId) ?? 0) + s.quantity);
     }
-    return [...map.entries()].map(([specId, quantity]) => ({
-      specId,
-      quantity,
-    }));
+    return [...map.entries()].map(([specId, quantity]) => ({ specId, quantity }));
   }
 
   // External trade flows crossing federation boundary (or everything for UC)
@@ -1277,13 +397,11 @@
     const leafSet = new Set(getLeaves(hubId));
     const exMap = new Map<string, number>();
     const imMap = new Map<string, number>();
-    for (const t of mockTradeProposals) {
+    for (const t of federationResult.tradeProposals) {
       const fromIn = leafSet.has(t.fromScopeId);
       const toIn = leafSet.has(t.toScopeId);
-      if (fromIn && !toIn)
-        exMap.set(t.specId, (exMap.get(t.specId) ?? 0) + t.quantity);
-      else if (!fromIn && toIn)
-        imMap.set(t.specId, (imMap.get(t.specId) ?? 0) + t.quantity);
+      if (fromIn && !toIn) exMap.set(t.specId, (exMap.get(t.specId) ?? 0) + t.quantity);
+      else if (!fromIn && toIn) imMap.set(t.specId, (imMap.get(t.specId) ?? 0) + t.quantity);
     }
     return {
       exports: [...exMap.entries()].map(([specId, qty]) => ({ specId, qty })),
@@ -1294,18 +412,12 @@
   // Per-member health for a hub (green=surplus only, yellow=resolved deficit, red=unresolved)
   function computeMemberHealth(hubId: string) {
     return getLeaves(hubId).map((id) => {
-      const r = mockByScope.get(id);
+      const r = federationResult.byScope.get(id);
       const unresolved = r?.deficits.filter((d) => d.shortfall > 0).length ?? 0;
-      const resolved = r?.deficits.filter((d) => d.shortfall === 0).length ?? 0;
-      const surplus = r?.surplus.length ?? 0;
+      const resolved   = r?.deficits.filter((d) => d.shortfall === 0).length ?? 0;
+      const surplus    = r?.surplus.length ?? 0;
       const status: "red" | "yellow" | "green" | "dim" =
-        unresolved > 0
-          ? "red"
-          : resolved > 0
-            ? "yellow"
-            : surplus > 0
-              ? "green"
-              : "dim";
+        unresolved > 0 ? "red" : resolved > 0 ? "yellow" : surplus > 0 ? "green" : "dim";
       return { id, status };
     });
   }
@@ -1315,28 +427,28 @@
     return Object.keys(federationLeaves)
       .filter((id) => id !== "universal-commune")
       .map((fedId) => {
-        const coherence = computeCoherence(fedId);
+        const coherence   = computeCoherence(fedId);
         const sufficiency = computeSufficiency(fedId);
-        const flows = computeNetFlows(fedId);
-        return {
-          fedId,
-          coherence,
-          sufficiency,
-          exports: flows.exports,
-          imports: flows.imports,
-        };
+        const flows       = computeNetFlows(fedId);
+        return { fedId, coherence, sufficiency, exports: flows.exports, imports: flows.imports };
       });
   }
 
-  function pct(n: number): string {
-    return `${Math.round(n * 100)}%`;
-  }
-  function coherenceColor(n: number): string {
-    return n >= 1 ? "#68d391" : n >= 0.8 ? "#d69e2e" : "#e53e3e";
-  }
-  function sufficiencyColor(n: number): string {
-    return n >= 0.8 ? "#68d391" : n >= 0.4 ? "#d69e2e" : "#b0c4f0";
-  }
+  function pct(n: number): string { return `${Math.round(n * 100)}%`; }
+  function coherenceColor(n: number): string { return n >= 1 ? "#68d391" : n >= 0.8 ? "#d69e2e" : "#e53e3e"; }
+  function sufficiencyColor(n: number): string { return n >= 0.8 ? "#68d391" : n >= 0.4 ? "#d69e2e" : "#b0c4f0"; }
+
+  // ---------------------------------------------------------------------------
+  // Proposal pruning
+  // ---------------------------------------------------------------------------
+
+  let rejectedTradeIds = $state(new Set<string>());
+  function rejectTrade(id: string) { rejectedTradeIds = new Set([...rejectedTradeIds, id]); }
+  function restoreTrade(id: string) { rejectedTradeIds = new Set([...rejectedTradeIds].filter(x => x !== id)); }
+
+  const activeProposals = $derived(
+    federationResult.tradeProposals.filter((t) => !rejectedTradeIds.has(t.id)),
+  );
 
   // ---------------------------------------------------------------------------
   // Page state
@@ -1344,83 +456,173 @@
 
   let selectedScope = $state("");
   let mode = $state<"plan" | "observe">("plan");
+  let selectedFlow  = $state<FlowSelectCtx | null>(null);
+  let observerTick  = $state(0);
 
   const selectedResult = $derived(
-    selectedScope ? mockByScope.get(selectedScope) : undefined,
+    selectedScope ? federationResult.byScope.get(selectedScope) : undefined,
   );
   const selectedIsHub = $derived(isHub(selectedScope));
   const hubLeaves = $derived(selectedIsHub ? getLeaves(selectedScope) : []);
-  const hubCoherence = $derived(
-    selectedIsHub ? computeCoherence(selectedScope) : 0,
-  );
-  const hubSufficiency = $derived(
-    selectedIsHub ? computeSufficiency(selectedScope) : 0,
-  );
-  const hubSurplus = $derived(
-    selectedIsHub ? computeSurplusPool(selectedScope) : [],
-  );
-  const hubFlows = $derived(
-    selectedIsHub
-      ? computeNetFlows(selectedScope)
-      : { exports: [], imports: [] },
-  );
-  const hubMemberHealth = $derived(
-    selectedIsHub ? computeMemberHealth(selectedScope) : [],
-  );
-  const hubFedHealth = $derived(
-    selectedScope === "universal-commune" ? computeFederationHealth() : [],
-  );
+  const hubCoherence = $derived(selectedIsHub ? computeCoherence(selectedScope) : 0);
+  const hubSufficiency = $derived(selectedIsHub ? computeSufficiency(selectedScope) : 0);
+  const hubSurplus = $derived(selectedIsHub ? computeSurplusPool(selectedScope) : []);
+  const hubFlows = $derived(selectedIsHub ? computeNetFlows(selectedScope) : { exports: [], imports: [] });
+  const hubMemberHealth = $derived(selectedIsHub ? computeMemberHealth(selectedScope) : []);
+  const hubFedHealth = $derived(selectedScope === "universal-commune" ? computeFederationHealth() : []);
 
   const outgoingTrades = $derived(
-    mockTradeProposals.filter((t) => t.fromScopeId === selectedScope),
+    activeProposals.filter((t) => t.fromScopeId === selectedScope),
   );
   const incomingTrades = $derived(
-    mockTradeProposals.filter((t) => t.toScopeId === selectedScope),
+    activeProposals.filter((t) => t.toScopeId === selectedScope),
   );
-  const hasTrades = $derived(
-    outgoingTrades.length > 0 || incomingTrades.length > 0,
-  );
+  const hasTrades = $derived(outgoingTrades.length > 0 || incomingTrades.length > 0);
 
   function tradeStatusColor(status: TradeProposal["status"]): string {
     if (status === "settled") return "#7ee8a2";
     return "#76c3f5";
   }
 
-  const totalScopes = $derived(mockPlanOrder.length);
+  const totalScopes = $derived(federationResult.planOrder.length);
   const totalUnresolved = $derived(
-    Array.from(mockByScope.values()).reduce(
-      (sum, r) => sum + r.deficits.filter((d) => d.shortfall > 0).length,
-      0,
+    Array.from(federationResult.byScope.values()).reduce(
+      (sum, r) => sum + r.deficits.filter((d) => d.shortfall > 0).length, 0,
     ),
   );
   const totalSurplusUnits = $derived(
-    Array.from(mockByScope.values()).reduce(
-      (sum, r) => sum + r.surplus.reduce((s, x) => s + x.quantity, 0),
-      0,
+    Array.from(federationResult.byScope.values()).reduce(
+      (sum, r) => sum + r.surplus.reduce((s, x) => s + x.quantity, 0), 0,
     ),
   );
-  const totalTrades = $derived(mockTradeProposals.length);
+  const totalTrades = $derived(federationResult.tradeProposals.length);
   const fullyResolvedDeficits = $derived(
-    Array.from(mockByScope.values()).reduce((sum, r) => {
-      return (
-        sum +
-        r.deficits.filter(
-          (d) => d.shortfall === 0 && (d.originalShortfall ?? d.shortfall) > 0,
-        ).length
-      );
+    Array.from(federationResult.byScope.values()).reduce((sum, r) => {
+      return sum + r.deficits.filter(
+        (d) => d.shortfall === 0 && (d.originalShortfall ?? d.shortfall) > 0,
+      ).length;
     }, 0),
   );
   const allDeficits = $derived(
-    Array.from(mockByScope.values()).reduce(
-      (sum, r) => sum + r.deficits.length,
-      0,
+    Array.from(federationResult.byScope.values()).reduce(
+      (sum, r) => sum + r.deficits.length, 0,
     ),
   );
   const resolvedPct = $derived(
-    allDeficits > 0
-      ? Math.round((fullyResolvedDeficits / allDeficits) * 100)
-      : 100,
+    allDeficits > 0 ? Math.round((fullyResolvedDeficits / allDeficits) * 100) : 100,
   );
+
+  // Scope proposals for selected scope (for proposals-band)
+  const scopeProposals = $derived(
+    selectedScope && !selectedIsHub
+      ? federationResult.tradeProposals.filter(
+          (t) => t.fromScopeId === selectedScope || t.toScopeId === selectedScope,
+        )
+      : [],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Claimable items
+  // ---------------------------------------------------------------------------
+  let myInventory = $state<EconomicResource[]>([]);
+  const claimedIds = $derived(new Set(myInventory.map((r) => r.id)));
+  const selectedClaimable = $derived(
+    selectedScope
+      ? (mockResources.get(selectedScope) ?? []).filter(
+          (r) =>
+            (r.classifiedAs?.includes("individual-claimable") ?? false) &&
+            !claimedIds.has(r.id),
+        )
+      : [],
+  );
+  function claimItem(resource: EconomicResource) {
+    myInventory = [...myInventory, resource];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Demand editor
+  // ---------------------------------------------------------------------------
+
+  const demandSpecs: ResourceSpecification[] = [
+    { id: "bread",     name: "Bread",     image: "🍞", defaultUnitOfResource: "loaf", resourceClassifiedAs: ["individual-claimable"] },
+    { id: "tools",     name: "Tools",     image: "🔧", defaultUnitOfResource: "unit", resourceClassifiedAs: ["individual-claimable"] },
+    { id: "citrus",    name: "Citrus",    image: "🍊", defaultUnitOfResource: "kg",   resourceClassifiedAs: ["individual-claimable"] },
+    { id: "salt",      name: "Salt",      image: "🧂", defaultUnitOfResource: "kg",   resourceClassifiedAs: ["individual-claimable"] },
+    { id: "fish",      name: "Fish",      image: "🐟", defaultUnitOfResource: "kg" },
+    { id: "wheat",     name: "Wheat",     image: "🌾", defaultUnitOfResource: "kg" },
+    { id: "dairy",     name: "Dairy",     image: "🥛", defaultUnitOfResource: "kg" },
+    { id: "flour",     name: "Flour",     image: "🌿", defaultUnitOfResource: "kg" },
+    { id: "olive-oil", name: "Olive Oil", image: "🫒", defaultUnitOfResource: "liter" },
+    { id: "goods",     name: "Goods",     image: "📦", defaultUnitOfResource: "unit" },
+  ];
+  const demandSpecMap = new Map(demandSpecs.map(s => [s.id, s]));
+
+  // Group supply slots by spec_id for the selected scope
+  const scopeSupply = $derived.by(() => {
+    if (!selectedScope) return new Map<string, { onhand: number; scheduled: number; unit: string }>();
+    const slots = querySupplyByScope(supplyIndex, selectedScope);
+    const map = new Map<string, { onhand: number; scheduled: number; unit: string }>();
+    for (const slot of slots) {
+      if (!slot.spec_id || slot.quantity === 0) continue;
+      const entry = map.get(slot.spec_id) ?? { onhand: 0, scheduled: 0, unit: '' };
+      if (slot.slot_type === 'inventory') entry.onhand += slot.quantity;
+      else if (slot.slot_type === 'scheduled_receipt') entry.scheduled += slot.quantity;
+      if (!entry.unit) entry.unit = demandSpecMap.get(slot.spec_id)?.defaultUnitOfResource ?? '';
+      map.set(slot.spec_id, entry);
+    }
+    return map;
+  });
+
+  let demandIdCounter = $state(1000);
+
+  const scopeDemandIntents = $derived(
+    demandIntents.filter(i => i.inScopeOf?.includes(selectedScope))
+  );
+
+  const scopeDemandsBySpec = $derived(
+    scopeDemandIntents.reduce((m, i) => {
+      const arr = m.get(i.resourceConformsTo ?? '') ?? [];
+      m.set(i.resourceConformsTo ?? '', [...arr, i]);
+      return m;
+    }, new Map<string, Intent[]>())
+  );
+
+  const demandSpecsForScope = $derived(
+    [...scopeDemandsBySpec.keys()]
+      .map(id => demandSpecMap.get(id))
+      .filter((s): s is ResourceSpecification => !!s)
+  );
+
+  function addDemand(specId: string) {
+    const spec = demandSpecMap.get(specId);
+    if (!spec || !selectedScope) return;
+    const id = `ui-${demandIdCounter++}`;
+    demandIntents = [...demandIntents, {
+      id,
+      action: 'transfer',
+      resourceConformsTo: specId,
+      resourceQuantity: { hasNumericalValue: 1, hasUnit: spec.defaultUnitOfResource ?? 'units' },
+      inScopeOf: [selectedScope],
+      due: '2026-04-01',
+    }];
+  }
+
+  function updateDemand(intent: Intent) {
+    demandIntents = demandIntents.map(i => i.id === intent.id ? intent : i);
+  }
+
+  function deleteDemand(id: string) {
+    demandIntents = demandIntents.filter(i => i.id !== id);
+  }
+
+  let newSpecId = $state('');
+  function addDemandCard() {
+    if (!newSpecId) return;
+    if (!scopeDemandsBySpec.has(newSpecId)) {
+      addDemand(newSpecId);
+    }
+    newSpecId = '';
+  }
 </script>
 
 <div class="page">
@@ -1459,184 +661,44 @@
     </div>
   </header>
 
-  <!-- Info strip: scope/deficit (left) | surplus/trades (right) -->
-  <div class="info-strip">
-    <div class="scope-band">
-      {#if selectedIsHub}
-        <!-- Hub: federation or universal-commune -->
-        <span class="band-lbl"
-          >{selectedScope === "universal-commune"
-            ? "SYSTEM"
-            : "FEDERATION"}</span
-        >
-        <span class="band-val">{selectedScope}</span>
-        <span class="hub-stat">
-          <span class="hub-stat-lbl">MEMBERS</span>
-          <span class="hub-stat-val">{hubLeaves.length}</span>
-        </span>
-        <span class="band-divider"></span>
-        <span class="hub-stat">
-          <span class="hub-stat-lbl">COHERENCE</span>
-          <span
-            class="hub-stat-val"
-            style="color:{coherenceColor(hubCoherence)}"
-            >{pct(hubCoherence)}</span
+  <!-- Proposals band — visible for leaf communes with pending proposals -->
+  {#if scopeProposals.length > 0}
+    <div class="proposals-band">
+      <span class="proposals-lbl">PROPOSALS</span>
+      <div class="proposals-scroll">
+        {#each scopeProposals as t (t.id)}
+          {@const rejected = rejectedTradeIds.has(t.id)}
+          <button
+            class="proposal-chip"
+            class:rejected
+            onclick={() => (rejected ? restoreTrade(t.id) : rejectTrade(t.id))}
+            title={rejected ? "Restore proposal" : "Reject proposal"}
           >
-        </span>
-        <span class="hub-stat">
-          <span class="hub-stat-lbl">SUFFICIENCY</span>
-          <span
-            class="hub-stat-val"
-            style="color:{sufficiencyColor(hubSufficiency)}"
-            >{pct(hubSufficiency)}</span
-          >
-        </span>
-        <span class="band-divider"></span>
-        <span class="hub-stat">
-          <span class="hub-stat-lbl">MEMBERS</span>
-          <span class="member-dots">
-            {#each hubMemberHealth as m (m.id)}
-              <span class="member-dot member-dot--{m.status}" title={m.id}
-              ></span>
-            {/each}
-          </span>
-        </span>
-        {#if selectedScope === "universal-commune"}
-          <span class="band-divider"></span>
-          {#each hubFedHealth as f (f.fedId)}
-            <span class="fed-chip">
-              <span class="fed-chip-name"
-                >{f.fedId.replace("-federation", "")}</span
-              >
-              <span
-                class="fed-chip-score"
-                style="color:{coherenceColor(f.coherence)}"
-                >{pct(f.coherence)}</span
-              >
-            </span>
-          {/each}
-        {/if}
-      {:else if selectedScope && selectedResult}
-        <!-- Leaf commune -->
-        <span class="band-lbl">SCOPE</span>
-        <span class="band-val">{selectedScope}</span>
-        {#if selectedResult.deficits.length > 0}
-          <span class="band-divider"></span>
-          <span class="band-lbl">DEFICITS</span>
-          {#each selectedResult.deficits as d (d.intentId)}
-            {@const orig = d.originalShortfall ?? d.shortfall}
-            {@const pctRes = orig > 0 ? Math.round(((orig - d.shortfall) / orig) * 100) : 0}
-            {@const fillPx = Math.round((pctRes / 100) * 48)}
-            <span class="deficit-chip">
-              <span class="deficit-spec">{d.specId}</span>
-              <span class="deficit-minibar">
-                <span class="deficit-fill" style="width:{fillPx}px"></span>
-              </span>
-              <span class="deficit-pct" style="color:{pctRes === 100 ? '#7ee8a2' : '#fc5858'}">{pctRes}%</span>
-              {#if d.resolvedAt?.length}
-                <span class="deficit-via">{d.resolvedAt[0]}</span>
-              {/if}
-            </span>
-          {/each}
-        {/if}
-        {#if selectedResult.metabolicDebt.length > 0}
-          <span class="band-divider"></span>
-          <span class="band-lbl">METABOLIC DEBT</span>
-          {#each selectedResult.metabolicDebt as debt (debt.specId)}
-            <span class="inline-item">
-              <span class="band-spec">{debt.specId}</span>
-              <span class="yellow">{debt.shortfall}</span>
-            </span>
-          {/each}
-        {/if}
-        {#if selectedResult.deficits.length === 0 && selectedResult.metabolicDebt.length === 0}
-          <span class="band-divider"></span>
-          <span class="band-empty">No deficits.</span>
-        {/if}
-      {:else}
-        <span class="band-idle-lbl">SCOPE</span>
-      {/if}
+            <span class="proposal-spec">{specNames[t.specId] ?? t.specId}</span>
+            <span class="proposal-qty">×{t.quantity}</span>
+            <span class="proposal-arrow">{t.fromScopeId === selectedScope ? "→" : "←"}</span>
+            <span class="proposal-peer">{t.fromScopeId === selectedScope ? t.toScopeId : t.fromScopeId}</span>
+            <span class="proposal-x">{rejected ? "↺" : "✕"}</span>
+          </button>
+        {/each}
+      </div>
     </div>
-
-    <div class="surplus-band">
-      {#if selectedIsHub}
-        <!-- Hub surplus: pool + net flows -->
-        {#if hubSurplus.length > 0}
-          <span class="band-lbl">POOL</span>
-          {#each hubSurplus as s (s.specId)}
-            <span class="inline-item">
-              <span class="band-spec">{s.specId}</span>
-              <span class="green">{s.quantity}</span>
-            </span>
-          {/each}
-        {/if}
-        {#if hubFlows.exports.length > 0}
-          <span class="band-divider"></span>
-          <span class="band-lbl">EXPORTS→</span>
-          {#each hubFlows.exports as e (e.specId)}
-            <span class="inline-item">
-              <span class="band-spec">{e.specId}</span>
-              <span style="color:#76c3f5">{e.qty}</span>
-            </span>
-          {/each}
-        {/if}
-        {#if hubFlows.imports.length > 0}
-          <span class="band-divider"></span>
-          <span class="band-lbl">←IMPORTS</span>
-          {#each hubFlows.imports as i (i.specId)}
-            <span class="inline-item">
-              <span class="band-spec">{i.specId}</span>
-              <span style="color:#b0c4f0">{i.qty}</span>
-            </span>
-          {/each}
-        {/if}
-        {#if selectedScope === "universal-commune"}
-          <span class="band-divider"></span>
-          <span class="hub-stat">
-            <span class="hub-stat-lbl">TRADES</span>
-            <span class="hub-stat-val blue">{mockTradeProposals.length}</span>
-          </span>
-          <span class="hub-stat">
-            <span class="hub-stat-lbl">SETTLED</span>
-            <span class="hub-stat-val green"
-              >{mockTradeProposals.filter((t) => t.status === "settled")
-                .length}</span
-            >
-          </span>
-        {/if}
-      {:else if selectedScope && selectedResult}
-        <!-- Leaf surplus + trades -->
-        {#if selectedResult.surplus.length > 0}
-          <span class="band-lbl">SURPLUS</span>
-          {#each selectedResult.surplus as s (s.specId)}
-            <span class="inline-item">
-              <span class="band-spec">{s.specId}</span>
-              <span class="green">{s.quantity}</span>
-              {#if s.availableFrom}<span class="muted">{s.availableFrom}</span>{/if}
-            </span>
-          {/each}
-        {/if}
-        {#if selectedResult.surplus.length === 0}
-          <span class="band-empty">No surplus.</span>
-        {/if}
-      {:else}
-        <span class="band-idle-lbl">SURPLUS</span>
-      {/if}
-    </div>
-  </div>
+  {/if}
 
   <!-- Main body: event log + graph, full width -->
   <div class="body">
-    <FederationEventLog events={mockEvents} />
+    <FederationEventLog events={federationResult.events} />
     <div class="graph-wrap">
       <FederationGraphView
-        planOrder={mockPlanOrder}
-        byScope={mockByScope}
+        planOrder={federationResult.planOrder}
+        byScope={federationResult.byScope}
         parentOf={mockParentOf}
-        tradeProposals={mockTradeProposals}
+        tradeProposals={activeProposals}
+        resourcesByScope={mockResources}
         selected={selectedScope}
         onselect={(id) => {
           selectedScope = selectedScope === id ? "" : id;
+          selectedFlow  = null;
         }}
       />
     </div>
@@ -1652,7 +714,7 @@
           <button
             class="tab-btn"
             class:active={mode === "plan"}
-            onclick={() => (mode = "plan")}>PLAN</button
+            onclick={() => { mode = "plan"; selectedFlow = null; }}>PLAN</button
           >
           <button
             class="tab-btn"
@@ -1661,20 +723,123 @@
           >
         </div>
       </div>
-      <div class="network-diagram-wrap">
-        <ScopeNetworkDiagram
-          planStore={selectedResult.planStore}
-          observer={mockObservers.get(selectedScope) ?? new Observer()}
-          {specNames}
-          {mode}
-          bufferZones={mockBufferZones.get(selectedScope) ?? []}
-          capacityBuffers={mockCapacityBuffers.get(selectedScope) ?? []}
-        />
+      <div class="network-body">
+        <div class="network-diagram-wrap">
+          <ScopeNetworkDiagram
+            planStore={selectedResult.planStore}
+            observer={combinedObserver}
+            {specNames}
+            {mode}
+            bufferZones={mockBufferZones.get(selectedScope) ?? []}
+            capacityBuffers={[]}
+            {observerTick}
+            onflowselect={(ctx) => (selectedFlow = ctx)}
+          />
+        </div>
+        <div class="recipes-panel-wrap">
+          <ScopeRecipesPanel scopeId={selectedScope} {recipeStore} {specNames} />
+        </div>
+        {#if selectedFlow}
+          <div class="observe-panel">
+            <EventRecorderPanel
+              context={selectedFlow}
+              observer={combinedObserver}
+              onrecord={() => { observerTick++; selectedFlow = null; }}
+              onclose={() => (selectedFlow = null)}
+            />
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
 
-  <InventoryBand allResources={mockResources} {specNames} {selectedScope} />
+  {#if selectedScope && selectedResult && !selectedIsHub}
+    <div class="demands-band">
+      <div class="demands-head">
+        <span class="band-lbl">DEMANDS · {selectedScope}</span>
+        <span class="demands-count">{scopeDemandIntents.length} intent{scopeDemandIntents.length !== 1 ? 's' : ''}</span>
+        <select class="spec-picker" bind:value={newSpecId} onchange={addDemandCard}>
+          <option value="">+ add spec…</option>
+          {#each demandSpecs as s (s.id)}
+            <option value={s.id}>{s.image ?? ''} {s.name}</option>
+          {/each}
+        </select>
+      </div>
+      <div class="demands-body">
+        <!-- Supply column -->
+        <div class="supply-col">
+          <span class="supply-col-lbl">SUPPLY</span>
+          {#each [...scopeSupply.entries()] as [specId, entry] (specId)}
+            {@const spec = demandSpecMap.get(specId)}
+            <div class="supply-row">
+              <span class="supply-emoji">{spec?.image ?? '📦'}</span>
+              <span class="supply-name">{spec?.name ?? specId}</span>
+              <span class="supply-qty onhand">{entry.onhand}</span>
+              {#if entry.scheduled > 0}
+                <span class="supply-qty scheduled">+{entry.scheduled}</span>
+              {/if}
+              <span class="supply-unit">{entry.unit}</span>
+            </div>
+          {/each}
+          {#if scopeSupply.size === 0}
+            <span class="supply-empty">—</span>
+          {/if}
+          {#if selectedResult.deficits.length > 0}
+            <span class="supply-col-lbl" style="margin-top:6px">DEFICITS</span>
+            {#each selectedResult.deficits as d (d.intentId)}
+              {@const orig = d.originalShortfall ?? d.shortfall}
+              {@const pctRes = orig > 0 ? Math.round(((orig - d.shortfall) / orig) * 100) : 100}
+              {@const spec = demandSpecMap.get(d.specId)}
+              <div class="supply-row">
+                <span class="supply-emoji">{spec?.image ?? '⚠️'}</span>
+                <span class="supply-name">{spec?.name ?? d.specId}</span>
+                <span class="supply-qty" style="color:{pctRes === 100 ? '#68d391' : '#fc5858'}">{d.shortfall === 0 ? '✓' : d.shortfall}</span>
+                {#if d.shortfall > 0}
+                  <span class="supply-unit">{spec?.defaultUnitOfResource ?? ''}</span>
+                {/if}
+                {#if d.resolvedAt?.length && d.shortfall === 0}
+                  <span class="supply-unit" style="color:rgba(118,195,245,0.6)">{d.resolvedAt[0]}</span>
+                {/if}
+              </div>
+            {/each}
+          {/if}
+        </div>
+        <!-- Demand cards -->
+        <div class="demands-scroll">
+          {#each demandSpecsForScope as spec (spec.id)}
+            <ResourceDemandCard
+              {spec}
+              compact
+              intents={scopeDemandsBySpec.get(spec.id) ?? []}
+              onAddDemand={() => addDemand(spec.id)}
+              onUpdate={updateDemand}
+              onDelete={deleteDemand}
+            />
+          {/each}
+          {#if demandSpecsForScope.length === 0}
+            <span class="demands-empty">No demands set for this scope. Use the picker to add one.</span>
+          {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if selectedScope && selectedClaimable.length > 0}
+    <div class="claimable-band">
+      <div class="band-lbl">CLAIMABLE · {selectedScope}</div>
+      <div class="claimable-scroll">
+        {#each selectedClaimable as r (r.id)}
+          <button class="claim-card" onclick={() => claimItem(r)}>
+            <div class="claim-name">{r.name ?? specNames[r.conformsTo] ?? r.conformsTo}</div>
+            <div class="claim-qty">{r.onhandQuantity?.hasNumericalValue ?? '—'} {r.onhandQuantity?.hasUnit ?? ''}</div>
+            <div class="claim-action">CLAIM</div>
+          </button>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  <InventoryBand allResources={mockResources} {specNames} {selectedScope} myResources={myInventory} />
 </div>
 
 <style>
@@ -1763,38 +928,6 @@
     display: flex;
   }
 
-  /* ---- Info strip (horizontal, below stat bar) ---- */
-  .info-strip {
-    display: flex;
-    flex-shrink: 0;
-    height: 38px;
-    border-bottom: 1px solid var(--border-faint);
-    background: var(--bg-surface);
-  }
-
-  .scope-band {
-    flex: 1;
-    min-width: 0;
-    border-right: 1px solid var(--border-faint);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 14px;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-
-  .surplus-band {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 14px;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-
   /* ---- Shared band primitives ---- */
   .band-lbl {
     font-size: 0.5rem;
@@ -1812,111 +945,6 @@
     flex-shrink: 0;
   }
 
-  .band-divider {
-    width: 1px;
-    height: 18px;
-    background: var(--border-faint);
-    flex-shrink: 0;
-  }
-
-  .band-idle-lbl {
-    font-size: 0.5rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    opacity: 0.38;
-  }
-
-  .band-empty {
-    font-size: 0.6rem;
-    opacity: 0.52;
-  }
-
-  .inline-item {
-    display: flex;
-    align-items: baseline;
-    gap: 5px;
-    font-size: 0.62rem;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .band-spec {
-    color: rgba(210, 228, 255, 0.88);
-  }
-
-  /* ---- Inline deficit chip (scope band, leaf communes) ---- */
-  .deficit-chip {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.58rem;
-    padding: 1px 7px;
-    border: 1px solid rgba(104, 211, 145, 0.2);
-    border-radius: 3px;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .deficit-spec { color: rgba(210, 228, 255, 0.88); }
-
-  .deficit-minibar {
-    width: 48px;
-    height: 4px;
-    background: rgba(140, 180, 255, 0.12);
-    border-radius: 2px;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-
-  .deficit-fill {
-    display: block;
-    height: 100%;
-    background: #7ee8a2;
-    opacity: 0.85;
-    border-radius: 2px;
-  }
-
-  .deficit-pct {
-    font-size: 0.52rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    flex-shrink: 0;
-  }
-
-  .deficit-via {
-    color: rgba(180, 205, 255, 0.5);
-    font-size: 0.5rem;
-    letter-spacing: 0.04em;
-  }
-
-  .inline-trade {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.58rem;
-    padding: 2px 7px;
-    border: 1px solid var(--border-faint);
-    border-radius: 3px;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .trade-arrow {
-    font-size: 0.65rem;
-    flex-shrink: 0;
-  }
-  .trade-peer {
-    color: rgba(210, 228, 255, 0.88);
-  }
-  .trade-meta {
-    color: rgba(180, 205, 255, 0.65);
-  }
-
-  .trade-status {
-    font-size: 0.44rem;
-    letter-spacing: 0.07em;
-  }
-
   .green {
     color: #7ee8a2;
   }
@@ -1926,93 +954,6 @@
   .blue {
     color: #76c3f5;
   }
-  .muted {
-    opacity: 0.58;
-    font-size: 0.55rem;
-  }
-
-  /* ---- Hub-level analytics widgets ---- */
-  .hub-stat {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    flex-shrink: 0;
-  }
-
-  .hub-stat-lbl {
-    font-size: 0.42rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    opacity: 0.45;
-    line-height: 1;
-  }
-
-  .hub-stat-val {
-    font-size: 0.72rem;
-    font-weight: 600;
-    line-height: 1;
-    letter-spacing: 0.02em;
-  }
-
-  .hub-stat-val.green {
-    color: #7ee8a2;
-  }
-  .hub-stat-val.blue {
-    color: #76c3f5;
-  }
-
-  /* Member health dots */
-  .member-dots {
-    display: flex;
-    gap: 3px;
-    align-items: center;
-    margin-top: 1px;
-  }
-
-  .member-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .member-dot--green {
-    background: #7ee8a2;
-  }
-  .member-dot--yellow {
-    background: #e8b04e;
-  }
-  .member-dot--red {
-    background: #fc5858;
-  }
-  .member-dot--dim {
-    background: rgba(255, 255, 255, 0.18);
-  }
-
-  /* Per-federation chips (universal-commune view) */
-  .fed-chip {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    padding: 2px 8px;
-    border: 1px solid var(--border-faint);
-    border-radius: 3px;
-    flex-shrink: 0;
-  }
-
-  .fed-chip-name {
-    font-size: 0.44rem;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    opacity: 0.55;
-    line-height: 1;
-  }
-
-  .fed-chip-score {
-    font-size: 0.7rem;
-    font-weight: 600;
-    line-height: 1;
-  }
 
   /* ---- Network diagram band (above inventory) ---- */
   .network-band {
@@ -2021,6 +962,21 @@
     background: var(--bg-surface);
     display: flex;
     flex-direction: column;
+  }
+
+  .network-body {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    overflow: hidden;
+  }
+
+  .observe-panel {
+    flex-shrink: 0;
+    width: 320px;
+    padding: 12px 16px;
+    border-left: 1px solid var(--border-faint);
+    overflow-y: auto;
   }
 
   .network-band-head {
@@ -2033,6 +989,8 @@
   }
 
   .network-diagram-wrap {
+    flex: 1;
+    min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
     padding: 8px 16px;
@@ -2070,5 +1028,304 @@
     color: rgba(255, 255, 255, 0.9);
     border-color: rgba(255, 255, 255, 0.35);
     background: var(--border-faint);
+  }
+
+  /* ---- Claimable band ---- */
+  .claimable-band {
+    display: flex;
+    flex-direction: row;
+    height: 110px;
+    border-top: 1px solid var(--border-faint);
+    background: var(--bg-base);
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .claimable-band > .band-lbl {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-family: var(--font-mono);
+    font-size: 0.5rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.55;
+    padding: 8px 6px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid var(--border-faint);
+    color: #e8b04e;
+  }
+
+  .claimable-scroll {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    padding: 8px 10px;
+    overflow-x: auto;
+    align-items: center;
+    scrollbar-width: thin;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .claim-card {
+    width: 120px;
+    height: 86px;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    background: rgba(232, 176, 78, 0.06);
+    border: 1px solid rgba(232, 176, 78, 0.25);
+    border-radius: 3px;
+    padding: 5px 7px;
+    gap: 4px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    font-family: var(--font-mono);
+    text-align: left;
+  }
+
+  .claim-card:hover {
+    border-color: rgba(232, 176, 78, 0.55);
+    background: rgba(232, 176, 78, 0.12);
+  }
+
+  .claim-name {
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: rgba(228, 238, 255, 0.96);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .claim-qty {
+    font-size: 0.55rem;
+    color: #e8b04e;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .claim-action {
+    font-size: 0.48rem;
+    letter-spacing: 0.1em;
+    color: #e8b04e;
+    border: 1px solid rgba(232, 176, 78, 0.4);
+    border-radius: 2px;
+    padding: 1px 5px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .claim-card:hover .claim-action {
+    background: rgba(232, 176, 78, 0.15);
+    border-color: rgba(232, 176, 78, 0.7);
+  }
+
+  /* ---- Proposals band ---- */
+  .proposals-band {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+    height: 36px;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-faint);
+    background: var(--bg-surface);
+    overflow: hidden;
+  }
+
+  .proposals-lbl {
+    font-size: 0.5rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.62;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .proposals-scroll {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    overflow-x: auto;
+    align-items: center;
+    scrollbar-width: thin;
+    flex: 1;
+    min-width: 0;
+    padding: 2px 0;
+  }
+
+  .proposal-chip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.56rem;
+    padding: 2px 7px;
+    border: 1px solid rgba(118, 195, 245, 0.35);
+    border-radius: 3px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    background: rgba(118, 195, 245, 0.06);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    color: rgba(228, 238, 255, 0.9);
+    transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+  }
+
+  .proposal-chip:hover {
+    background: rgba(118, 195, 245, 0.14);
+    border-color: rgba(118, 195, 245, 0.6);
+  }
+
+  .proposal-chip.rejected {
+    opacity: 0.4;
+    text-decoration: line-through;
+    border-color: rgba(255, 100, 100, 0.3);
+    background: rgba(255, 100, 100, 0.04);
+  }
+
+  .proposal-chip.rejected:hover {
+    opacity: 0.7;
+    text-decoration: none;
+  }
+
+  .proposal-spec { color: rgba(210, 228, 255, 0.88); }
+  .proposal-qty { color: #76c3f5; font-weight: 600; }
+  .proposal-arrow { font-size: 0.62rem; opacity: 0.7; }
+  .proposal-peer { color: rgba(180, 205, 255, 0.65); font-size: 0.5rem; }
+  .proposal-x { font-size: 0.55rem; opacity: 0.6; margin-left: 2px; }
+
+  /* ---- Recipes panel in network-band ---- */
+  .recipes-panel-wrap {
+    width: 260px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border-faint);
+    overflow-y: auto;
+    padding: 8px 12px;
+    max-height: 240px;
+  }
+
+  /* ---- Demands band ---- */
+  .demands-band {
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-faint);
+    background: var(--bg-surface);
+    max-height: 280px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .demands-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    border-bottom: 1px solid var(--border-faint);
+    flex-shrink: 0;
+  }
+
+  .demands-count {
+    font-size: 0.6rem;
+    opacity: 0.55;
+  }
+
+  .spec-picker {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    background: var(--bg-overlay);
+    border: 1px solid var(--border-dim);
+    color: rgba(228,238,255,0.7);
+    border-radius: 3px;
+    padding: 2px 6px;
+    cursor: pointer;
+  }
+
+  .demands-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .supply-col {
+    flex-shrink: 0;
+    width: 160px;
+    border-right: 1px solid var(--border-faint);
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+  }
+
+  .supply-col-lbl {
+    font-size: 0.48rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.45;
+    margin-bottom: 2px;
+    flex-shrink: 0;
+  }
+
+  .supply-row {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 0.6rem;
+    white-space: nowrap;
+  }
+
+  .supply-emoji { font-size: 0.7rem; flex-shrink: 0; }
+
+  .supply-name {
+    flex: 1;
+    color: rgba(210, 228, 255, 0.7);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .supply-qty {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+  }
+
+  .supply-qty.onhand  { color: #68d391; }
+  .supply-qty.scheduled { color: rgba(99, 179, 237, 0.75); }
+
+  .supply-unit {
+    font-size: 0.52rem;
+    color: rgba(167, 139, 250, 0.55);
+  }
+
+  .supply-empty {
+    font-size: 0.6rem;
+    opacity: 0.35;
+  }
+
+  .demands-scroll {
+    display: flex;
+    gap: 12px;
+    padding: 10px 14px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex: 1;
+    min-height: 0;
+    align-items: flex-start;
+  }
+
+  .demands-empty {
+    font-size: 0.6rem;
+    opacity: 0.45;
+    align-self: center;
   }
 </style>

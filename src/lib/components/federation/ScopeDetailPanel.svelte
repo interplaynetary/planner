@@ -61,16 +61,11 @@
   let recordError = $state<string | null>(null);
   let submitting  = $state(false);
 
-  $effect(() => {
-    if (flowCtx) {
-      recordQty   = Math.max(0, flowCtx.plannedQty - flowCtx.fulfilledQty);
-      recordTs    = new Date().toISOString().slice(0, 16);
-      recordError = null;
-    }
-  });
-
   function handleFlowSelect(ctx: FlowSelectCtx) {
-    flowCtx = ctx;
+    flowCtx     = ctx;
+    recordQty   = Math.max(0, ctx.plannedQty - ctx.fulfilledQty);
+    recordTs    = new Date().toISOString().slice(0, 16);
+    recordError = null;
   }
 
   function handleRecord() {
@@ -155,7 +150,7 @@
 
     {#if result.surplus.length > 0}
       <div class="section-label">SURPLUS</div>
-      {#each result.surplus as s (s.specId)}
+      {#each result.surplus as s, i (s.specId + '-' + i)}
         <div class="signal-row">
           <span class="signal-spec">{s.specId}</span>
           <span class="green">{s.quantity}</span>
@@ -166,7 +161,7 @@
 
     {#if result.metabolicDebt.length > 0}
       <div class="section-label">METABOLIC DEBT</div>
-      {#each result.metabolicDebt as debt (debt.specId)}
+      {#each result.metabolicDebt as debt, i (debt.specId + '-' + i)}
         <div class="signal-row">
           <span class="signal-spec">{debt.specId}</span>
           <span class="yellow">{debt.shortfall}</span>

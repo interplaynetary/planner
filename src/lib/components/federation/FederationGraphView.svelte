@@ -1,5 +1,6 @@
 <script lang="ts">
   import { SvelteMap } from "svelte/reactivity";
+  import type { EconomicResource } from "$lib/schemas";
   import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
   import type { TradeProposal } from "$lib/planning/plan-federation";
 
@@ -8,6 +9,7 @@
     byScope: Map<string, ScopePlanResult>;
     parentOf: (id: string) => string | undefined;
     tradeProposals?: TradeProposal[];
+    resourcesByScope?: Map<string, EconomicResource[]>;
     selected?: string;
     onselect?: (id: string) => void;
   }
@@ -17,9 +19,17 @@
     byScope,
     parentOf,
     tradeProposals = [],
+    resourcesByScope = new Map(),
     selected = "",
     onselect,
   }: Props = $props();
+
+  // Deterministic hue from a string (spec ID → consistent color)
+  function specColor(id: string): string {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) & 0xffff;
+    return `hsl(${h % 360}, 62%, 58%)`;
+  }
 
   let svgWidth = $state(800);
   let svgHeight = $state(520);
@@ -31,7 +41,7 @@
     "#b794f4",
     "#4fd1c5",
     "#f687b3",
-    "#68d391",
+    "#7ee8a2",
   ];
 
   // ---------------------------------------------------------------------------
@@ -109,8 +119,9 @@
   function hierColor(toId: string): string {
     const r = byScope.get(toId);
     if (!r) return "var(--border-faint)";
-    if (r.deficits.some((d) => d.shortfall > 0)) return "rgba(229,62,62,0.50)";
-    if (r.surplus.length > 0) return "rgba(104,211,145,0.40)";
+    if (r.deficits.some((d) => d.shortfall > 0)) return "rgba(252,88,88,0.50)";
+    if (r.deficits.some((d) => (d.originalShortfall ?? 0) > 0)) return "rgba(126,232,162,0.45)";
+    if (r.surplus.length > 0) return "rgba(126,232,162,0.35)";
     return "var(--border-dim)";
   }
 
@@ -179,22 +190,23 @@
 
   function nodeStroke(id: string): string {
     const r = byScope.get(id);
-    if (r?.deficits.some((d) => d.shortfall > 0)) return "#e53e3e";
-    if (r?.metabolicDebt?.length) return "#d69e2e";
+    if (r?.deficits.some((d) => d.shortfall > 0)) return "#fc5858";
+    if (r?.metabolicDebt?.length) return "#e8b04e";
+    if (r?.deficits.some((d) => (d.originalShortfall ?? 0) > 0)) return "#7ee8a2";
     const role = nodeRole(id);
-    if (role === "root") return "rgba(99,179,237,0.85)";
-    if (role === "federation") return "rgba(160,200,255,0.35)";
+    if (role === "root") return "rgba(120,195,255,0.85)";
+    if (role === "federation") return "rgba(160,210,255,0.40)";
     if (tradeProposals.some((t) => t.fromScopeId === id || t.toScopeId === id))
-      return "rgba(99,179,237,0.55)";
-    return "rgba(160,200,255,0.22)";
+      return "rgba(120,195,255,0.60)";
+    return "rgba(160,210,255,0.26)";
   }
 
   function nodeFill(id: string): string {
-    if (id === selected) return "#1e3050";
+    if (id === selected) return "#1d3358";
     const role = nodeRole(id);
-    if (role === "root") return "#0f2040";
-    if (role === "federation") return "#162030";
-    return "#131c2a";
+    if (role === "root") return "#142248";
+    if (role === "federation") return "#192740";
+    return "#161f33";
   }
 
   function hexPoints(rx: number, ry: number): string {
@@ -348,11 +360,36 @@
             {planOrder.filter((i) => nodeRole(i) === "federation").length} federations
           </text>
         {:else if role === "federation"}
+          {@const fedKids = planOrder.filter((i) => parentOf(i) === id)}
+          {@const coherentKids = fedKids.filter((i) => {
+            const r = byScope.get(i);
+            return !r || !r.deficits.some((d) => d.shortfall > 0);
+          }).length}
+          {@const coherence = fedKids.length > 0 ? coherentKids / fedKids.length : 1}
+          {@const pieR = 11}
+          {@const pieCy = 26}
+          {@const pieAngle = coherence * 2 * Math.PI}
+          {@const pieEndX = +(pieR * Math.sin(pieAngle)).toFixed(2)}
+          {@const pieEndY = +(pieCy - pieR * Math.cos(pieAngle)).toFixed(2)}
+          {@const pieLarge = coherence > 0.5 ? 1 : 0}
           <!-- Federation node -->
           <text x={0} y={-7} text-anchor="middle" class="node-name fed-name"
             >{line1}</text
           >
           <text x={0} y={8} text-anchor="middle" class="node-sub">{line2}</text>
+          <!-- Coherence pie -->
+          <circle cx={0} cy={pieCy} r={pieR} fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.14)" stroke-width="0.5" />
+          {#if coherence >= 1}
+            <circle cx={0} cy={pieCy} r={pieR} fill="rgba(126,232,162,0.30)" />
+          {:else if coherence > 0}
+            <path
+              d="M 0 {pieCy} L 0 {pieCy - pieR} A {pieR} {pieR} 0 {pieLarge} 1 {pieEndX} {pieEndY} Z"
+              fill="rgba(126,232,162,0.30)"
+            />
+          {/if}
+          <text x={0} y={pieCy + 4} text-anchor="middle" class="pie-pct"
+            >{Math.round(coherence * 100)}%</text
+          >
         {:else}
           <!-- Leaf commune -->
           {@const tradeIdxFrom = tradeProposals.findIndex(
@@ -377,6 +414,28 @@
             >{line1}</text
           >
 
+          <!-- Resource squares -->
+          {@const scopeRes = resourcesByScope.get(id) ?? []}
+          {#if scopeRes.length > 0}
+            {@const sqSize = 6}
+            {@const sqGap = 2}
+            {@const totalW = scopeRes.length * sqSize + (scopeRes.length - 1) * sqGap}
+            {@const startX = -totalW / 2}
+            {#each scopeRes as res, ri (res.id)}
+              <rect
+                x={startX + ri * (sqSize + sqGap)}
+                y={18}
+                width={sqSize}
+                height={sqSize}
+                rx={1}
+                fill={specColor(res.conformsTo ?? res.id)}
+                opacity="0.82"
+              >
+                <title>{res.name ?? res.conformsTo ?? res.id} · {res.onhandQuantity?.hasNumericalValue ?? "?"} {res.onhandQuantity?.hasUnit ?? ""}</title>
+              </rect>
+            {/each}
+          {/if}
+
           <!-- Surplus -->
           {#if surplusQty > 0}
             <text x={-62} y={22} class="node-stat green-txt"
@@ -384,23 +443,13 @@
             >
           {/if}
 
-          <!-- Deficit badge -->
+          <!-- Deficit badge — red if unresolved, green ✓ if all resolved -->
           {#if defCount > 0}
-            <rect
-              x={20}
-              y={-28}
-              width={30}
-              height={13}
-              rx={2}
-              fill="rgba(229,62,62,0.35)"
-            />
-            <text
-              x={35}
-              y={-19}
-              text-anchor="middle"
-              class="badge-txt"
-              fill="#e53e3e">{defCount}D</text
-            >
+            <rect x={20} y={-28} width={30} height={13} rx={2} fill="rgba(252,88,88,0.30)" />
+            <text x={35} y={-19} text-anchor="middle" class="badge-txt" fill="#fc5858">{defCount}D</text>
+          {:else if result && result.deficits.length > 0}
+            <rect x={20} y={-28} width={30} height={13} rx={2} fill="rgba(126,232,162,0.20)" />
+            <text x={35} y={-19} text-anchor="middle" class="badge-txt" fill="#7ee8a2">✓</text>
           {/if}
 
           <!-- Debt label -->
@@ -425,8 +474,8 @@
                 width={resolvedW}
                 height={4}
                 rx={2}
-                fill="#68d391"
-                opacity="0.8"
+                fill="#7ee8a2"
+                opacity="0.85"
               />
             {/if}
             {#if resolvedW < w - 14}
@@ -436,8 +485,8 @@
                 width={w - 14 - resolvedW}
                 height={4}
                 rx={2}
-                fill="#e53e3e"
-                opacity="0.55"
+                fill="#fc5858"
+                opacity="0.60"
               />
             {/if}
           {/if}
@@ -498,11 +547,17 @@
     font-size: 0.56rem;
     letter-spacing: 0.04em;
   }
+  :global(.pie-pct) {
+    font-family: var(--font-mono);
+    font-size: 7.5px;
+    fill: rgba(200, 228, 255, 0.72);
+  }
+
   :global(.green-txt) {
-    fill: #68d391;
+    fill: #7ee8a2;
   }
   :global(.yellow-txt) {
-    fill: #d69e2e;
+    fill: #e8b04e;
   }
   :global(.dim-txt) {
     fill: rgba(160, 195, 255, 0.45);

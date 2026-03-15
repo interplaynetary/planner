@@ -5,9 +5,10 @@
     allResources: Map<string, EconomicResource[]>;
     specNames: Record<string, string>;
     selectedScope?: string;
+    myResources?: EconomicResource[];
   }
 
-  let { allResources, specNames, selectedScope = '' }: Props = $props();
+  let { allResources, specNames, selectedScope = '', myResources }: Props = $props();
 
   const hasAny = $derived(Array.from(allResources.values()).some(rs => rs.length > 0));
 </script>
@@ -16,6 +17,20 @@
   <div class="band-label">INVENTORY</div>
 
   <div class="scroll-area">
+    {#if myResources && myResources.length > 0}
+      <div class="scope-group">
+        <div class="scope-divider" style="color: #7ee8a2">MY INV</div>
+        {#each myResources as r (r.id)}
+          <div class="resource-card" style="border-color: rgba(126,232,162,0.35)">
+            <div class="card-scope">{r.conformsTo}</div>
+            <div class="card-name">{r.name ?? specNames[r.conformsTo] ?? r.conformsTo}</div>
+            <div class="card-qty" style="border-left-color: #7ee8a2">
+              OH {r.onhandQuantity?.hasNumericalValue ?? '—'} {r.onhandQuantity?.hasUnit ?? ''}
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
     {#if hasAny}
       {#each allResources.entries() as [scopeId, resources] (scopeId)}
         {#if resources.length > 0}

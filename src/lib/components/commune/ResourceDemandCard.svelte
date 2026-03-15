@@ -9,6 +9,7 @@
   interface Props {
     spec: ResourceSpecification;
     intents: Intent[];
+    compact?: boolean;
     // Editing (omit for readonly)
     onAddDemand?: () => void;
     onUpdate?: (intent: Intent) => void;
@@ -26,6 +27,7 @@
   let {
     spec,
     intents,
+    compact = false,
     onAddDemand,
     onUpdate,
     onDelete,
@@ -113,7 +115,7 @@
   }
 </script>
 
-<div class="card">
+<div class="card" class:compact>
   <!-- Header -->
   <div class="card-header">
     <span class="emoji">{spec.image ?? "📦"}</span>
@@ -140,21 +142,23 @@
     {/if}
   </div>
 
-  <!-- Art band -->
-  <div class="card-art" aria-hidden="true"></div>
+  {#if !compact}
+    <!-- Art band -->
+    <div class="card-art" aria-hidden="true"></div>
 
-  <!-- Classification tags -->
-  {#if spec.resourceClassifiedAs?.filter(t => t !== 'communal-demand').length}
-    <div class="tag-row">
-      {#each spec.resourceClassifiedAs.filter(t => t !== 'communal-demand') as tag (tag)}
-        <span class="class-tag class-tag--{tag}">{tag}</span>
-      {/each}
-    </div>
-  {/if}
+    <!-- Classification tags -->
+    {#if spec.resourceClassifiedAs?.filter(t => t !== 'communal-demand').length}
+      <div class="tag-row">
+        {#each spec.resourceClassifiedAs.filter(t => t !== 'communal-demand') as tag (tag)}
+          <span class="class-tag class-tag--{tag}">{tag}</span>
+        {/each}
+      </div>
+    {/if}
 
-  <!-- Optional description -->
-  {#if spec.note}
-    <p class="card-desc">{spec.note}</p>
+    <!-- Optional description -->
+    {#if spec.note}
+      <p class="card-desc">{spec.note}</p>
+    {/if}
   {/if}
 
   <!-- Demand rows -->
@@ -164,10 +168,10 @@
         {#if readonly}
           <span class="qty-text">{getQty(intent)}</span>
           <span class="unit-label">{getUnit()}</span>
-          <span class="pill"
-            title="Time pattern">⏰ {formatWhen(intent.availability_window) || "—"}</span>
-          <span class="pill loc-pill"
-            title="Location">📍 {locLabel(intent.atLocation)}</span>
+          {#if !compact}
+            <span class="pill" title="Time pattern">⏰ {formatWhen(intent.availability_window) || "—"}</span>
+            <span class="pill loc-pill" title="Location">📍 {locLabel(intent.atLocation)}</span>
+          {/if}
         {:else}
           <input
             type="number"
@@ -179,18 +183,33 @@
             step="1"
           />
           <span class="unit-label">{getUnit()}</span>
-          <button
-            class="pill"
-            class:active={expandedTimeId === intent.id}
-            onclick={() => toggleTime(intent.id)}
-            title="Time pattern"
-          >⏰ {formatWhen(intent.availability_window) || "—"}</button>
-          <button
-            class="pill loc-pill"
-            class:active={expandedLocId === intent.id}
-            onclick={() => toggleLoc(intent.id)}
-            title="Location"
-          >📍 {locLabel(intent.atLocation)}</button>
+          {#if compact}
+            <button
+              class="icon-btn"
+              class:active={expandedTimeId === intent.id}
+              onclick={() => toggleTime(intent.id)}
+              title={formatWhen(intent.availability_window) || "Set time pattern"}
+            >⏰</button>
+            <button
+              class="icon-btn"
+              class:active={expandedLocId === intent.id}
+              onclick={() => toggleLoc(intent.id)}
+              title={locLabel(intent.atLocation) || "Set location"}
+            >📍</button>
+          {:else}
+            <button
+              class="pill"
+              class:active={expandedTimeId === intent.id}
+              onclick={() => toggleTime(intent.id)}
+              title="Time pattern"
+            >⏰ {formatWhen(intent.availability_window) || "—"}</button>
+            <button
+              class="pill loc-pill"
+              class:active={expandedLocId === intent.id}
+              onclick={() => toggleLoc(intent.id)}
+              title="Location"
+            >📍 {locLabel(intent.atLocation)}</button>
+          {/if}
           <button class="del" onclick={() => onDelete?.(intent.id)}>✕</button>
         {/if}
       </div>
@@ -478,4 +497,78 @@
   }
 
   .add-row:hover { background: rgba(124, 58, 237, 0.1); }
+
+  .icon-btn {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--bg-overlay);
+    padding: 1px 3px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.7rem;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .icon-btn.active {
+    background: rgba(124, 58, 237, 0.2);
+    border-color: rgba(124, 58, 237, 0.5);
+  }
+
+  /* ---- Compact mode ---- */
+  .card.compact {
+    width: 140px;
+    min-height: 0;
+  }
+
+  .card.compact .card-header {
+    padding: 3px 5px;
+  }
+
+  .card.compact .emoji {
+    font-size: 0.75rem;
+  }
+
+  .card.compact .spec-name {
+    font-size: 0.68rem;
+  }
+
+  .card.compact .unit-input {
+    width: 36px;
+    font-size: 0.55rem;
+  }
+
+  .card.compact .unit-display {
+    font-size: 0.55rem;
+  }
+
+  .card.compact .row {
+    padding: 2px 5px;
+    gap: 2px;
+  }
+
+  .card.compact .qty {
+    width: 38px;
+    font-size: 0.65rem;
+    padding: 1px 3px;
+  }
+
+  .card.compact .qty-text {
+    width: 38px;
+    font-size: 0.65rem;
+  }
+
+  .card.compact .unit-label {
+    font-size: 0.55rem;
+  }
+
+  .card.compact .del {
+    padding: 1px 3px;
+    font-size: 0.55rem;
+  }
+
+  .card.compact .add-row {
+    margin: 3px 5px;
+    font-size: 0.58rem;
+    padding: 1px 5px;
+  }
 </style>
