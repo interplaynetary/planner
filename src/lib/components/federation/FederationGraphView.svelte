@@ -119,7 +119,6 @@
   function hierColor(toId: string): string {
     const r = byScope.get(toId);
     if (!r) return "var(--border-faint)";
-    if (r.deficits.some((d) => d.shortfall > 0)) return "rgba(252,88,88,0.50)";
     if (r.deficits.some((d) => (d.originalShortfall ?? 0) > 0)) return "rgba(126,232,162,0.45)";
     if (r.surplus.length > 0) return "rgba(126,232,162,0.35)";
     return "var(--border-dim)";
@@ -190,8 +189,6 @@
 
   function nodeStroke(id: string): string {
     const r = byScope.get(id);
-    if (r?.deficits.some((d) => d.shortfall > 0)) return "#fc5858";
-    if (r?.metabolicDebt?.length) return "#e8b04e";
     if (r?.deficits.some((d) => (d.originalShortfall ?? 0) > 0)) return "#7ee8a2";
     const role = nodeRole(id);
     if (role === "root") return "rgba(120,195,255,0.85)";
@@ -322,7 +319,7 @@
         result?.surplus.reduce((s, x) => s + x.quantity, 0) ?? 0}
       {@const defCount =
         result?.deficits.filter((d) => d.shortfall > 0).length ?? 0}
-      {@const hasDebt = (result?.metabolicDebt?.length ?? 0) > 0}
+
       {@const totalOrig =
         result?.deficits.reduce(
           (s, d) => s + (d.originalShortfall ?? d.shortfall),
@@ -450,11 +447,6 @@
           {:else if result && result.deficits.length > 0}
             <rect x={20} y={-28} width={30} height={13} rx={2} fill="rgba(126,232,162,0.20)" />
             <text x={35} y={-19} text-anchor="middle" class="badge-txt" fill="#7ee8a2">✓</text>
-          {/if}
-
-          <!-- Debt label -->
-          {#if hasDebt}
-            <text x={-44} y={32} class="node-stat yellow-txt">debt</text>
           {/if}
 
           <!-- Residual bar -->

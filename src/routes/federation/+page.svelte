@@ -348,10 +348,11 @@
       rs.addRecipe({ id: "recipe-salted-fish", name: "Salted Fish", primaryOutput: "salted-fish", recipeProcesses: [rp.id] });
     }
 
-    // commune-salter: salt + work → brine
+    // commune-salter: salt + fish + work → brine  (fish for garum-style brine; fish=0 at commune-salter → Phase B blocked)
     {
       const rp = rs.addRecipeProcess({ id: "rp-brine-prep", name: "Brine Preparation", processConformsTo: "ps-brine-prep" });
       rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 5,  hasUnit: "kg" } });
       rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 8, hasUnit: "hr" } });
       rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "brine", resourceQuantity: { hasNumericalValue: 60, hasUnit: "liter" } });
       rs.addRecipe({ id: "recipe-brine-making", name: "Brine Making", primaryOutput: "brine", recipeProcesses: [rp.id] });
@@ -444,10 +445,11 @@
       rs.addRecipe({ id: "recipe-grain-ale", name: "Grain Ale Brewing", primaryOutput: "ale", recipeProcesses: [rp1.id, rp2.id] });
     }
 
-    // commune-dairy: dairy + work → yogurt  (uses dairy's 80 kg capacity)
+    // commune-dairy: dairy + citrus + work → yogurt  (citrus as culture agent; citrus=0 at commune-dairy → Phase B blocked)
     {
       const rp = rs.addRecipeProcess({ id: "rp-yogurt-making", name: "Yogurt Culturing", processConformsTo: "ps-yogurt-making" });
-      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "dairy",  resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 5,  hasUnit: "kg" } });
       rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 8, hasUnit: "hr" } });
       rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "yogurt", resourceQuantity: { hasNumericalValue: 28, hasUnit: "kg" } });
       rs.addRecipe({ id: "recipe-yogurt", name: "Yogurt", primaryOutput: "yogurt", recipeProcesses: [rp.id] });
@@ -466,10 +468,11 @@
       rs.addRecipe({ id: "recipe-agri-tools", name: "Agricultural Tools", primaryOutput: "agri-tools", recipeProcesses: [rpSmelt.id, rpForge.id] });
     }
 
-    // commune-fisher: fish + work → smoked-fish  (uses fisher's 80 kg capacity)
+    // commune-fisher: fish + salt + work → smoked-fish  (salt=0 at commune-fisher → Phase B blocked)
     {
       const rp = rs.addRecipeProcess({ id: "rp-fish-smoking", name: "Fish Smoking", processConformsTo: "ps-fish-smoking" });
       rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 4,  hasUnit: "kg" } });
       rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 20, hasUnit: "hr" } });
       rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "smoked-fish", resourceQuantity: { hasNumericalValue: 22, hasUnit: "kg" } });
       rs.addRecipe({ id: "recipe-smoked-fish", name: "Smoked Fish", primaryOutput: "smoked-fish", recipeProcesses: [rp.id] });
@@ -486,10 +489,11 @@
       rs.addRecipe({ id: "recipe-fish-chowder", name: "Fish Chowder", primaryOutput: "fish-chowder", recipeProcesses: [rp.id] });
     }
 
-    // commune-citrus: citrus + work → vinegar  (fermentation; useful as preservative across federation)
+    // commune-citrus: citrus + salt + work → vinegar  (salt for fermentation starter; salt=0 at commune-citrus → Phase B blocked)
     {
       const rp = rs.addRecipeProcess({ id: "rp-citrus-fermentation", name: "Citrus Fermentation", processConformsTo: "ps-citrus-fermentation" });
       rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 3,  hasUnit: "kg" } });
       rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 6, hasUnit: "hr" } });
       rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "vinegar", resourceQuantity: { hasNumericalValue: 25, hasUnit: "liter" } });
       rs.addRecipe({ id: "recipe-citrus-vinegar", name: "Citrus Vinegar", primaryOutput: "vinegar", recipeProcesses: [rp.id] });
@@ -532,39 +536,39 @@
   // Safety-stock levels only — kept low so demand exceeds on-hand and recipes fire
   const mockResources = new Map<string, EconomicResource[]>([
     ["commune-grain", [{ id: "res-grain-wheat", name: "Wheat Reserve", conformsTo: "wheat",
-      accountingQuantity: { hasNumericalValue: 40, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 40, hasUnit: "kg" },
+      accountingQuantity: { hasNumericalValue: 80, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 80, hasUnit: "kg" },
       primaryAccountable: "commune-grain", custodianScope: "commune-grain" }]],
     ["commune-dairy", [{ id: "res-dairy-dairy", name: "Dairy Stock", conformsTo: "dairy",
-      accountingQuantity: { hasNumericalValue: 15, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 15, hasUnit: "kg" },
+      accountingQuantity: { hasNumericalValue: 30, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 30, hasUnit: "kg" },
       primaryAccountable: "commune-dairy", custodianScope: "commune-dairy" }]],
     ["commune-forge", [
       { id: "res-forge-tools", name: "Tool Stock", conformsTo: "tools",
-        accountingQuantity: { hasNumericalValue: 10, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 10, hasUnit: "unit" },
+        accountingQuantity: { hasNumericalValue: 20, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 20, hasUnit: "unit" },
         primaryAccountable: "commune-forge", classifiedAs: ["individual-claimable"], custodianScope: "commune-forge" },
       { id: "res-forge-ore", name: "Iron Ore", conformsTo: "ore",
-        accountingQuantity: { hasNumericalValue: 200, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 200, hasUnit: "kg" },
+        accountingQuantity: { hasNumericalValue: 400, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 400, hasUnit: "kg" },
         primaryAccountable: "commune-forge", custodianScope: "commune-forge" },
     ]],
     ["commune-workshop", [{ id: "res-workshop-goods", name: "Goods Stock", conformsTo: "goods",
-      accountingQuantity: { hasNumericalValue: 8, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 8, hasUnit: "unit" },
+      accountingQuantity: { hasNumericalValue: 16, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 16, hasUnit: "unit" },
       primaryAccountable: "commune-workshop", custodianScope: "commune-workshop" }]],
     ["commune-olive", [{ id: "res-olive-oil", name: "Olive Oil", conformsTo: "olive-oil",
-      accountingQuantity: { hasNumericalValue: 18, hasUnit: "liter" }, onhandQuantity: { hasNumericalValue: 18, hasUnit: "liter" },
+      accountingQuantity: { hasNumericalValue: 36, hasUnit: "liter" }, onhandQuantity: { hasNumericalValue: 36, hasUnit: "liter" },
       primaryAccountable: "commune-olive", custodianScope: "commune-olive" }]],
     ["commune-citrus", [{ id: "res-citrus-fruit", name: "Citrus Fruits", conformsTo: "citrus",
-      accountingQuantity: { hasNumericalValue: 30, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 30, hasUnit: "kg" },
+      accountingQuantity: { hasNumericalValue: 60, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 60, hasUnit: "kg" },
       primaryAccountable: "commune-citrus", classifiedAs: ["individual-claimable"], custodianScope: "commune-citrus" }]],
     ["commune-mill", [{ id: "res-mill-flour", name: "Flour Reserve", conformsTo: "flour",
-      accountingQuantity: { hasNumericalValue: 12, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 12, hasUnit: "kg" },
+      accountingQuantity: { hasNumericalValue: 24, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 24, hasUnit: "kg" },
       primaryAccountable: "commune-mill", custodianScope: "commune-mill" }]],
     ["commune-bakery", [{ id: "res-bakery-bread", name: "Bread Stock", conformsTo: "bread",
-      accountingQuantity: { hasNumericalValue: 25, hasUnit: "loaf" }, onhandQuantity: { hasNumericalValue: 25, hasUnit: "loaf" },
+      accountingQuantity: { hasNumericalValue: 50, hasUnit: "loaf" }, onhandQuantity: { hasNumericalValue: 50, hasUnit: "loaf" },
       primaryAccountable: "commune-bakery", classifiedAs: ["individual-claimable"], custodianScope: "commune-bakery" }]],
     ["commune-fisher", [{ id: "res-fisher-fish", name: "Fish Stock", conformsTo: "fish",
-      accountingQuantity: { hasNumericalValue: 20, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 20, hasUnit: "kg" },
+      accountingQuantity: { hasNumericalValue: 40, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 40, hasUnit: "kg" },
       primaryAccountable: "commune-fisher", custodianScope: "commune-fisher" }]],
     ["commune-salter", [{ id: "res-salter-salt", name: "Salt Reserve", conformsTo: "salt",
-      accountingQuantity: { hasNumericalValue: 35, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 35, hasUnit: "kg" },
+      accountingQuantity: { hasNumericalValue: 70, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 70, hasUnit: "kg" },
       primaryAccountable: "commune-salter", classifiedAs: ["individual-claimable"], custodianScope: "commune-salter" }]],
   ]);
 
@@ -658,18 +662,18 @@
   // Phase B of planForScope sees these as supply slots → generates SurplusSignal → lateral matching has a non-empty surplusPool.
   const produceIntents: Intent[] = [
     // Primary harvesters / extractors — no inputs needed
-    // outputOf references the actual recipe process ID that produces this spec
-    { id: "pi-grain-wheat",    action: "produce", outputOf: "rp-wheat-harvest",   resourceConformsTo: "wheat",     resourceQuantity: { hasNumericalValue: 320,  hasUnit: "kg"    }, inScopeOf: ["commune-grain"]    },
-    { id: "pi-dairy-dairy",    action: "produce", outputOf: "rp-dairy-prod",       resourceConformsTo: "dairy",     resourceQuantity: { hasNumericalValue: 80,   hasUnit: "kg"    }, inScopeOf: ["commune-dairy"]    },
-    { id: "pi-forge-tools",    action: "produce", outputOf: "rp-smithing",         resourceConformsTo: "tools",     resourceQuantity: { hasNumericalValue: 80,   hasUnit: "unit"  }, inScopeOf: ["commune-forge"]    },
-    { id: "pi-workshop-goods", action: "produce", outputOf: "rp-manufacturing",    resourceConformsTo: "goods",     resourceQuantity: { hasNumericalValue: 60,   hasUnit: "unit"  }, inScopeOf: ["commune-workshop"] },
-    { id: "pi-olive-oil",      action: "produce", outputOf: "rp-olive-pressing",   resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 100,  hasUnit: "liter" }, inScopeOf: ["commune-olive"]    },
-    { id: "pi-citrus-citrus",  action: "produce", outputOf: "rp-citrus-harvest",   resourceConformsTo: "citrus",    resourceQuantity: { hasNumericalValue: 150,  hasUnit: "kg"    }, inScopeOf: ["commune-citrus"]   },
+    // Quantities set ~2x expected demand to ensure ample surplus for lateral matching
+    { id: "pi-grain-wheat",    action: "produce", outputOf: "rp-wheat-harvest",   resourceConformsTo: "wheat",     resourceQuantity: { hasNumericalValue: 600,  hasUnit: "kg"    }, inScopeOf: ["commune-grain"]    },
+    { id: "pi-dairy-dairy",    action: "produce", outputOf: "rp-dairy-prod",       resourceConformsTo: "dairy",     resourceQuantity: { hasNumericalValue: 200,  hasUnit: "kg"    }, inScopeOf: ["commune-dairy"]    },
+    { id: "pi-forge-tools",    action: "produce", outputOf: "rp-smithing",         resourceConformsTo: "tools",     resourceQuantity: { hasNumericalValue: 160,  hasUnit: "unit"  }, inScopeOf: ["commune-forge"]    },
+    { id: "pi-workshop-goods", action: "produce", outputOf: "rp-manufacturing",    resourceConformsTo: "goods",     resourceQuantity: { hasNumericalValue: 120,  hasUnit: "unit"  }, inScopeOf: ["commune-workshop"] },
+    { id: "pi-olive-oil",      action: "produce", outputOf: "rp-olive-pressing",   resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 200,  hasUnit: "liter" }, inScopeOf: ["commune-olive"]    },
+    { id: "pi-citrus-citrus",  action: "produce", outputOf: "rp-citrus-harvest",   resourceConformsTo: "citrus",    resourceQuantity: { hasNumericalValue: 400,  hasUnit: "kg"    }, inScopeOf: ["commune-citrus"]   },
     // Processors — produce output from inputs sourced via lateral matching
-    { id: "pi-mill-flour",     action: "produce", outputOf: "rp-flour-sifting",    resourceConformsTo: "flour",     resourceQuantity: { hasNumericalValue: 160,  hasUnit: "kg"    }, inScopeOf: ["commune-mill"]     },
-    { id: "pi-bakery-bread",   action: "produce", outputOf: "rp-baking",           resourceConformsTo: "bread",     resourceQuantity: { hasNumericalValue: 200,  hasUnit: "loaf"  }, inScopeOf: ["commune-bakery"]   },
-    { id: "pi-fisher-fish",    action: "produce", outputOf: "rp-fishing",          resourceConformsTo: "fish",      resourceQuantity: { hasNumericalValue: 80,   hasUnit: "kg"    }, inScopeOf: ["commune-fisher"]   },
-    { id: "pi-salter-salt",    action: "produce", outputOf: "rp-salt-extraction",  resourceConformsTo: "salt",      resourceQuantity: { hasNumericalValue: 160,  hasUnit: "kg"    }, inScopeOf: ["commune-salter"]   },
+    { id: "pi-mill-flour",     action: "produce", outputOf: "rp-flour-sifting",    resourceConformsTo: "flour",     resourceQuantity: { hasNumericalValue: 350,  hasUnit: "kg"    }, inScopeOf: ["commune-mill"]     },
+    { id: "pi-bakery-bread",   action: "produce", outputOf: "rp-baking",           resourceConformsTo: "bread",     resourceQuantity: { hasNumericalValue: 450,  hasUnit: "loaf"  }, inScopeOf: ["commune-bakery"]   },
+    { id: "pi-fisher-fish",    action: "produce", outputOf: "rp-fishing",          resourceConformsTo: "fish",      resourceQuantity: { hasNumericalValue: 200,  hasUnit: "kg"    }, inScopeOf: ["commune-fisher"]   },
+    { id: "pi-salter-salt",    action: "produce", outputOf: "rp-salt-extraction",  resourceConformsTo: "salt",      resourceQuantity: { hasNumericalValue: 450,  hasUnit: "kg"    }, inScopeOf: ["commune-salter"]   },
   ];
 
   // Supply index = on-hand inventory + committed produce intents (Stratum 2a).
@@ -991,6 +995,49 @@
     }
     newSpecId = '';
   }
+
+  // ── AI RECIPE WORKSHOP ──────────────────────────────────────────────────────
+  interface GeneratedRecipe {
+    recipe: { id: string; name: string; note?: string; primaryOutput?: string };
+    processes: { id: string; name: string; note?: string; hasDuration?: { hasNumericalValue: number; hasUnit: string }; sequenceGroup?: number }[];
+    flows: { id: string; action: string; resourceConformsTo?: string; resourceQuantity?: { hasNumericalValue: number; hasUnit: string }; effortQuantity?: { hasNumericalValue: number; hasUnit: string }; recipeInputOf?: string; recipeOutputOf?: string }[];
+    active: boolean;
+  }
+
+  const AI_EXAMPLES = [
+    'Bake sourdough bread from flour, water, and salt',
+    'Forge iron tools from ore and charcoal via smelting and smithing',
+    'Press olive oil from fresh olives',
+    'Mill wheat into flour using stone grinding',
+    'Brew ale from malted barley, hops, and yeast',
+    'Cure fish with salt for preservation',
+    'Weave linen fabric from flax fibre',
+    'Make cheese from fresh dairy milk',
+  ];
+
+  let showAiWorkshop = $state(false);
+  let aiPrompt = $state('');
+  let aiGenerating = $state(false);
+  let aiError = $state('');
+  let aiGenerated = $state<GeneratedRecipe[]>([]);
+
+  async function generateRecipe() {
+    if (!aiPrompt.trim() || aiGenerating) return;
+    aiGenerating = true;
+    aiError = '';
+    const res = await fetch('/api/generate-recipe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: aiPrompt }),
+    });
+    const payload = await res.json();
+    if (payload.success) {
+      aiGenerated = [{ ...payload.data, active: true }, ...aiGenerated];
+    } else {
+      aiError = payload.error ?? 'Generation failed';
+    }
+    aiGenerating = false;
+  }
 </script>
 
 <div class="page">
@@ -1062,7 +1109,70 @@
             onclick={() => (mode = "observe")}>OBSERVE</button
           >
         </div>
+        <button class="recipe-ai-btn" class:open={showAiWorkshop} onclick={() => showAiWorkshop = !showAiWorkshop} title="AI Recipe Workshop">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+            <path d="M8 1 L9.5 6 L14 6 L10.5 9 L12 14 L8 11 L4 14 L5.5 9 L2 6 L6.5 6 Z"/>
+          </svg>
+          RECIPE AI
+          {#if aiGenerated.length > 0}<span class="recipe-count-badge">{aiGenerated.length}</span>{/if}
+        </button>
       </div>
+      {#if showAiWorkshop}
+        <div class="ai-workshop-wrap">
+          <div class="ai-prompt-area">
+            <div class="ai-chips">
+              {#each AI_EXAMPLES as ex (ex)}
+                <button class="ai-chip" onclick={() => aiPrompt = ex}>{ex}</button>
+              {/each}
+            </div>
+            <textarea
+              bind:value={aiPrompt}
+              placeholder="Describe a production process…"
+              rows="3"
+              onkeydown={(e) => { if (e.ctrlKey && e.key === 'Enter') generateRecipe(); }}
+            ></textarea>
+            {#if aiError}<div class="ai-error">{aiError}</div>{/if}
+            <button class="ai-generate-btn" onclick={generateRecipe} disabled={aiGenerating || !aiPrompt.trim()}>
+              {aiGenerating ? 'GENERATING…' : 'GENERATE RECIPE'}
+            </button>
+          </div>
+          {#if aiGenerated.length > 0}
+            <div class="ai-cards-area">
+              {#each aiGenerated as r (r.recipe.id)}
+                <div class="ai-recipe-card" class:rc-active={r.active} class:rc-inactive={!r.active}>
+                  <div class="ai-card-head">
+                    <span class="ai-card-name">{r.recipe.name}</span>
+                    <button class="ai-toggle-pill" class:pill-active={r.active} onclick={() => r.active = !r.active}>
+                      {r.active ? 'ACTIVE' : 'INACTIVE'}
+                    </button>
+                  </div>
+                  {#if r.recipe.note}<div class="ai-card-note">{r.recipe.note}</div>{/if}
+                  <div class="ai-section-lbl">PROCESSES</div>
+                  {#each [...r.processes].sort((a, b) => (a.sequenceGroup ?? 99) - (b.sequenceGroup ?? 99)) as p (p.id)}
+                    <div class="ai-proc-row">
+                      <span class="ai-proc-seq">{p.sequenceGroup ?? '—'}</span>
+                      <span class="ai-proc-name">{p.name}</span>
+                      {#if p.hasDuration}<span class="ai-proc-dur">{p.hasDuration.hasNumericalValue} {p.hasDuration.hasUnit}</span>{/if}
+                    </div>
+                  {/each}
+                  <div class="ai-section-lbl">FLOWS</div>
+                  {#each r.flows as f (f.id)}
+                    <div class="ai-flow-row">
+                      <span class="ai-action-badge ab-{f.action}">{f.action}</span>
+                      <span class="ai-flow-spec">{f.resourceConformsTo ?? '—'}</span>
+                      {#if f.resourceQuantity}
+                        <span class="ai-flow-qty">{f.resourceQuantity.hasNumericalValue} {f.resourceQuantity.hasUnit}</span>
+                      {:else if f.effortQuantity}
+                        <span class="ai-flow-qty">{f.effortQuantity.hasNumericalValue} {f.effortQuantity.hasUnit}</span>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
       <div class="network-body">
         <div class="network-diagram-wrap">
           <ScopeNetworkDiagram
@@ -1551,6 +1661,148 @@
     padding: 8px 12px;
     max-height: 240px;
   }
+
+  /* ---- RECIPE AI button ---- */
+  .recipe-ai-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    margin-left: 8px;
+    padding: 2px 10px 2px 7px;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: #b794f4;
+    background: rgba(159, 122, 234, 0.08);
+    border: 1px solid rgba(159, 122, 234, 0.35);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  }
+  .recipe-ai-btn svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .recipe-ai-btn:hover, .recipe-ai-btn.open {
+    background: rgba(159, 122, 234, 0.16);
+    border-color: rgba(159, 122, 234, 0.7);
+    box-shadow: 0 0 8px rgba(159, 122, 234, 0.25);
+    color: #d6bcfa;
+  }
+  .recipe-count-badge {
+    background: rgba(159, 122, 234, 0.3);
+    border-radius: 8px;
+    font-size: 0.5rem;
+    padding: 0 5px;
+    line-height: 1.6;
+  }
+
+  /* ---- AI Workshop panel ---- */
+  .ai-workshop-wrap {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border-faint);
+    background: var(--bg-overlay);
+    max-height: 480px;
+    overflow: hidden;
+  }
+  .ai-prompt-area {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-faint);
+    flex-shrink: 0;
+  }
+  .ai-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .ai-chip {
+    font-family: var(--font-mono);
+    font-size: 0.52rem;
+    padding: 2px 7px;
+    background: transparent;
+    border: 1px solid rgba(214, 158, 46, 0.3);
+    color: rgba(214, 158, 46, 0.75);
+    cursor: pointer;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .ai-chip:hover {
+    background: rgba(214, 158, 46, 0.08);
+    color: rgba(214, 158, 46, 1);
+  }
+  .ai-workshop-wrap textarea {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-dim);
+    color: #e2e8f0;
+    border-radius: 3px;
+    padding: 6px;
+    resize: vertical;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .ai-workshop-wrap textarea:focus { outline: none; border-color: rgba(126,232,162,0.4); }
+  .ai-error { font-family: var(--font-mono); font-size: 0.58rem; color: #fc5858; }
+  .ai-generate-btn {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    padding: 4px 14px;
+    background: transparent;
+    border: 1px solid rgba(126,232,162,0.4);
+    color: rgba(126,232,162,0.85);
+    cursor: pointer;
+    border-radius: 3px;
+    align-self: flex-start;
+    letter-spacing: 0.07em;
+  }
+  .ai-generate-btn:hover:not(:disabled) { background: rgba(126,232,162,0.08); border-color: rgba(126,232,162,0.7); }
+  .ai-generate-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .ai-cards-area {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px 14px;
+    overflow-y: auto;
+    flex: 1;
+    align-content: flex-start;
+  }
+  .ai-recipe-card {
+    font-family: var(--font-mono);
+    border-radius: 4px;
+    padding: 9px 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    width: 240px;
+    flex-shrink: 0;
+  }
+  .rc-active  { border: 1px solid rgba(126,232,162,0.5); background: rgba(126,232,162,0.04); }
+  .rc-inactive { border: 1px solid rgba(255,255,255,0.07); background: rgba(255,255,255,0.02); opacity: 0.4; }
+  .ai-card-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .ai-card-name { font-size: 0.58rem; font-weight: 600; color: rgba(228,238,255,0.9); }
+  .ai-toggle-pill {
+    font-family: var(--font-mono); font-size: 0.46rem; padding: 1px 6px; border-radius: 20px;
+    cursor: pointer; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.13); color: rgba(255,255,255,0.4); letter-spacing: 0.04em;
+  }
+  .ai-toggle-pill.pill-active { background: rgba(126,232,162,0.1); border-color: rgba(126,232,162,0.38); color: rgba(126,232,162,0.88); }
+  .ai-card-note { font-size: 0.5rem; opacity: 0.52; line-height: 1.4; }
+  .ai-section-lbl { font-size: 0.43rem; letter-spacing: 0.1em; opacity: 0.38; margin-top: 2px; }
+  .ai-proc-row { display: flex; align-items: center; gap: 5px; font-size: 0.5rem; }
+  .ai-proc-seq { opacity: 0.38; font-size: 0.46rem; min-width: 10px; }
+  .ai-proc-name { flex: 1; color: rgba(228,238,255,0.8); }
+  .ai-proc-dur { opacity: 0.43; font-size: 0.46rem; }
+  .ai-flow-row { display: flex; align-items: center; gap: 4px; font-size: 0.48rem; }
+  .ai-action-badge { font-size: 0.42rem; padding: 1px 4px; border-radius: 2px; background: rgba(255,255,255,0.07); color: rgba(255,255,255,0.48); white-space: nowrap; }
+  .ab-produce  { background: rgba(126,232,162,0.11); color: #7ee8a2; }
+  .ab-consume  { background: rgba(252, 88, 88,0.11); color: #fc5858; }
+  .ab-work     { background: rgba(118,195,245,0.11); color: #76c3f5; }
+  .ab-transfer { background: rgba(232,176, 78,0.11); color: #e8b04e; }
+  .ai-flow-spec { flex: 1; color: rgba(228,238,255,0.73); }
+  .ai-flow-qty  { opacity: 0.43; white-space: nowrap; }
 
   /* ---- Demands band ---- */
   .demands-band {
