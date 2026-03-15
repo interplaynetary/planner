@@ -24,7 +24,7 @@ import { nanoid } from 'nanoid';
 
 import type { Intent } from '../schemas';
 import type { RecipeStore } from '../knowledge/recipes';
-import type { Observer } from '../observation/observer';
+import { Observer } from '../observation/observer';
 import { PlanStore } from './planning';
 import { ProcessRegistry } from '../process-registry';
 import { PlanNetter } from './netting';
@@ -733,6 +733,29 @@ export function planForScope(
                 plannedWithin: supplyPlanId,
                 finished: false,
             });
+            // Produce intents represent committed production for export to other scopes.
+            // Routing them through dependentSupply would greedily absorb them into local
+            // downstream recipes, leaving no surplus for lateral matching.
+            // Treat the entire quantity as surplus directly.
+            allSurplus.push({
+                specId: supplySlot.spec_id,
+                quantity: supplySlot.quantity,
+                plannedWithin: supplyPlanId,
+                availableFrom: supplySlot.available_from,
+                atLocation: supplySlot.h3_cell,
+            });
+            continue;
+        }
+
+        // For inventory slots: use a scope-local observer so computeMaxByOtherMaterials
+        // only sees resources available within this planning scope, not federation-wide.
+        // This prevents cross-scope resources from satisfying local recipe constraints
+        // and causing greedy absorption of inventory that should flow to lateral matching.
+        const scopedObserver = new Observer();
+        for (const r of ctx.observer.allResources()) {
+            if (r.custodianScope && canonical.includes(r.custodianScope)) {
+                scopedObserver.seedResource(r);
+            }
         }
 
         const result = dependentSupply({
@@ -745,7 +768,7 @@ export function planForScope(
             recipeStore: ctx.recipeStore,
             planStore,
             processes,
-            observer: ctx.observer,
+            observer: scopedObserver,
             netter,
             agents: ctx.agents,
             generateId,

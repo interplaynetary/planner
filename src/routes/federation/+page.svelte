@@ -236,10 +236,11 @@
       rs.addRecipe({ id: "recipe-wheat-porridge", name: "Wheat Porridge", primaryOutput: "porridge", recipeProcesses: [rp.id] });
     }
 
-    // commune-dairy: dairy + work → butter
+    // commune-dairy: dairy + salt + work → butter  (salt for salted butter; salt=0 at commune-dairy scoped → Phase B blocked)
     {
       const rp = rs.addRecipeProcess({ id: "rp-churning", name: "Butter Churning", processConformsTo: "ps-churning" });
       rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt",  resourceQuantity: { hasNumericalValue: 5,  hasUnit: "kg" } });
       rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 16, hasUnit: "hr" } });
       rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "butter", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" } });
       rs.addRecipe({ id: "recipe-butter-churning", name: "Butter Churning", primaryOutput: "butter", recipeProcesses: [rp.id] });
@@ -286,10 +287,11 @@
       rs.addRecipe({ id: "recipe-soap-making", name: "Olive Oil Soap", primaryOutput: "soap", recipeProcesses: [rp.id] });
     }
 
-    // commune-citrus: citrus + work → juice
+    // commune-citrus: citrus + salt + work → juice  (salt for preservation; salt=0 at commune-citrus scoped → Phase B blocked)
     {
       const rp = rs.addRecipeProcess({ id: "rp-juice-pressing", name: "Juice Pressing", processConformsTo: "ps-juice-pressing" });
       rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 60, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 2,  hasUnit: "kg" } });
       rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 12, hasUnit: "hr" } });
       rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "juice", resourceQuantity: { hasNumericalValue: 40, hasUnit: "liter" } });
       rs.addRecipe({ id: "recipe-juice-pressing", name: "Citrus Juice", primaryOutput: "juice", recipeProcesses: [rp.id] });
@@ -432,10 +434,11 @@
 
     // ── Capacity-chain recipes (cross-commune dependencies) ─────────────────
 
-    // commune-grain: wheat → malt → ale  (uses grain's 320 kg wheat capacity)
+    // commune-grain: wheat + metal → malt → ale  (metal for brewing vessels; metal=0 at commune-grain scoped → Phase B blocked)
     {
       const rp1 = rs.addRecipeProcess({ id: "rp-grain-mashing", name: "Grain Mashing", processConformsTo: "ps-grain-mashing" });
       rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "wheat", resourceQuantity: { hasNumericalValue: 80, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp1.id, resourceConformsTo: "metal", resourceQuantity: { hasNumericalValue: 1,  hasUnit: "kg" } });
       rs.addRecipeFlow({ action: "work", recipeInputOf: rp1.id, effortQuantity: { hasNumericalValue: 12, hasUnit: "hr" } });
       rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp1.id, resourceConformsTo: "malt", resourceQuantity: { hasNumericalValue: 60, hasUnit: "kg" } });
       const rp2 = rs.addRecipeProcess({ id: "rp-ale-fermentation", name: "Ale Fermentation", processConformsTo: "ps-ale-fermentation" });
