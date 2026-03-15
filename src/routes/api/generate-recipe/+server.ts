@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { OPENROUTER_API_KEY } from '$env/static/private';
+import { env } from '$env/dynamic/private';
 import { AIPipe, type LLMProvider } from '$lib/ai-pipe';
 import OpenAI from 'openai';
 import { z } from 'zod';
@@ -108,7 +108,7 @@ Rules:
 export const POST = async ({ request }) => {
   const { prompt } = await request.json();
 
-  const pipe = new AIPipe(new OpenRouterProvider(OPENROUTER_API_KEY));
+  const pipe = new AIPipe(new OpenRouterProvider(env.OPENROUTER_API_KEY ?? ''));
   const result = await pipe.generate({
     schema: AIRecipeSchema,
     prompt,
