@@ -3,7 +3,6 @@
   import FederationGraphView from "$lib/components/federation/FederationGraphView.svelte";
   import FederationEventLog from "$lib/components/federation/FederationEventLog.svelte";
   import InventoryBand from "$lib/components/federation/InventoryBand.svelte";
-  import DeficitResidualBar from "$lib/components/federation/DeficitResidualBar.svelte";
   import ScopeNetworkDiagram from "$lib/components/federation/ScopeNetworkDiagram.svelte";
   import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
   import type {
@@ -1525,12 +1524,19 @@
           <span class="band-divider"></span>
           <span class="band-lbl">DEFICITS</span>
           {#each selectedResult.deficits as d (d.intentId)}
-            <DeficitResidualBar
-              specId={d.specId}
-              shortfall={d.shortfall}
-              originalShortfall={d.originalShortfall}
-              resolvedAt={d.resolvedAt ?? []}
-            />
+            {@const orig = d.originalShortfall ?? d.shortfall}
+            {@const pctRes = orig > 0 ? Math.round(((orig - d.shortfall) / orig) * 100) : 0}
+            {@const fillPx = Math.round((pctRes / 100) * 48)}
+            <span class="deficit-chip">
+              <span class="deficit-spec">{d.specId}</span>
+              <span class="deficit-minibar">
+                <span class="deficit-fill" style="width:{fillPx}px"></span>
+              </span>
+              <span class="deficit-pct" style="color:{pctRes === 100 ? '#7ee8a2' : '#fc5858'}">{pctRes}%</span>
+              {#if d.resolvedAt?.length}
+                <span class="deficit-via">{d.resolvedAt[0]}</span>
+              {/if}
+            </span>
           {/each}
         {/if}
         {#if selectedResult.metabolicDebt.length > 0}
@@ -1606,40 +1612,11 @@
             <span class="inline-item">
               <span class="band-spec">{s.specId}</span>
               <span class="green">{s.quantity}</span>
-              {#if s.availableFrom}<span class="muted">{s.availableFrom}</span
-                >{/if}
+              {#if s.availableFrom}<span class="muted">{s.availableFrom}</span>{/if}
             </span>
           {/each}
         {/if}
-        {#if hasTrades}
-          <span class="band-divider"></span>
-          <span class="band-lbl">INTER-SCOPE SUPPORTS</span>
-          {#each outgoingTrades as t (t.id)}
-            <span class="inline-trade">
-              <span class="trade-arrow" style="color:#76c3f5">→</span>
-              <span class="trade-peer">{t.toScopeId}</span>
-              <span class="trade-meta">{t.specId} ×{t.quantity}</span>
-              <span
-                class="trade-status"
-                style="color:{tradeStatusColor(t.status)}"
-                >{t.status.toUpperCase()}</span
-              >
-            </span>
-          {/each}
-          {#each incomingTrades as t (t.id)}
-            <span class="inline-trade">
-              <span class="trade-arrow" style="color:#7ee8a2">←</span>
-              <span class="trade-peer">{t.fromScopeId}</span>
-              <span class="trade-meta">{t.specId} ×{t.quantity}</span>
-              <span
-                class="trade-status"
-                style="color:{tradeStatusColor(t.status)}"
-                >{t.status.toUpperCase()}</span
-              >
-            </span>
-          {/each}
-        {/if}
-        {#if selectedResult.surplus.length === 0 && !hasTrades}
+        {#if selectedResult.surplus.length === 0}
           <span class="band-empty">No surplus.</span>
         {/if}
       {:else}
@@ -1865,6 +1842,51 @@
 
   .band-spec {
     color: rgba(210, 228, 255, 0.88);
+  }
+
+  /* ---- Inline deficit chip (scope band, leaf communes) ---- */
+  .deficit-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.58rem;
+    padding: 1px 7px;
+    border: 1px solid rgba(104, 211, 145, 0.2);
+    border-radius: 3px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .deficit-spec { color: rgba(210, 228, 255, 0.88); }
+
+  .deficit-minibar {
+    width: 48px;
+    height: 4px;
+    background: rgba(140, 180, 255, 0.12);
+    border-radius: 2px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .deficit-fill {
+    display: block;
+    height: 100%;
+    background: #7ee8a2;
+    opacity: 0.85;
+    border-radius: 2px;
+  }
+
+  .deficit-pct {
+    font-size: 0.52rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+  }
+
+  .deficit-via {
+    color: rgba(180, 205, 255, 0.5);
+    font-size: 0.5rem;
+    letter-spacing: 0.04em;
   }
 
   .inline-trade {

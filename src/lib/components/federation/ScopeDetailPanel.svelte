@@ -9,6 +9,7 @@
   import type { StoreRegistry } from "$lib/planning/store-registry";
   import type { TradeProposal } from "$lib/planning/plan-federation";
   import type { Observer } from "$lib/observation/observer";
+  import type { FlowSelectCtx } from "$lib/components/vf/observe-types";
 
   interface Props {
     scopeId: string;
@@ -50,6 +51,67 @@
   }
 
   let mode = $state<"plan" | "observe">("plan");
+
+  // ── Observe mode: inline event recorder ─────────────────────────────────────
+  let flowCtx     = $state<FlowSelectCtx | null>(null);
+  let observerTick = $state(0);
+  let recordQty   = $state(0);
+  let recordTs    = $state('');
+  let recordNotes = $state('');
+  let recordError = $state<string | null>(null);
+  let submitting  = $state(false);
+
+  $effect(() => {
+    if (flowCtx) {
+      recordQty   = Math.max(0, flowCtx.plannedQty - flowCtx.fulfilledQty);
+      recordTs    = new Date().toISOString().slice(0, 16);
+      recordError = null;
+    }
+  });
+
+  function handleFlowSelect(ctx: FlowSelectCtx) {
+    flowCtx = ctx;
+  }
+
+  function handleRecord() {
+    if (!flowCtx || recordQty <= 0) return;
+    submitting = true;
+    const ctx = flowCtx;
+    const isWork = ctx.action === 'work';
+    try {
+      observer.record({
+        id: `ev-scope-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        action: ctx.action as any,
+        ...(ctx.isInput ? { inputOf: ctx.processId } : { outputOf: ctx.processId }),
+        resourceConformsTo: ctx.specId,
+        ...(isWork
+          ? { effortQuantity: { hasNumericalValue: recordQty, hasUnit: ctx.unit } }
+          : { resourceQuantity: { hasNumericalValue: recordQty, hasUnit: ctx.unit } }),
+        hasPointInTime: new Date(recordTs).toISOString(),
+        ...(ctx.commitmentId ? { fulfills: ctx.commitmentId } : {}),
+        ...(isWork && ctx.providerAgentId ? { provider: ctx.providerAgentId } : {}),
+        ...(recordNotes ? { note: recordNotes } : {}),
+      });
+      observerTick++;
+      recordNotes = '';
+      recordError = null;
+      // Refresh the ctx so past events list and progress update
+      const updatedEvents = observer.allEvents().filter(e =>
+        (ctx.isInput ? e.inputOf === ctx.processId : e.outputOf === ctx.processId) &&
+        e.resourceConformsTo === ctx.specId
+      );
+      const fs = ctx.commitmentId ? observer.getFulfillment(ctx.commitmentId) : null;
+      flowCtx = {
+        ...ctx,
+        existingEvents: updatedEvents,
+        fulfilledQty: fs?.totalFulfilled.hasNumericalValue ?? (ctx.fulfilledQty + recordQty),
+      };
+    } catch (e: any) {
+      recordError = e.message ?? 'Recording failed';
+    } finally {
+      submitting = false;
+    }
+  }
 </script>
 
 <aside class="detail-panel" aria-label="Scope detail: {scopeId}">
@@ -153,8 +215,83 @@
       {mode}
       {bufferZones}
       {capacityBuffers}
+      {observerTick}
+      onflowselect={handleFlowSelect}
     />
   </section>
+
+  <!-- Inline event recorder — appears when a card is clicked in observe mode -->
+  {#if flowCtx && mode === 'observe'}
+    {@const pct = flowCtx.plannedQty > 0
+      ? Math.min(100, (flowCtx.fulfilledQty / flowCtx.plannedQty) * 100)
+      : 0}
+    <section class="panel-section recorder-section">
+      <div class="rec-header">
+        <div class="rec-breadcrumb">
+          <span class="rec-proc">{flowCtx.procName}</span>
+          <span class="rec-sep">›</span>
+          <span class="rec-action" style="color:{flowCtx.action === 'work' ? '#9f7aea' : flowCtx.action === 'produce' ? '#38a169' : '#e53e3e'}">{flowCtx.action}</span>
+          <span class="rec-sep">›</span>
+          <span class="rec-spec">{flowCtx.specName}</span>
+        </div>
+        <button class="rec-close" onclick={() => (flowCtx = null)} aria-label="Close recorder">✕</button>
+      </div>
+
+      {#if flowCtx.plannedQty > 0}
+        <div class="rec-progress">
+          <div class="rec-track">
+            <div class="rec-fill" style="width:{pct}%; background:{pct >= 100 ? '#38a169' : pct >= 50 ? '#d69e2e' : '#e53e3e'}"></div>
+          </div>
+          <span class="rec-pct-label">{flowCtx.fulfilledQty.toFixed(1)} / {flowCtx.plannedQty} {flowCtx.unit} ({pct.toFixed(0)}%)</span>
+        </div>
+      {/if}
+
+      <form class="rec-form" onsubmit={(ev) => { ev.preventDefault(); handleRecord(); }}>
+        <div class="rec-row">
+          <label class="rec-label" for="sdp-qty">
+            {flowCtx.action === 'work' ? 'Hours worked' : `Quantity (${flowCtx.unit})`}
+          </label>
+          <div class="rec-qty-row">
+            <input id="sdp-qty" type="number" min="0" step="any" bind:value={recordQty} class="rec-input-qty" />
+            <button type="button" class="rec-exact-btn"
+              onclick={() => { recordQty = Math.max(0, (flowCtx?.plannedQty ?? 0) - (flowCtx?.fulfilledQty ?? 0)); }}>
+              Fulfill Exactly
+            </button>
+          </div>
+        </div>
+        <div class="rec-row">
+          <label class="rec-label" for="sdp-ts">Date / Time</label>
+          <input id="sdp-ts" type="datetime-local" bind:value={recordTs} class="rec-input-ts" />
+        </div>
+        <div class="rec-row">
+          <label class="rec-label" for="sdp-notes">Notes (optional)</label>
+          <textarea id="sdp-notes" bind:value={recordNotes} rows="2" class="rec-input-notes" placeholder="Optional note…"></textarea>
+        </div>
+        {#if recordError}
+          <div class="rec-error">{recordError}</div>
+        {/if}
+        <button type="submit" class="rec-submit" disabled={submitting || recordQty <= 0}>
+          {submitting ? 'Recording…' : 'Record Event'}
+        </button>
+      </form>
+
+      {#if flowCtx.existingEvents.length > 0}
+        <div class="rec-past">
+          <div class="rec-past-header">Past events ({flowCtx.existingEvents.length})</div>
+          {#each flowCtx.existingEvents as ev (ev.id)}
+            <div class="rec-past-row">
+              <span class="rec-past-ts">{new Date(ev.hasPointInTime ?? '').toLocaleString()}</span>
+              <span class="rec-past-qty">
+                {ev.resourceQuantity?.hasNumericalValue ?? ev.effortQuantity?.hasNumericalValue ?? '?'}
+                {ev.resourceQuantity?.hasUnit ?? ev.effortQuantity?.hasUnit ?? ''}
+              </span>
+              {#if ev.note}<span class="rec-past-note">{ev.note}</span>{/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </section>
+  {/if}
 </aside>
 
 <style>
@@ -366,5 +503,230 @@
     font-size: 0.48rem;
     letter-spacing: 0.08em;
     flex-shrink: 0;
+  }
+
+  /* ── Inline event recorder ─────────────────────────────────────────── */
+  .recorder-section {
+    background: rgba(159, 122, 234, 0.04);
+    border-top: 1px solid rgba(159, 122, 234, 0.2);
+  }
+
+  .rec-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .rec-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+  }
+
+  .rec-proc {
+    font-weight: 700;
+    color: rgba(228, 238, 255, 0.9);
+  }
+
+  .rec-sep {
+    opacity: 0.35;
+  }
+
+  .rec-spec {
+    color: rgba(226, 232, 240, 0.65);
+  }
+
+  .rec-close {
+    background: none;
+    border: none;
+    color: rgba(226, 232, 240, 0.4);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    padding: 2px 4px;
+    flex-shrink: 0;
+  }
+
+  .rec-close:hover {
+    color: rgba(226, 232, 240, 0.9);
+  }
+
+  .rec-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .rec-track {
+    flex: 1;
+    height: 4px;
+    background: var(--border-dim);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .rec-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.2s;
+  }
+
+  .rec-pct-label {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    opacity: 0.55;
+    white-space: nowrap;
+  }
+
+  .rec-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .rec-row {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .rec-label {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    opacity: 0.42;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .rec-qty-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .rec-input-qty {
+    background: var(--border-faint);
+    border: 1px solid var(--border-dim);
+    border-radius: 3px;
+    color: #e2e8f0;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    padding: 3px 6px;
+    width: 90px;
+  }
+
+  .rec-input-ts {
+    background: var(--border-faint);
+    border: 1px solid var(--border-dim);
+    border-radius: 3px;
+    color: #e2e8f0;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    padding: 3px 6px;
+  }
+
+  .rec-input-notes {
+    background: var(--border-faint);
+    border: 1px solid var(--border-dim);
+    border-radius: 3px;
+    color: #e2e8f0;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    padding: 3px 6px;
+    resize: vertical;
+  }
+
+  .rec-exact-btn {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    padding: 2px 6px;
+    background: var(--border-faint);
+    border: 1px solid var(--border-dim);
+    border-radius: 3px;
+    color: rgba(226, 232, 240, 0.55);
+    cursor: pointer;
+  }
+
+  .rec-exact-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #e2e8f0;
+  }
+
+  .rec-submit {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    padding: 4px 12px;
+    background: rgba(56, 161, 105, 0.18);
+    border: 1px solid rgba(56, 161, 105, 0.38);
+    border-radius: 3px;
+    color: #68d391;
+    cursor: pointer;
+    align-self: flex-start;
+    margin-top: 2px;
+  }
+
+  .rec-submit:hover:not(:disabled) {
+    background: rgba(56, 161, 105, 0.32);
+  }
+
+  .rec-submit:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
+
+  .rec-error {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: #fc8181;
+    padding: 2px 0;
+  }
+
+  .rec-past {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    border-top: 1px solid var(--border-faint);
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+
+  .rec-past-header {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    opacity: 0.38;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 3px;
+  }
+
+  .rec-past-row {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    opacity: 0.65;
+  }
+
+  .rec-past-ts {
+    color: rgba(210, 228, 255, 0.55);
+    flex-shrink: 0;
+  }
+
+  .rec-past-qty {
+    color: #7ee8a2;
+    flex-shrink: 0;
+  }
+
+  .rec-past-note {
+    color: rgba(210, 228, 255, 0.45);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

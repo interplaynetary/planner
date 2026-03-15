@@ -379,7 +379,7 @@
 
           <!-- Surplus -->
           {#if surplusQty > 0}
-            <text x={-58} y={20} class="node-stat green-txt"
+            <text x={-62} y={22} class="node-stat green-txt"
               >+{Math.round(surplusQty)}</text
             >
           {/if}
@@ -403,15 +403,8 @@
             >
           {/if}
 
-          <!-- Trade/debt label -->
-          {#if hasTrade && !hasDebt}
-            <text
-              x={-58}
-              y={20}
-              class="node-stat"
-              fill={tradeColor ?? "#63b3ed"}>⇄ trade</text
-            >
-          {:else if hasDebt}
+          <!-- Debt label -->
+          {#if hasDebt}
             <text x={-44} y={32} class="node-stat yellow-txt">debt</text>
           {/if}
 
