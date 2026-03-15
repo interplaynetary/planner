@@ -108,7 +108,7 @@
     width: 160px;
     flex-shrink: 0;
     padding: 8px 10px 9px;
-    background: #0d0d0d;
+    background: var(--bg-base);
     border: 1px solid rgba(56, 189, 248, 0.12);
     border-radius: 4px;
     font-family: var(--font-mono);
@@ -148,8 +148,8 @@
     font-size: 0.52rem;
     letter-spacing: 0.07em;
     text-transform: uppercase;
-    opacity: 0.25;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    opacity: 0.50;
+    border-top: 1px solid var(--border-faint);
     padding-top: 4px;
     margin-top: 1px;
   }
@@ -184,7 +184,7 @@
 
   .coverage-track {
     height: 5px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--border-dim);
     border-radius: 2px;
     overflow: hidden;
   }
@@ -203,7 +203,7 @@
 
   .section-sep {
     height: 1px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--border-faint);
     margin: 2px 0;
   }
 
@@ -212,7 +212,7 @@
     height: 5px;
     border-radius: 2px;
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--bg-overlay);
   }
 
   .ent-seg.social {

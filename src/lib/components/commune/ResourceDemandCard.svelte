@@ -241,7 +241,7 @@
     min-height: 200px;
     flex-shrink: 0;
     background: #16161e;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border-dim);
     border-left: 3px solid rgba(124, 58, 237, 0.8);
     border-radius: 4px;
     display: flex;
@@ -254,9 +254,9 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--bg-overlay);
     padding: 5px 6px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--border-faint);
   }
 
   .emoji { font-size: 0.9rem; flex-shrink: 0; }
@@ -277,7 +277,7 @@
     font-family: monospace;
     font-size: 0.6rem;
     color: rgba(167, 139, 250, 0.9);
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--border-faint);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 3px;
     padding: 1px 3px;
@@ -302,7 +302,7 @@
   .policy-btn {
     font-size: 0.7rem;
     padding: 1px 4px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--border-faint);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.4);
     border-radius: 3px;
@@ -349,7 +349,7 @@
     letter-spacing: 0.03em;
     text-transform: lowercase;
     color: rgba(255, 255, 255, 0.5);
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--bg-overlay);
     border: 1px solid rgba(255, 255, 255, 0.12);
   }
 
@@ -387,7 +387,7 @@
   .qty {
     width: 48px;
     text-align: right;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--border-faint);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: #e2e8f0;
     border-radius: 3px;
@@ -423,7 +423,7 @@
   .pill {
     flex: 1;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--bg-overlay);
     color: rgba(255, 255, 255, 0.45);
     font-size: 0.6rem;
     overflow: hidden;
@@ -462,7 +462,7 @@
 
   .expand-panel {
     background: rgba(0, 0, 0, 0.25);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--border-faint);
   }
 
   .add-row {

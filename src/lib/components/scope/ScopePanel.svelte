@@ -140,7 +140,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 1px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--border-faint);
   }
 
   .cell {
@@ -148,7 +148,7 @@
     flex-direction: column;
     gap: 3px;
     padding: 8px 12px;
-    background: #0d0d0d;
+    background: var(--bg-base);
     min-width: 130px;
     flex: 1;
   }
@@ -168,7 +168,7 @@
 
   .thin-bar-track {
     height: 3px;
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--bg-overlay);
     border-radius: 2px;
     overflow: hidden;
     margin-top: 2px;

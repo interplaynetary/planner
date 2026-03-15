@@ -85,7 +85,7 @@
     font-weight: 500;
     text-align: left;
     padding: 3px var(--gap-md);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--border-faint);
   }
   td {
     padding: 3px var(--gap-md);

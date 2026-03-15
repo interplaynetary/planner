@@ -3,21 +3,36 @@
    All colours are CSS custom properties so map overlays can inherit. */
 
 :root {
-  /* Zone colours */
-  --zone-red: #e53e3e;
-  --zone-yellow: #d69e2e;
-  --zone-green: #38a169;
-  --zone-excess: #3182ce;
-  --zone-stockout: #742a2a;
-  --zone-early: #4299e1;
-  --zone-late: #742a2a;
+  /* ---- Theme surfaces (dark-navy, readable) ---- */
+  --bg-base:       #111827;   /* page background */
+  --bg-surface:    #1b2336;   /* panel / header surfaces */
+  --bg-elevated:   #222e48;   /* cards, selected states */
+  --bg-overlay:    rgba(99, 155, 255, 0.09);  /* subtle tint for hover/band-header */
+
+  /* Borders */
+  --border-faint:  rgba(130, 175, 255, 0.18);  /* structural borders */
+  --border-dim:    rgba(130, 175, 255, 0.35);  /* more visible borders */
+
+  /* Text */
+  --text-primary:   rgba(228, 238, 255, 0.95);
+  --text-secondary: rgba(188, 212, 252, 0.80);
+  --text-dim:       rgba(150, 185, 235, 0.55);
+
+  /* ---- Zone colours ---- */
+  --zone-red: #fc5858;
+  --zone-yellow: #e8b04e;
+  --zone-green: #48bb78;
+  --zone-excess: #4ca6f0;
+  --zone-stockout: #8b3232;
+  --zone-early: #5ab5f5;
+  --zone-late: #8b3232;
 
   /* Zone fill — semi-transparent for map overlay use */
-  --zone-red-fill: rgba(229, 62, 62, 0.18);
-  --zone-yellow-fill: rgba(214, 158, 46, 0.18);
-  --zone-green-fill: rgba(56, 161, 105, 0.18);
-  --zone-excess-fill: rgba(49, 130, 206, 0.18);
-  --zone-stockout-fill: rgba(116, 42, 42, 0.25);
+  --zone-red-fill: rgba(252, 88, 88, 0.20);
+  --zone-yellow-fill: rgba(232, 176, 78, 0.20);
+  --zone-green-fill: rgba(72, 187, 120, 0.20);
+  --zone-excess-fill: rgba(76, 166, 240, 0.20);
+  --zone-stockout-fill: rgba(139, 50, 50, 0.28);
 
   /* Typography */
   --font-mono: "JetBrains Mono", "Fira Mono", ui-monospace, monospace;
@@ -34,5 +49,5 @@
   --gap-lg: 16px;
 
   /* Zone label opacity for secondary text */
-  --muted: 0.45;
+  --muted: 0.60;
 }

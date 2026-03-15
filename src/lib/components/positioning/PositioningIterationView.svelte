@@ -561,14 +561,14 @@
     font-size: var(--text-xs);
     opacity: 0.4;
     padding-bottom: 2px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--border-faint);
   }
 
   .recipe-select,
   .profile-select {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    background: rgba(255,255,255,0.06);
+    background: var(--border-faint);
     border: 1px solid rgba(255,255,255,0.12);
     color: #e2e8f0;
     padding: 3px 6px;
@@ -588,7 +588,7 @@
     opacity: 0.4;
     padding: 2px 4px;
     font-weight: 400;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--border-faint);
   }
 
   .cand-table td {
@@ -600,7 +600,7 @@
     cursor: pointer;
   }
 
-  .cand-table tr:hover td { background: rgba(255,255,255,0.04); }
+  .cand-table tr:hover td { background: var(--bg-overlay); }
   .cand-table tr.selected td { background: rgba(183,148,244,0.12); }
 
   .mono { font-family: var(--font-mono); }
@@ -645,7 +645,7 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     padding: 2px 6px;
-    background: rgba(255,255,255,0.06);
+    background: var(--border-faint);
     border: 1px solid rgba(255,255,255,0.1);
     border-radius: 2px;
   }
@@ -698,7 +698,7 @@
   .text-input {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    background: rgba(255,255,255,0.06);
+    background: var(--border-faint);
     border: 1px solid rgba(255,255,255,0.12);
     color: #e2e8f0;
     padding: 3px 6px;
@@ -729,7 +729,7 @@
   }
 
   .empty {
-    opacity: 0.25;
+    opacity: 0.50;
     font-size: var(--text-xs);
   }
 
@@ -740,7 +740,7 @@
     display: flex;
     flex-direction: column;
     background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.06);
+    border: 1px solid var(--border-faint);
     border-radius: 3px;
     padding: 4px 6px;
     gap: 0;
@@ -757,7 +757,7 @@
   .factor-row:last-child { border-bottom: none; }
   .factor-num {
     font-family: var(--font-mono);
-    opacity: 0.25;
+    opacity: 0.50;
     min-width: 12px;
     flex-shrink: 0;
   }
@@ -784,11 +784,11 @@
   }
   .fbadge.good    { background: rgba(72,187,120,0.15);  color: var(--zone-green); border: 1px solid var(--zone-green); }
   .fbadge.warn    { background: rgba(245,101,101,0.12); color: var(--zone-red);   border: 1px solid var(--zone-red); }
-  .fbadge.neutral { background: rgba(255,255,255,0.05); color: rgba(226,232,240,0.45); border: 1px solid rgba(255,255,255,0.1); }
+  .fbadge.neutral { background: var(--border-faint); color: rgba(226,232,240,0.45); border: 1px solid rgba(255,255,255,0.1); }
   .var-select {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    background: rgba(255,255,255,0.06);
+    background: var(--border-faint);
     border: 1px solid rgba(255,255,255,0.12);
     color: #e2e8f0;
     padding: 2px 4px;

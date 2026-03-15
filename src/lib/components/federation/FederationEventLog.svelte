@@ -96,35 +96,32 @@
 <style>
   .event-log {
     display: flex;
-    align-items: stretch;
-    gap: 0;
-    background: #0d0d0d;
-    border-top: 1px solid rgba(255,255,255,0.06);
-    height: 90px;
+    flex-direction: column;
+    width: 148px;
+    min-width: 148px;
+    background: var(--bg-base);
+    border-right: 1px solid var(--border-faint);
     flex-shrink: 0;
     overflow: hidden;
   }
 
   .log-label {
-    writing-mode: vertical-rl;
-    text-orientation: mixed;
-    transform: rotate(180deg);
     font-family: var(--font-mono);
-    font-size: 0.48rem;
+    font-size: 0.44rem;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    opacity: 0.2;
-    padding: 8px 10px;
+    opacity: 0.50;
+    padding: 10px 10px 6px;
     flex-shrink: 0;
-    border-right: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid var(--border-faint);
     white-space: nowrap;
   }
 
   .rounds-wrap {
     display: flex;
+    flex-direction: column;
     flex: 1;
-    min-width: 0;
-    overflow-x: auto;
+    overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: rgba(255,255,255,0.1) transparent;
   }
@@ -132,96 +129,104 @@
   .round-group {
     display: flex;
     flex-direction: column;
-    border-right: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid var(--border-faint);
     flex-shrink: 0;
   }
 
   .round-group:last-child {
-    border-right: none;
+    border-bottom: none;
   }
 
   .round-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 10px 4px;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
+    gap: 5px;
+    padding: 5px 8px 3px;
+    border-bottom: 1px solid var(--border-faint);
   }
 
   .round-label {
     font-family: var(--font-mono);
-    font-size: 0.48rem;
-    letter-spacing: 0.12em;
+    font-size: 0.44rem;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    opacity: 0.3;
+    opacity: 0.55;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
   }
 
   .round-count {
     font-family: var(--font-mono);
-    font-size: 0.48rem;
-    opacity: 0.2;
-    background: rgba(255,255,255,0.06);
+    font-size: 0.44rem;
+    opacity: 0.55;
+    background: var(--border-faint);
     border-radius: 2px;
-    padding: 0 4px;
+    padding: 0 3px;
+    flex-shrink: 0;
   }
 
   .events-row {
     display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 6px 10px;
-    flex: 1;
-    overflow-x: auto;
-    scrollbar-width: none;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 6px;
   }
-
-  .events-row::-webkit-scrollbar { display: none; }
 
   .event-chip {
     display: flex;
     align-items: center;
     gap: 4px;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.07);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-faint);
     border-radius: 3px;
-    padding: 3px 7px;
-    white-space: nowrap;
+    padding: 2px 5px;
     cursor: default;
     transition: background 0.1s;
-    flex-shrink: 0;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .event-chip:hover {
-    background: rgba(255,255,255,0.07);
+    background: var(--bg-overlay);
   }
 
   .evt-icon {
-    font-size: 0.6rem;
+    font-size: 0.55rem;
     flex-shrink: 0;
   }
 
   .evt-scope {
     font-family: var(--font-mono);
-    font-size: 0.58rem;
+    font-size: 0.54rem;
     color: rgba(255,255,255,0.6);
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
   }
 
   .evt-arrow {
-    font-size: 0.55rem;
+    font-size: 0.5rem;
     opacity: 0.7;
+    flex-shrink: 0;
   }
 
   .evt-spec {
     font-family: var(--font-mono);
-    font-size: 0.55rem;
-    letter-spacing: 0.06em;
+    font-size: 0.5rem;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
   }
 
   .evt-qty {
     font-family: var(--font-mono);
-    font-size: 0.55rem;
-    letter-spacing: 0.04em;
+    font-size: 0.5rem;
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
   }
 </style>

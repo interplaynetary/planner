@@ -214,7 +214,7 @@
     font-size: 0.6rem;
     opacity: 0.4;
     padding-bottom: 4px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--border-faint);
     margin-bottom: 4px;
     white-space: nowrap;
   }
@@ -246,7 +246,7 @@
   }
 
   .frow:hover {
-    background: rgba(255,255,255,0.05);
+    background: var(--border-faint);
   }
 
   .flabel {
@@ -268,7 +268,7 @@
     font-family: var(--font-mono);
     font-size: 0.6rem;
     padding: 2px 6px;
-    background: rgba(255,255,255,0.05);
+    background: var(--border-faint);
     border: 1px solid rgba(255,255,255,0.1);
     border-radius: 3px;
     white-space: nowrap;

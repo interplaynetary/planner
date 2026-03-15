@@ -184,7 +184,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    border: 1px solid rgba(255,255,255,0.06);
+    border: 1px solid var(--border-faint);
     border-radius: 3px;
     cursor: pointer;
     transition: border-color 0.15s, transform 0.1s;

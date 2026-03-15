@@ -101,7 +101,7 @@
     flex: 1;
     font-family: var(--font-mono);
     font-size: 0.65rem;
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--bg-overlay);
     border: 1px solid rgba(124, 58, 237, 0.4);
     color: #e2e8f0;
     border-radius: 3px;
@@ -118,7 +118,7 @@
   .cancel-btn {
     flex-shrink: 0;
     padding: 2px 5px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--border-faint);
     border: 1px solid rgba(255, 255, 255, 0.12);
     color: rgba(255, 255, 255, 0.4);
     border-radius: 3px;

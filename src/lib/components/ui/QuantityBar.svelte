@@ -31,7 +31,7 @@
   .track {
     flex: 1;
     height: 4px;
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--bg-elevated);
     border-radius: 2px;
     overflow: hidden;
   }

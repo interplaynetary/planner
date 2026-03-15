@@ -110,8 +110,8 @@
     align-items: center;
     justify-content: space-between;
     padding: 4px 6px;
-    background: rgba(255, 255, 255, 0.06);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--border-faint);
+    border-bottom: 1px solid var(--border-faint);
     gap: 4px;
   }
 

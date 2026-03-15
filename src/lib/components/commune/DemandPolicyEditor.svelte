@@ -184,7 +184,7 @@
     gap: 5px;
     padding: 7px 8px;
     background: rgba(0, 0, 0, 0.3);
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid var(--border-faint);
   }
 
   .row {
@@ -210,7 +210,7 @@
     font-family: monospace;
     font-size: 0.58rem;
     padding: 2px 5px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--border-faint);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.4);
     border-radius: 3px;
@@ -225,7 +225,7 @@
 
   .val-input {
     flex: 1;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--border-faint);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: #e2e8f0;
     border-radius: 3px;

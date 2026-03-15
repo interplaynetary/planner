@@ -124,7 +124,7 @@
     font-size: var(--text-xs);
     opacity: 0.4;
     padding-bottom: var(--gap-xs);
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--border-faint);
   }
   table {
     border-collapse: collapse;
@@ -137,7 +137,7 @@
     opacity: 0.35;
     font-weight: 400;
     padding: 2px 6px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--border-faint);
     white-space: nowrap;
   }
   td { padding: 2px 6px; }
@@ -151,7 +151,7 @@
     font-size: 0.6rem;
     padding: 1px 4px;
     border-radius: 2px;
-    background: rgba(255,255,255,0.08);
+    background: var(--border-dim);
     opacity: 0.7;
     white-space: nowrap;
   }

@@ -857,7 +857,7 @@
     flex-direction: column;
     font-family: var(--font-sans);
     font-size: var(--text-sm);
-    background: #0d0d0d;
+    background: var(--bg-base);
     color: #e2e8f0;
     min-height: 100vh;
     padding: var(--gap-md);
@@ -865,7 +865,7 @@
   }
 
   .band {
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border-dim);
     border-radius: 4px;
     overflow: hidden;
   }
@@ -875,8 +875,8 @@
     align-items: center;
     gap: var(--gap-md);
     padding: var(--gap-sm) var(--gap-md);
-    background: rgba(255, 255, 255, 0.04);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--bg-overlay);
+    border-bottom: 1px solid var(--border-faint);
     flex-wrap: wrap;
   }
 
@@ -911,15 +911,15 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     padding: 2px 8px;
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: var(--bg-overlay);
+    border: 1px solid var(--border-dim);
     color: #e2e8f0;
     cursor: pointer;
     border-radius: 3px;
   }
 
   button:hover {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--bg-elevated);
   }
 
   .band-body {
@@ -968,8 +968,8 @@
     letter-spacing: 0.07em;
     padding: 0 10px;
     height: 26px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: var(--border-faint);
+    border: 1px solid var(--border-dim);
     border-radius: 3px;
     color: rgba(255, 255, 255, 0.45);
     cursor: pointer;
@@ -981,7 +981,7 @@
 
   .all-btn:hover,
   .all-btn.all-active {
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--bg-elevated);
     color: #e2e8f0;
     border-color: rgba(255, 255, 255, 0.3);
   }
@@ -1004,7 +1004,7 @@
     min-height: 240px;
     flex-shrink: 0;
     background: rgba(255, 255, 255, 0.03);
-    border: 1px dashed rgba(255, 255, 255, 0.15);
+    border: 1px dashed var(--border-dim);
     border-radius: 4px;
     display: flex;
     flex-direction: column;
@@ -1021,7 +1021,7 @@
   }
 
   .add-spec-card:hover {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--border-faint);
     border-color: rgba(255, 255, 255, 0.3);
     color: rgba(255, 255, 255, 0.7);
   }
@@ -1044,7 +1044,7 @@
     font-size: var(--text-xs);
     opacity: 0.4;
     padding-bottom: var(--gap-xs);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--border-faint);
     white-space: nowrap;
     flex-shrink: 0;
   }
@@ -1084,7 +1084,7 @@
   }
 
   .empty {
-    opacity: 0.25;
+    opacity: 0.50;
     font-size: var(--text-xs);
   }
 
@@ -1229,16 +1229,16 @@
   .mode-toggle button {
     font-family: var(--font-mono); font-size: var(--text-xs);
     padding: 2px 8px; border-radius: 3px; cursor: pointer;
-    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12);
+    background: var(--bg-overlay); border: 1px solid rgba(255,255,255,0.12);
     color: rgba(226,232,240,0.5);
   }
   .mode-toggle button.active {
-    background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.3);
+    background: var(--bg-elevated); border-color: rgba(255,255,255,0.3);
     color: #e2e8f0;
   }
   .observe-panel {
     padding: var(--gap-md);
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid var(--border-faint);
     max-width: 480px;
   }
 </style>

@@ -379,7 +379,7 @@
 	}
 
 	.separator {
-		color: rgba(255, 255, 255, 0.15);
+		color: var(--border-dim);
 		margin: 0 2px;
 	}
 
@@ -456,7 +456,7 @@
 	}
 
 	.time-input {
-		background: rgba(255, 255, 255, 0.06);
+		background: var(--border-faint);
 		border: 1px solid rgba(255, 255, 255, 0.12);
 		border-radius: 3px;
 		padding: 1px 3px;

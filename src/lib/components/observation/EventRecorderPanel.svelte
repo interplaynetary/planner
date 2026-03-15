@@ -205,7 +205,7 @@
   .progress-track {
     flex: 1;
     height: 4px;
-    background: rgba(255,255,255,0.08);
+    background: var(--border-dim);
     border-radius: 2px;
     overflow: hidden;
   }
@@ -248,8 +248,8 @@
   }
 
   .qty-input {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.15);
+    background: var(--border-faint);
+    border: 1px solid var(--border-dim);
     border-radius: 3px;
     color: #e2e8f0;
     font-family: var(--font-mono);
@@ -259,8 +259,8 @@
   }
 
   .ts-input {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.15);
+    background: var(--border-faint);
+    border: 1px solid var(--border-dim);
     border-radius: 3px;
     color: #e2e8f0;
     font-family: var(--font-mono);
@@ -269,8 +269,8 @@
   }
 
   .notes-input {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.15);
+    background: var(--border-faint);
+    border: 1px solid var(--border-dim);
     border-radius: 3px;
     color: #e2e8f0;
     font-family: var(--font-mono);
@@ -283,8 +283,8 @@
     font-family: var(--font-mono);
     font-size: 0.65rem;
     padding: 2px 6px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.15);
+    background: var(--border-faint);
+    border: 1px solid var(--border-dim);
     border-radius: 3px;
     color: rgba(226,232,240,0.6);
     cursor: pointer;
@@ -326,7 +326,7 @@
     display: flex;
     flex-direction: column;
     gap: 3px;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid var(--border-faint);
     padding-top: var(--gap-sm);
   }
 

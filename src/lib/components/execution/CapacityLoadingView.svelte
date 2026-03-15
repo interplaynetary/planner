@@ -150,7 +150,7 @@
   }
 
   tr + tr {
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    border-top: 1px solid var(--border-faint);
   }
 
   tr.red td.name {
@@ -186,7 +186,7 @@
 
   .footer td {
     padding-top: 6px;
-    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    border-top: 1px solid var(--border-dim);
   }
 
   .empty {

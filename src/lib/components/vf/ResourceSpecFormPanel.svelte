@@ -180,7 +180,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 12px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--border-dim);
     flex-shrink: 0;
   }
 
@@ -234,7 +234,7 @@
   }
 
   .input {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--border-faint);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 3px;
     color: #e2e8f0;
@@ -291,7 +291,7 @@
     gap: 8px;
     margin-top: auto;
     padding-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid var(--border-faint);
   }
 
   .btn-cancel {
@@ -299,7 +299,7 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     padding: 5px 0;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--border-faint);
     border: 1px solid rgba(255, 255, 255, 0.12);
     color: rgba(255, 255, 255, 0.6);
     cursor: pointer;

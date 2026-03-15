@@ -72,7 +72,7 @@
   .node.excess  { background: var(--zone-excess-fill); color: var(--zone-excess); }
   .node.yellow  { background: var(--zone-yellow-fill); color: var(--zone-yellow); }
   .node.green   { background: var(--zone-green-fill);  color: var(--zone-green); }
-  .node.other   { background: rgba(255,255,255,0.08);  color: inherit; }
+  .node.other   { background: var(--border-dim);  color: inherit; }
   .node.selected { outline: 2px solid var(--zone-green); opacity: 1; }
   .arrow { font-size: var(--text-xs); }
   .score { font-size: 9px; }

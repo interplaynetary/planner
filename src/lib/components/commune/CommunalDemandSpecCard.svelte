@@ -63,7 +63,7 @@
     width: 160px;
     flex-shrink: 0;
     padding: 8px 10px 9px;
-    background: #0d0d0d;
+    background: var(--bg-base);
     border: 1px solid rgba(104, 211, 145, 0.12);
     border-radius: 4px;
     font-family: var(--font-mono);

@@ -10,7 +10,7 @@
     'individual-claimable': { bg: 'rgba(214,158,46,0.18)', bgActive: 'rgba(214,158,46,0.38)', fg: 'var(--zone-yellow)', border: 'rgba(214,158,46,0.5)'  },
     'communal':             { bg: 'rgba(56,161,105,0.18)',  bgActive: 'rgba(56,161,105,0.38)',  fg: 'var(--zone-green)',  border: 'rgba(56,161,105,0.5)'  },
   };
-  const DEFAULT = { bg: 'rgba(255,255,255,0.06)', bgActive: 'rgba(255,255,255,0.15)', fg: 'rgba(255,255,255,0.7)', border: 'rgba(255,255,255,0.2)' };
+  const DEFAULT = { bg: 'var(--border-faint)', bgActive: 'var(--border-dim)', fg: 'rgba(255,255,255,0.7)', border: 'rgba(255,255,255,0.2)' };
 
   function c(name: string) { return COLOR[name] ?? DEFAULT; }
 

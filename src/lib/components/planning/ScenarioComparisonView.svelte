@@ -191,7 +191,7 @@
   }
 
   th.best {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--bg-overlay);
     border-bottom: 2px solid var(--zone-green);
   }
 
@@ -205,7 +205,7 @@
   }
 
   tbody tr + tr {
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    border-top: 1px solid var(--border-faint);
   }
 
   .label-col {
@@ -261,7 +261,7 @@
   .cov-bar {
     flex: 1;
     height: 5px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--border-dim);
     border-radius: 2px;
     overflow: hidden;
     min-width: 40px;

@@ -158,8 +158,8 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     padding: 2px 6px;
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: var(--bg-overlay);
+    border: 1px solid var(--border-dim);
     color: #e2e8f0;
     border-radius: 3px;
     cursor: pointer;
@@ -190,7 +190,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 1px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--border-faint);
     border-radius: 3px;
     overflow: hidden;
   }
@@ -200,7 +200,7 @@
     flex-direction: column;
     gap: 2px;
     padding: 6px 10px;
-    background: #0d0d0d;
+    background: var(--bg-base);
     min-width: 120px;
     flex: 1;
   }
@@ -244,7 +244,7 @@
 
   .usage-bar-track {
     height: 5px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--border-dim);
     border-radius: 3px;
     overflow: hidden;
     margin: 4px 0 3px;

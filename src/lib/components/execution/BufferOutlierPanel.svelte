@@ -136,7 +136,7 @@
     font-size: var(--text-xs);
     font-family: var(--font-mono);
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.15);
+    border: 1px solid var(--border-dim);
     border-radius: 3px;
     padding: 4px 6px;
     color: inherit;

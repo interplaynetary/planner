@@ -1,36 +1,55 @@
 <script lang="ts">
-  import DeficitResidualBar from './DeficitResidualBar.svelte';
-  import ScopeNetworkDiagram from './ScopeNetworkDiagram.svelte';
-  import EconomicResourceCard from '$lib/components/vf/EconomicResourceCard.svelte';
-  import type { ScopePlanResult } from '$lib/planning/plan-for-scope';
-  import type { StoreRegistry } from '$lib/planning/store-registry';
-  import type { EconomicResource } from '$lib/schemas';
-  import type { TradeProposal } from '$lib/planning/plan-federation';
-  import type { Observer } from '$lib/observation/observer';
+  import DeficitResidualBar from "./DeficitResidualBar.svelte";
+  import ScopeNetworkDiagram from "./ScopeNetworkDiagram.svelte";
+  import type {
+    SimpleBufferZone,
+    SimpleCapacityBuffer,
+  } from "./ScopeNetworkDiagram.svelte";
+  import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
+  import type { StoreRegistry } from "$lib/planning/store-registry";
+  import type { TradeProposal } from "$lib/planning/plan-federation";
+  import type { Observer } from "$lib/observation/observer";
 
   interface Props {
     scopeId: string;
     result: ScopePlanResult;
     observer: Observer;
-    resources: EconomicResource[];
     specNames: Record<string, string>;
     registry: StoreRegistry;
     tradeProposals?: TradeProposal[];
+    bufferZones?: SimpleBufferZone[];
+    capacityBuffers?: SimpleCapacityBuffer[];
     onclose: () => void;
   }
 
-  let { scopeId, result, observer, resources, specNames, registry, tradeProposals = [], onclose }: Props = $props();
+  let {
+    scopeId,
+    result,
+    observer,
+    specNames,
+    registry,
+    tradeProposals = [],
+    bufferZones = [],
+    capacityBuffers = [],
+    onclose,
+  }: Props = $props();
 
-  const outgoingTrades = $derived(tradeProposals.filter(t => t.fromScopeId === scopeId));
-  const incomingTrades = $derived(tradeProposals.filter(t => t.toScopeId === scopeId));
-  const hasTrades = $derived(outgoingTrades.length > 0 || incomingTrades.length > 0);
+  const outgoingTrades = $derived(
+    tradeProposals.filter((t) => t.fromScopeId === scopeId),
+  );
+  const incomingTrades = $derived(
+    tradeProposals.filter((t) => t.toScopeId === scopeId),
+  );
+  const hasTrades = $derived(
+    outgoingTrades.length > 0 || incomingTrades.length > 0,
+  );
 
-  function tradeStatusColor(status: TradeProposal['status']): string {
-    if (status === 'settled') return '#68d391';
-    return '#63b3ed';
+  function tradeStatusColor(status: TradeProposal["status"]): string {
+    if (status === "settled") return "#68d391";
+    return "#63b3ed";
   }
 
-  let mode = $state<'plan' | 'observe'>('plan');
+  let mode = $state<"plan" | "observe">("plan");
 </script>
 
 <aside class="detail-panel" aria-label="Scope detail: {scopeId}">
@@ -41,10 +60,20 @@
     </div>
     <div class="header-right">
       <div class="mode-tabs">
-        <button class="tab-btn" class:active={mode === 'plan'} onclick={() => mode = 'plan'}>PLAN</button>
-        <button class="tab-btn" class:active={mode === 'observe'} onclick={() => mode = 'observe'}>OBSERVE</button>
+        <button
+          class="tab-btn"
+          class:active={mode === "plan"}
+          onclick={() => (mode = "plan")}>PLAN</button
+        >
+        <button
+          class="tab-btn"
+          class:active={mode === "observe"}
+          onclick={() => (mode = "observe")}>OBSERVE</button
+        >
       </div>
-      <button class="close-btn" onclick={onclose} aria-label="Close panel">✕</button>
+      <button class="close-btn" onclick={onclose} aria-label="Close panel"
+        >✕</button
+      >
     </div>
   </div>
 
@@ -84,14 +113,16 @@
     {/if}
 
     {#if hasTrades}
-      <div class="section-label">LATERAL TRADES</div>
+      <div class="section-label">INTER-SCOPE SUPPORTS</div>
       {#each outgoingTrades as t (t.id)}
         <div class="trade-row">
           <span class="trade-arrow" style="color:#63b3ed">→</span>
           <span class="trade-peer">{t.toScopeId}</span>
           <span class="trade-spec">{t.specId}</span>
           <span class="trade-qty">×{t.quantity}</span>
-          <span class="trade-status" style="color:{tradeStatusColor(t.status)}">{t.status.toUpperCase()}</span>
+          <span class="trade-status" style="color:{tradeStatusColor(t.status)}"
+            >{t.status.toUpperCase()}</span
+          >
         </div>
       {/each}
       {#each incomingTrades as t (t.id)}
@@ -100,7 +131,9 @@
           <span class="trade-peer">{t.fromScopeId}</span>
           <span class="trade-spec">{t.specId}</span>
           <span class="trade-qty">×{t.quantity}</span>
-          <span class="trade-status" style="color:{tradeStatusColor(t.status)}">{t.status.toUpperCase()}</span>
+          <span class="trade-status" style="color:{tradeStatusColor(t.status)}"
+            >{t.status.toUpperCase()}</span
+          >
         </div>
       {/each}
     {/if}
@@ -118,27 +151,9 @@
       {observer}
       {specNames}
       {mode}
+      {bufferZones}
+      {capacityBuffers}
     />
-  </section>
-
-  <!-- Inventory — always visible -->
-  <section class="panel-section">
-    <div class="section-label">INVENTORY</div>
-    {#if resources.length === 0}
-      <p class="empty">No resources observed.</p>
-    {:else}
-      <div class="resource-grid">
-        {#each resources as r (r.id)}
-          <EconomicResourceCard
-            resource={r}
-            specName={specNames[r.conformsTo] ?? r.conformsTo}
-            price={0}
-            canClaim={false}
-            onclaim={() => {}}
-          />
-        {/each}
-      </div>
-    {/if}
   </section>
 </aside>
 
@@ -146,8 +161,8 @@
   .detail-panel {
     width: 480px;
     min-width: 480px;
-    background: #111;
-    border-left: 1px solid rgba(255,255,255,0.06);
+    background: var(--bg-surface);
+    border-left: 1px solid var(--border-faint);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -159,7 +174,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 14px 16px 10px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--border-faint);
     gap: 8px;
   }
 
@@ -182,14 +197,14 @@
     font-family: var(--font-mono);
     font-size: 0.55rem;
     letter-spacing: 0.08em;
-    opacity: 0.35;
+    opacity: 0.58;
     text-transform: uppercase;
   }
 
   .scope-name {
     font-family: var(--font-mono);
     font-size: 0.75rem;
-    color: rgba(255,255,255,0.85);
+    color: rgba(228, 238, 255, 0.96);
     word-break: break-all;
   }
 
@@ -200,48 +215,53 @@
 
   .tab-btn {
     background: none;
-    border: 1px solid rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.4);
+    border: 1px solid var(--border-dim);
+    color: rgba(200, 220, 255, 0.62);
     cursor: pointer;
     font-family: var(--font-mono);
     font-size: 0.6rem;
     letter-spacing: 0.06em;
     padding: 3px 8px;
     border-radius: 3px;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    transition:
+      color 0.15s,
+      border-color 0.15s,
+      background 0.15s;
   }
 
   .tab-btn:hover {
-    color: rgba(255,255,255,0.7);
-    border-color: rgba(255,255,255,0.2);
+    color: rgba(228, 238, 255, 0.88);
+    border-color: rgba(255, 255, 255, 0.3);
   }
 
   .tab-btn.active {
-    color: rgba(255,255,255,0.9);
-    border-color: rgba(255,255,255,0.35);
-    background: rgba(255,255,255,0.06);
+    color: rgba(228, 238, 255, 0.98);
+    border-color: rgba(255, 255, 255, 0.5);
+    background: var(--border-faint);
   }
 
   .close-btn {
     background: none;
-    border: 1px solid rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.5);
+    border: 1px solid var(--border-dim);
+    color: rgba(200, 220, 255, 0.7);
     cursor: pointer;
     font-size: 0.7rem;
     padding: 4px 7px;
     border-radius: 3px;
     flex-shrink: 0;
-    transition: color 0.15s, border-color 0.15s;
+    transition:
+      color 0.15s,
+      border-color 0.15s;
   }
 
   .close-btn:hover {
-    color: rgba(255,255,255,0.9);
-    border-color: rgba(255,255,255,0.3);
+    color: rgba(228, 238, 255, 0.98);
+    border-color: rgba(255, 255, 255, 0.45);
   }
 
   .signals-band {
     padding: 10px 16px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--border-faint);
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -249,7 +269,7 @@
 
   .panel-section {
     padding: 12px 16px;
-    border-bottom: 1px solid rgba(255,255,255,0.04);
+    border-bottom: 1px solid var(--border-faint);
   }
 
   .diagram-section {
@@ -261,7 +281,7 @@
     font-size: 0.55rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    opacity: 0.35;
+    opacity: 0.58;
     margin-bottom: 8px;
   }
 
@@ -277,7 +297,7 @@
   .empty {
     font-family: var(--font-mono);
     font-size: 0.65rem;
-    opacity: 0.3;
+    opacity: 0.52;
     margin: 0;
   }
 
@@ -291,7 +311,7 @@
   }
 
   .signal-spec {
-    color: rgba(255,255,255,0.7);
+    color: rgba(210, 228, 255, 0.88);
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -299,9 +319,16 @@
     white-space: nowrap;
   }
 
-  .green { color: #68d391; }
-  .yellow { color: #d69e2e; }
-  .muted { opacity: 0.4; font-size: 0.58rem; }
+  .green {
+    color: #7ee8a2;
+  }
+  .yellow {
+    color: #e8b04e;
+  }
+  .muted {
+    opacity: 0.6;
+    font-size: 0.58rem;
+  }
 
   .trade-row {
     display: flex;
@@ -312,7 +339,10 @@
     font-size: 0.62rem;
   }
 
-  .trade-arrow { font-size: 0.72rem; flex-shrink: 0; }
+  .trade-arrow {
+    font-size: 0.72rem;
+    flex-shrink: 0;
+  }
 
   .trade-peer {
     flex: 1;
@@ -320,21 +350,21 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: rgba(255,255,255,0.7);
+    color: rgba(210, 228, 255, 0.88);
   }
 
-  .trade-spec { color: rgba(255,255,255,0.4); flex-shrink: 0; }
-  .trade-qty { color: rgba(255,255,255,0.5); flex-shrink: 0; }
+  .trade-spec {
+    color: rgba(180, 205, 255, 0.65);
+    flex-shrink: 0;
+  }
+  .trade-qty {
+    color: rgba(190, 215, 255, 0.72);
+    flex-shrink: 0;
+  }
 
   .trade-status {
     font-size: 0.48rem;
     letter-spacing: 0.08em;
     flex-shrink: 0;
-  }
-
-  .resource-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
   }
 </style>

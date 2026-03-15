@@ -156,7 +156,7 @@
 	.day-cell {
 		padding: 0.5rem 0.25rem;
 		border-radius: 4px;
-		background: rgba(255, 255, 255, 0.15);
+		background: var(--border-dim);
 		backdrop-filter: blur(10px);
 		text-align: center;
 		transition: all 0.2s ease;

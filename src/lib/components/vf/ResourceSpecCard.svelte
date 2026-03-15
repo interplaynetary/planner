@@ -144,8 +144,8 @@
     align-items: center;
     justify-content: space-between;
     padding: 4px 6px;
-    background: rgba(255, 255, 255, 0.06);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--border-faint);
+    border-bottom: 1px solid var(--border-faint);
     gap: 4px;
   }
 
@@ -250,7 +250,7 @@
     gap: 3px;
     margin-top: auto;
     padding-top: 4px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid var(--border-faint);
   }
 
   .pos-row {
@@ -276,7 +276,7 @@
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.12);
+    background: var(--bg-elevated);
     border: 1px solid rgba(255, 255, 255, 0.2);
   }
 

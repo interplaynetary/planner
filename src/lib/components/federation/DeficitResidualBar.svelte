@@ -61,7 +61,7 @@
     flex-direction: column;
     gap: 4px;
     padding: 8px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 1px solid var(--border-faint);
   }
 
   .bar-header {
@@ -88,7 +88,7 @@
   .bar-track {
     height: 8px;
     border-radius: 2px;
-    background: rgba(255,255,255,0.04);
+    background: var(--bg-overlay);
     display: flex;
     overflow: hidden;
   }

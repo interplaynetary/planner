@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { SvelteMap } from 'svelte/reactivity';
-  import type { ScopePlanResult } from '$lib/planning/plan-for-scope';
-  import type { TradeProposal } from '$lib/planning/plan-federation';
+  import { SvelteMap } from "svelte/reactivity";
+  import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
+  import type { TradeProposal } from "$lib/planning/plan-federation";
 
   interface Props {
     planOrder: string[];
@@ -12,22 +12,36 @@
     onselect?: (id: string) => void;
   }
 
-  let { planOrder, byScope, parentOf, tradeProposals = [], selected = '', onselect }: Props = $props();
+  let {
+    planOrder,
+    byScope,
+    parentOf,
+    tradeProposals = [],
+    selected = "",
+    onselect,
+  }: Props = $props();
 
   let svgWidth = $state(800);
   let svgHeight = $state(520);
 
   // Distinct colors for each trade proposal
-  const TRADE_COLORS = ['#63b3ed', '#f6ad55', '#b794f4', '#4fd1c5', '#f687b3', '#68d391'];
+  const TRADE_COLORS = [
+    "#63b3ed",
+    "#f6ad55",
+    "#b794f4",
+    "#4fd1c5",
+    "#f687b3",
+    "#68d391",
+  ];
 
   // ---------------------------------------------------------------------------
   // Node role detection
   // ---------------------------------------------------------------------------
 
-  function nodeRole(id: string): 'root' | 'federation' | 'leaf' {
+  function nodeRole(id: string): "root" | "federation" | "leaf" {
     const p = parentOf(id);
-    if (!p || !planOrder.includes(p)) return 'root';
-    return planOrder.some(o => parentOf(o) === id) ? 'federation' : 'leaf';
+    if (!p || !planOrder.includes(p)) return "root";
+    return planOrder.some((o) => parentOf(o) === id) ? "federation" : "leaf";
   }
 
   // ---------------------------------------------------------------------------
@@ -39,11 +53,11 @@
     const cx = svgWidth / 2;
     const cy = svgHeight / 2 + 14;
 
-    const root = planOrder.find(id => nodeRole(id) === 'root');
+    const root = planOrder.find((id) => nodeRole(id) === "root");
     if (!root) return pos;
     pos.set(root, { x: cx, y: cy });
 
-    const feds = planOrder.filter(id => parentOf(id) === root);
+    const feds = planOrder.filter((id) => parentOf(id) === root);
     if (feds.length === 0) return pos;
 
     // Rings sized to fit within SVG bounds with padding
@@ -52,12 +66,18 @@
     const COM_SPREAD = Math.PI / 8; // ±22.5° between sibling communes
 
     feds.forEach((fid, i) => {
-      const angle = -Math.PI / 2 + (2 * Math.PI / feds.length) * i;
-      pos.set(fid, { x: cx + R1 * Math.cos(angle), y: cy + R1 * Math.sin(angle) });
+      const angle = -Math.PI / 2 + ((2 * Math.PI) / feds.length) * i;
+      pos.set(fid, {
+        x: cx + R1 * Math.cos(angle),
+        y: cy + R1 * Math.sin(angle),
+      });
 
-      const communes = planOrder.filter(id => parentOf(id) === fid);
+      const communes = planOrder.filter((id) => parentOf(id) === fid);
       communes.forEach((cid, j) => {
-        const offset = communes.length > 1 ? (j - (communes.length - 1) / 2) * COM_SPREAD * 2.2 : 0;
+        const offset =
+          communes.length > 1
+            ? (j - (communes.length - 1) / 2) * COM_SPREAD * 2.2
+            : 0;
         const ca = angle + offset;
         pos.set(cid, { x: cx + R2 * Math.cos(ca), y: cy + R2 * Math.sin(ca) });
       });
@@ -82,16 +102,16 @@
   function hierPath(from: string, to: string): string {
     const f = positions.get(from);
     const t = positions.get(to);
-    if (!f || !t) return '';
+    if (!f || !t) return "";
     return `M ${f.x} ${f.y} L ${t.x} ${t.y}`;
   }
 
   function hierColor(toId: string): string {
     const r = byScope.get(toId);
-    if (!r) return 'rgba(255,255,255,0.06)';
-    if (r.deficits.some(d => d.shortfall > 0)) return 'rgba(229,62,62,0.2)';
-    if (r.surplus.length > 0) return 'rgba(104,211,145,0.14)';
-    return 'rgba(255,255,255,0.06)';
+    if (!r) return "var(--border-faint)";
+    if (r.deficits.some((d) => d.shortfall > 0)) return "rgba(229,62,62,0.50)";
+    if (r.surplus.length > 0) return "rgba(104,211,145,0.40)";
+    return "var(--border-dim)";
   }
 
   // ---------------------------------------------------------------------------
@@ -101,7 +121,7 @@
   function tradeArcPath(fromId: string, toId: string): string {
     const f = positions.get(fromId);
     const t = positions.get(toId);
-    if (!f || !t) return '';
+    if (!f || !t) return "";
     const cx = svgWidth / 2;
     const cy = svgHeight / 2 + 14;
     const mx = (f.x + t.x) / 2;
@@ -116,7 +136,10 @@
     return `M ${f.x} ${f.y} Q ${mx + (dx / len) * push} ${my + (dy / len) * push} ${t.x} ${t.y}`;
   }
 
-  function tradeLabelPos(fromId: string, toId: string): { x: number; y: number } | null {
+  function tradeLabelPos(
+    fromId: string,
+    toId: string,
+  ): { x: number; y: number } | null {
     const f = positions.get(fromId);
     const t = positions.get(toId);
     if (!f || !t) return null;
@@ -136,54 +159,66 @@
   // Node rendering helpers
   // ---------------------------------------------------------------------------
 
-  function cardDims(role: 'root' | 'federation' | 'leaf'): { w: number; h: number } {
-    if (role === 'root') return { w: 160, h: 72 };
-    if (role === 'federation') return { w: 140, h: 62 };
+  function cardDims(role: "root" | "federation" | "leaf"): {
+    w: number;
+    h: number;
+  } {
+    if (role === "root") return { w: 160, h: 72 };
+    if (role === "federation") return { w: 140, h: 62 };
     return { w: 130, h: 80 };
   }
 
   function displayLines(id: string): [string, string?] {
-    if (id === 'universal-commune') return ['UNIVERSAL', 'COMMUNE'];
-    if (id.endsWith('-federation')) return [id.replace('-federation', '').toUpperCase(), 'FEDERATION'];
-    if (id.startsWith('commune-')) return [id.replace('commune-', '').toUpperCase()];
+    if (id === "universal-commune") return ["UNIVERSAL", "COMMUNE"];
+    if (id.endsWith("-federation"))
+      return [id.replace("-federation", "").toUpperCase(), "FEDERATION"];
+    if (id.startsWith("commune-"))
+      return [id.replace("commune-", "").toUpperCase()];
     return [id.toUpperCase()];
   }
 
   function nodeStroke(id: string): string {
     const r = byScope.get(id);
-    if (r?.deficits.some(d => d.shortfall > 0)) return '#e53e3e';
-    if (r?.metabolicDebt?.length) return '#d69e2e';
+    if (r?.deficits.some((d) => d.shortfall > 0)) return "#e53e3e";
+    if (r?.metabolicDebt?.length) return "#d69e2e";
     const role = nodeRole(id);
-    if (role === 'root') return 'rgba(99,179,237,0.65)';
-    if (role === 'federation') return 'rgba(255,255,255,0.18)';
-    if (tradeProposals.some(t => t.fromScopeId === id || t.toScopeId === id)) return 'rgba(99,179,237,0.3)';
-    return 'rgba(255,255,255,0.11)';
+    if (role === "root") return "rgba(99,179,237,0.85)";
+    if (role === "federation") return "rgba(160,200,255,0.35)";
+    if (tradeProposals.some((t) => t.fromScopeId === id || t.toScopeId === id))
+      return "rgba(99,179,237,0.55)";
+    return "rgba(160,200,255,0.22)";
   }
 
   function nodeFill(id: string): string {
-    if (id === selected) return '#1a2233';
+    if (id === selected) return "#1e3050";
     const role = nodeRole(id);
-    if (role === 'root') return '#0b1220';
-    if (role === 'federation') return '#101418';
-    return '#0d0d0d';
+    if (role === "root") return "#0f2040";
+    if (role === "federation") return "#162030";
+    return "#131c2a";
   }
 
   function hexPoints(rx: number, ry: number): string {
     return [
-      [-rx, 0], [-rx * 0.5, -ry], [rx * 0.5, -ry],
-      [rx, 0],  [rx * 0.5,  ry],  [-rx * 0.5, ry],
-    ].map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+      [-rx, 0],
+      [-rx * 0.5, -ry],
+      [rx * 0.5, -ry],
+      [rx, 0],
+      [rx * 0.5, ry],
+      [-rx * 0.5, ry],
+    ]
+      .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
+      .join(" ");
   }
 
   function hexRx(role: string): number {
-    if (role === 'root')       return 105;
-    if (role === 'federation') return 92;
+    if (role === "root") return 105;
+    if (role === "federation") return 92;
     return 88;
   }
 
   function hexRy(role: string): number {
-    if (role === 'root')       return 50;
-    if (role === 'federation') return 43;
+    if (role === "root") return 50;
+    if (role === "federation") return 43;
     return 40;
   }
 </script>
@@ -197,7 +232,14 @@
 >
   <defs>
     {#each TRADE_COLORS as color, i (i)}
-      <marker id="tarrow-{i}" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <marker
+        id="tarrow-{i}"
+        markerWidth="7"
+        markerHeight="7"
+        refX="6"
+        refY="3.5"
+        orient="auto"
+      >
         <path d="M0,0 L7,3.5 L0,7 Z" fill={color} opacity="0.9" />
       </marker>
     {/each}
@@ -211,7 +253,7 @@
     {/if}
   {/each}
 
-  <!-- ── Lateral trade arcs ───────────────────────────────────────────── -->
+  <!-- ── INTER-SCOPE SUPPORT arcs ───────────────────────────────────────────── -->
   {#each tradeProposals as proposal, idx (proposal.id)}
     {@const color = TRADE_COLORS[idx % TRADE_COLORS.length]}
     {@const path = tradeArcPath(proposal.fromScopeId, proposal.toScopeId)}
@@ -228,9 +270,24 @@
         class="trade-arc"
       />
       {#if lp}
-        <rect x={lp.x - 32} y={lp.y - 9} width={64} height={16} rx={2}
-          fill="#08090f" stroke={color} stroke-width="0.5" opacity="0.95" />
-        <text x={lp.x} y={lp.y + 3} text-anchor="middle" class="trade-lbl" fill={color}>
+        <rect
+          x={lp.x - 32}
+          y={lp.y - 9}
+          width={64}
+          height={16}
+          rx={2}
+          fill="#111e30"
+          stroke={color}
+          stroke-width="0.5"
+          opacity="0.95"
+        />
+        <text
+          x={lp.x}
+          y={lp.y + 3}
+          text-anchor="middle"
+          class="trade-lbl"
+          fill={color}
+        >
           {proposal.specId} ×{proposal.quantity}
         </text>
       {/if}
@@ -246,20 +303,30 @@
       {@const result = byScope.get(id)}
       {@const [line1, line2] = displayLines(id)}
       {@const isSelected = id === selected}
-      {@const hasTrade = tradeProposals.some(t => t.fromScopeId === id || t.toScopeId === id)}
-      {@const surplusQty = result?.surplus.reduce((s, x) => s + x.quantity, 0) ?? 0}
-      {@const defCount = result?.deficits.filter(d => d.shortfall > 0).length ?? 0}
+      {@const hasTrade = tradeProposals.some(
+        (t) => t.fromScopeId === id || t.toScopeId === id,
+      )}
+      {@const surplusQty =
+        result?.surplus.reduce((s, x) => s + x.quantity, 0) ?? 0}
+      {@const defCount =
+        result?.deficits.filter((d) => d.shortfall > 0).length ?? 0}
       {@const hasDebt = (result?.metabolicDebt?.length ?? 0) > 0}
-      {@const totalOrig = result?.deficits.reduce((s, d) => s + (d.originalShortfall ?? d.shortfall), 0) ?? 0}
-      {@const totalShort = result?.deficits.reduce((s, d) => s + d.shortfall, 0) ?? 0}
-      {@const resolvedW = totalOrig > 0 ? ((totalOrig - totalShort) / totalOrig) * (w - 14) : 0}
+      {@const totalOrig =
+        result?.deficits.reduce(
+          (s, d) => s + (d.originalShortfall ?? d.shortfall),
+          0,
+        ) ?? 0}
+      {@const totalShort =
+        result?.deficits.reduce((s, d) => s + d.shortfall, 0) ?? 0}
+      {@const resolvedW =
+        totalOrig > 0 ? ((totalOrig - totalShort) / totalOrig) * (w - 14) : 0}
       <g
         transform="translate({pos.x},{pos.y})"
         onclick={() => onselect?.(id)}
         role="button"
         tabindex="0"
         aria-label="Scope {id}"
-        onkeydown={(e) => e.key === 'Enter' && onselect?.(id)}
+        onkeydown={(e) => e.key === "Enter" && onselect?.(id)}
         style="cursor:pointer"
       >
         <!-- Card background -->
@@ -267,69 +334,117 @@
           points={hexPoints(hexRx(role), hexRy(role))}
           fill={nodeFill(id)}
           stroke={nodeStroke(id)}
-          stroke-width={isSelected ? 2 : role === 'root' ? 1.5 : 1}
-          stroke-dasharray={role === 'federation' ? '5 3' : 'none'}
+          stroke-width={isSelected ? 2 : role === "root" ? 1.5 : 1}
+          stroke-dasharray={role === "federation" ? "5 3" : "none"}
         />
 
-        {#if role === 'root'}
+        {#if role === "root"}
           <!-- Universal Commune -->
-          <text x={0} y={-10} text-anchor="middle" class="node-name root-name">{line1}</text>
+          <text x={0} y={-10} text-anchor="middle" class="node-name root-name"
+            >{line1}</text
+          >
           <text x={0} y={8} text-anchor="middle" class="node-sub">{line2}</text>
           <text x={0} y={24} text-anchor="middle" class="node-stat dim-txt">
-            {planOrder.filter(i => nodeRole(i) === 'federation').length} federations
+            {planOrder.filter((i) => nodeRole(i) === "federation").length} federations
           </text>
-
-        {:else if role === 'federation'}
+        {:else if role === "federation"}
           <!-- Federation node -->
-          <text x={0} y={-7} text-anchor="middle" class="node-name fed-name">{line1}</text>
+          <text x={0} y={-7} text-anchor="middle" class="node-name fed-name"
+            >{line1}</text
+          >
           <text x={0} y={8} text-anchor="middle" class="node-sub">{line2}</text>
-
         {:else}
           <!-- Leaf commune -->
-          {@const tradeIdxFrom = tradeProposals.findIndex(t => t.fromScopeId === id)}
-          {@const tradeIdxTo = tradeProposals.findIndex(t => t.toScopeId === id)}
-          {@const tradeColor = tradeIdxFrom >= 0
-            ? TRADE_COLORS[tradeIdxFrom % TRADE_COLORS.length]
-            : tradeIdxTo >= 0
-            ? TRADE_COLORS[tradeIdxTo % TRADE_COLORS.length]
-            : null}
+          {@const tradeIdxFrom = tradeProposals.findIndex(
+            (t) => t.fromScopeId === id,
+          )}
+          {@const tradeIdxTo = tradeProposals.findIndex(
+            (t) => t.toScopeId === id,
+          )}
+          {@const tradeColor =
+            tradeIdxFrom >= 0
+              ? TRADE_COLORS[tradeIdxFrom % TRADE_COLORS.length]
+              : tradeIdxTo >= 0
+                ? TRADE_COLORS[tradeIdxTo % TRADE_COLORS.length]
+                : null}
 
           <!-- Trade accent dot -->
           {#if tradeColor}
             <circle cx={60} cy={-22} r={4} fill={tradeColor} opacity="0.5" />
           {/if}
 
-          <text x={0} y={-6} text-anchor="middle" class="node-name leaf-name">{line1}</text>
+          <text x={0} y={-6} text-anchor="middle" class="node-name leaf-name"
+            >{line1}</text
+          >
 
           <!-- Surplus -->
           {#if surplusQty > 0}
-            <text x={-58} y={20} class="node-stat green-txt">+{Math.round(surplusQty)}</text>
+            <text x={-58} y={20} class="node-stat green-txt"
+              >+{Math.round(surplusQty)}</text
+            >
           {/if}
 
           <!-- Deficit badge -->
           {#if defCount > 0}
-            <rect x={20} y={-28} width={30} height={13} rx={2} fill="rgba(229,62,62,0.2)" />
-            <text x={35} y={-19} text-anchor="middle" class="badge-txt" fill="#e53e3e">{defCount}D</text>
+            <rect
+              x={20}
+              y={-28}
+              width={30}
+              height={13}
+              rx={2}
+              fill="rgba(229,62,62,0.35)"
+            />
+            <text
+              x={35}
+              y={-19}
+              text-anchor="middle"
+              class="badge-txt"
+              fill="#e53e3e">{defCount}D</text
+            >
           {/if}
 
           <!-- Trade/debt label -->
           {#if hasTrade && !hasDebt}
-            <text x={-58} y={20} class="node-stat" fill={tradeColor ?? '#63b3ed'}>⇄ trade</text>
+            <text
+              x={-58}
+              y={20}
+              class="node-stat"
+              fill={tradeColor ?? "#63b3ed"}>⇄ trade</text
+            >
           {:else if hasDebt}
             <text x={-44} y={32} class="node-stat yellow-txt">debt</text>
           {/if}
 
           <!-- Residual bar -->
           {#if result && result.deficits.length > 0}
-            <rect x={-72} y={6} width={144} height={4} rx={2} fill="rgba(255,255,255,0.04)" />
+            <rect
+              x={-72}
+              y={6}
+              width={144}
+              height={4}
+              rx={2}
+              fill="rgba(140,180,255,0.12)"
+            />
             {#if resolvedW > 0}
-              <rect x={-72} y={6} width={resolvedW} height={4} rx={2} fill="#68d391" opacity="0.8" />
+              <rect
+                x={-72}
+                y={6}
+                width={resolvedW}
+                height={4}
+                rx={2}
+                fill="#68d391"
+                opacity="0.8"
+              />
             {/if}
             {#if resolvedW < w - 14}
               <rect
-                x={-72+resolvedW} y={6}
-                width={w-14-resolvedW} height={4}
-                rx={2} fill="#e53e3e" opacity="0.55"
+                x={-72 + resolvedW}
+                y={6}
+                width={w - 14 - resolvedW}
+                height={4}
+                rx={2}
+                fill="#e53e3e"
+                opacity="0.55"
               />
             {/if}
           {/if}
@@ -345,7 +460,7 @@
     height: 100%;
     min-height: 400px;
     display: block;
-    background: #0a0a0a;
+    background: var(--bg-base);
   }
 
   :global(.trade-arc) {
@@ -353,14 +468,16 @@
   }
 
   @keyframes trade-flow {
-    to { stroke-dashoffset: -27; }
+    to {
+      stroke-dashoffset: -27;
+    }
   }
 
   :global(.node-name) {
     font-family: var(--font-mono);
     font-size: 0.64rem;
     letter-spacing: 0.07em;
-    fill: rgba(255,255,255,0.82);
+    fill: rgba(220, 235, 255, 0.92);
     font-weight: 600;
   }
   :global(.root-name) {
@@ -370,7 +487,7 @@
   }
   :global(.fed-name) {
     font-size: 0.62rem;
-    fill: rgba(255,255,255,0.7);
+    fill: rgba(200, 220, 255, 0.8);
   }
   :global(.leaf-name) {
     font-size: 0.62rem;
@@ -380,7 +497,7 @@
     font-family: var(--font-mono);
     font-size: 0.46rem;
     letter-spacing: 0.13em;
-    fill: rgba(255,255,255,0.25);
+    fill: rgba(160, 195, 255, 0.52);
     text-transform: uppercase;
   }
   :global(.node-stat) {
@@ -388,9 +505,16 @@
     font-size: 0.56rem;
     letter-spacing: 0.04em;
   }
-  :global(.green-txt)  { fill: #68d391; }
-  :global(.yellow-txt) { fill: #d69e2e; }
-  :global(.dim-txt)    { fill: rgba(255,255,255,0.2); font-size: 0.48rem; }
+  :global(.green-txt) {
+    fill: #68d391;
+  }
+  :global(.yellow-txt) {
+    fill: #d69e2e;
+  }
+  :global(.dim-txt) {
+    fill: rgba(160, 195, 255, 0.45);
+    font-size: 0.48rem;
+  }
   :global(.badge-txt) {
     font-family: var(--font-mono);
     font-size: 0.48rem;

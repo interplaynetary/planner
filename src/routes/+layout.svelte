@@ -1,4 +1,5 @@
 <script lang="ts">
+	import '$lib/components/ui/tokens.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import TooltipOverlay from '$lib/components/ui/TooltipOverlay.svelte';
 

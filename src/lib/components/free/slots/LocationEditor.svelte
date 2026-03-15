@@ -180,7 +180,7 @@
 		flex-wrap: wrap;
 		gap: 2px;
 		padding: 2px;
-		background: rgba(255, 255, 255, 0.05);
+		background: var(--border-faint);
 		border-radius: 4px;
 		margin-bottom: 7px;
 	}
@@ -202,7 +202,7 @@
 
 	.tab-button:hover {
 		color: rgba(255, 255, 255, 0.7);
-		background: rgba(255, 255, 255, 0.06);
+		background: var(--border-faint);
 	}
 
 	.tab-button.active {
@@ -242,7 +242,7 @@
 		border-radius: 3px;
 		font-size: 0.65rem;
 		color: #e2e8f0;
-		background: rgba(255, 255, 255, 0.06);
+		background: var(--border-faint);
 		transition: border-color 0.15s;
 		appearance: textfield;
 	}

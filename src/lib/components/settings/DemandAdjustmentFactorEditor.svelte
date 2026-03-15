@@ -129,7 +129,7 @@
     flex-direction: column;
     gap: 4px;
     padding: 6px 8px;
-    border: 1px solid rgba(255,255,255,0.08);
+    border: 1px solid var(--border-dim);
     border-radius: 3px;
     background: rgba(255,255,255,0.02);
   }
@@ -139,8 +139,8 @@
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     padding: 2px 8px;
-    border: 1px solid rgba(255,255,255,0.15);
-    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-dim);
+    background: var(--bg-overlay);
     color: #e2e8f0;
     cursor: pointer;
     border-radius: 3px;

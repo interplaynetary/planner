@@ -71,7 +71,7 @@
     width: 160px;
     flex-shrink: 0;
     padding: 8px 10px 9px;
-    background: #0d0d0d;
+    background: var(--bg-base);
     border: 1px solid rgba(214, 158, 46, 0.12);
     border-radius: 4px;
     text-align: left;
@@ -176,7 +176,7 @@
 
   .usage-track {
     height: 3px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--border-dim);
     border-radius: 2px;
     overflow: hidden;
   }

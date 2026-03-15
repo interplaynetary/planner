@@ -100,7 +100,7 @@
     font-size: var(--text-xs);
     opacity: 0.4;
     padding-bottom: var(--gap-xs);
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--border-faint);
   }
   table { border-collapse: collapse; font-family: var(--font-mono); width: 100%; }
   th {
@@ -108,7 +108,7 @@
     opacity: 0.35;
     font-weight: 400;
     padding: 2px 6px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    border-bottom: 1px solid var(--border-faint);
   }
   td { padding: 2px 6px; }
   .num { text-align: right; }
@@ -126,11 +126,11 @@
   input, button { font-size: var(--text-xs); font-family: var(--font-mono); }
   button {
     padding: 2px 8px;
-    background: rgba(255,255,255,0.07);
-    border: 1px solid rgba(255,255,255,0.15);
+    background: var(--bg-overlay);
+    border: 1px solid var(--border-dim);
     color: #e2e8f0;
     cursor: pointer;
     border-radius: 3px;
   }
-  button:hover { background: rgba(255,255,255,0.12); }
+  button:hover { background: var(--bg-elevated); }
 </style>
