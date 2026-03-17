@@ -42,6 +42,17 @@
 
   const readonly = $derived(!onUpdate);
 
+  const isClaimable = $derived(
+    intents[0]?.resourceClassifiedAs?.includes('individual-claimable') ?? false,
+  );
+
+  function toggleClaimType() {
+    const next = isClaimable ? [] : ['individual-claimable'];
+    for (const intent of intents) {
+      onUpdate?.({ ...intent, resourceClassifiedAs: next });
+    }
+  }
+
   let expandedTimeId = $state<string | null>(null);
   let expandedLocId  = $state<string | null>(null);
   let policyOpen     = $state(false);
@@ -120,6 +131,13 @@
   <div class="card-header">
     <span class="emoji">{spec.image ?? "📦"}</span>
     <span class="spec-name">{spec.name}</span>
+    <button
+      class="type-toggle"
+      class:type-toggle--claim={isClaimable}
+      onclick={toggleClaimType}
+      disabled={readonly}
+      title={isClaimable ? "Claimable — click to make commons" : "Commons — click to make claimable"}
+    >{isClaimable ? "◆" : "∞"}</button>
     {#if readonly}
       <span class="unit-display">{getUnit()}</span>
     {:else}
@@ -316,6 +334,28 @@
     color: rgba(167, 139, 250, 0.7);
     flex-shrink: 0;
     padding: 1px 3px;
+  }
+
+  .type-toggle {
+    font-size: 0.55rem;
+    padding: 1px 4px;
+    border-radius: 3px;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    background: rgba(34, 197, 94, 0.1);
+    color: #86efac;
+    cursor: pointer;
+    flex-shrink: 0;
+    line-height: 1.4;
+  }
+
+  .type-toggle:disabled { cursor: default; pointer-events: none; }
+
+  .type-toggle:not(:disabled):hover { opacity: 0.75; }
+
+  .type-toggle--claim {
+    border-color: rgba(234, 179, 8, 0.3);
+    background: rgba(234, 179, 8, 0.1);
+    color: #fde68a;
   }
 
   .policy-btn {

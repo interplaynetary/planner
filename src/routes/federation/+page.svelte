@@ -769,43 +769,92 @@
   // Demand intents — infra cross-scope needs + claimable demands
   // ---------------------------------------------------------------------------
 
+  const CLAIM = ['individual-claimable'];
+
   let demandIntents = $state<Intent[]>([
-    // Infra: 5 cross-federation exchanges
+    // ── Infrastructure (commons) ──────────────────────────────────────────────
     { id: "di-mill-wheat",   action: "transfer", resourceConformsTo: "wheat", resourceQuantity: { hasNumericalValue: 200, hasUnit: "kg"   }, inScopeOf: ["commune-mill"],    due: "2026-04-01" },
-    { id: "di-grain-tools",  action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 15,  hasUnit: "unit" }, inScopeOf: ["commune-grain"],   due: "2026-04-01" },
-    { id: "di-bakery-dairy", action: "transfer", resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 30,  hasUnit: "kg"   }, inScopeOf: ["commune-bakery"],  due: "2026-04-01" },
-    { id: "di-forge-flour",  action: "transfer", resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 30,  hasUnit: "kg"   }, inScopeOf: ["commune-forge"],   due: "2026-04-01" },
-    { id: "di-citrus-fish",  action: "transfer", resourceConformsTo: "fish",  resourceQuantity: { hasNumericalValue: 40,  hasUnit: "kg"   }, inScopeOf: ["commune-citrus"],  due: "2026-04-01" },
-    // Claimable: bread
-    { id: "ci-grain-bread",    action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 30, hasUnit: "loaf" }, inScopeOf: ["commune-grain"],    due: "2026-04-01" },
-    { id: "ci-dairy-bread",    action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 20, hasUnit: "loaf" }, inScopeOf: ["commune-dairy"],    due: "2026-04-01" },
-    { id: "ci-forge-bread",    action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 20, hasUnit: "loaf" }, inScopeOf: ["commune-forge"],    due: "2026-04-01" },
-    { id: "ci-workshop-bread", action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 25, hasUnit: "loaf" }, inScopeOf: ["commune-workshop"], due: "2026-04-01" },
-    { id: "ci-olive-bread",    action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 20, hasUnit: "loaf" }, inScopeOf: ["commune-olive"],    due: "2026-04-01" },
-    { id: "ci-fisher-bread",   action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 25, hasUnit: "loaf" }, inScopeOf: ["commune-fisher"],   due: "2026-04-01" },
-    { id: "ci-salter-bread",   action: "transfer", resourceConformsTo: "bread",  resourceQuantity: { hasNumericalValue: 20, hasUnit: "loaf" }, inScopeOf: ["commune-salter"],   due: "2026-04-01" },
-    // Claimable: salt
-    { id: "ci-grain-salt",     action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg"   }, inScopeOf: ["commune-grain"],    due: "2026-04-01" },
-    { id: "ci-workshop-salt",  action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 18, hasUnit: "kg"   }, inScopeOf: ["commune-workshop"], due: "2026-04-01" },
-    { id: "ci-olive-salt",     action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 12, hasUnit: "kg"   }, inScopeOf: ["commune-olive"],    due: "2026-04-01" },
-    { id: "ci-citrus-salt",    action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg"   }, inScopeOf: ["commune-citrus"],   due: "2026-04-01" },
-    { id: "ci-mill-salt",      action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 10, hasUnit: "kg"   }, inScopeOf: ["commune-mill"],     due: "2026-04-01" },
-    { id: "ci-bakery-salt",    action: "transfer", resourceConformsTo: "salt",   resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg"   }, inScopeOf: ["commune-bakery"],   due: "2026-04-01" },
-    // Claimable: tools
-    { id: "ci-dairy-tools",    action: "transfer", resourceConformsTo: "tools",  resourceQuantity: { hasNumericalValue:  8, hasUnit: "unit" }, inScopeOf: ["commune-dairy"],    due: "2026-04-01" },
-    { id: "ci-mill-tools",     action: "transfer", resourceConformsTo: "tools",  resourceQuantity: { hasNumericalValue: 10, hasUnit: "unit" }, inScopeOf: ["commune-mill"],     due: "2026-04-01" },
-    { id: "ci-fisher-tools",   action: "transfer", resourceConformsTo: "tools",  resourceQuantity: { hasNumericalValue: 12, hasUnit: "unit" }, inScopeOf: ["commune-fisher"],   due: "2026-04-01" },
-    { id: "ci-bakery-tools",   action: "transfer", resourceConformsTo: "tools",  resourceQuantity: { hasNumericalValue:  8, hasUnit: "unit" }, inScopeOf: ["commune-bakery"],   due: "2026-04-01" },
-    { id: "ci-citrus-tools",   action: "transfer", resourceConformsTo: "tools",  resourceQuantity: { hasNumericalValue:  6, hasUnit: "unit" }, inScopeOf: ["commune-citrus"],   due: "2026-04-01" },
-    // Claimable: citrus
-    { id: "ci-forge-citrus",   action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg"   }, inScopeOf: ["commune-forge"],    due: "2026-04-01" },
-    { id: "ci-workshop-citrus",action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg"   }, inScopeOf: ["commune-workshop"], due: "2026-04-01" },
-    { id: "ci-mill-citrus",    action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg"   }, inScopeOf: ["commune-mill"],     due: "2026-04-01" },
-    { id: "ci-fisher-citrus",  action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg"   }, inScopeOf: ["commune-fisher"],   due: "2026-04-01" },
-    { id: "ci-salter-citrus",  action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 18, hasUnit: "kg"   }, inScopeOf: ["commune-salter"],   due: "2026-04-01" },
-    { id: "ci-bakery-citrus",  action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 22, hasUnit: "kg"   }, inScopeOf: ["commune-bakery"],   due: "2026-04-01" },
-    // Cross-scope: connect mill → bakery flour flow
-    { id: "di-bakery-flour",   action: "transfer", resourceConformsTo: "flour",  resourceQuantity: { hasNumericalValue: 80,  hasUnit: "kg"   }, inScopeOf: ["commune-bakery"],   due: "2026-04-01" },
+    { id: "di-bakery-flour", action: "transfer", resourceConformsTo: "flour", resourceQuantity: { hasNumericalValue: 120, hasUnit: "kg"   }, inScopeOf: ["commune-bakery"],  due: "2026-04-01" },
+    { id: "di-bakery-dairy", action: "transfer", resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 40,  hasUnit: "kg"   }, inScopeOf: ["commune-bakery"],  due: "2026-04-01" },
+
+    // ── Claimable: bread (all 10 communes demand from the bakery commons) ─────
+    { id: "ci-grain-bread",    action: "transfer", resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 80, hasUnit: "loaf" }, inScopeOf: ["commune-grain"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-dairy-bread",    action: "transfer", resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 60, hasUnit: "loaf" }, inScopeOf: ["commune-dairy"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-forge-bread",    action: "transfer", resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 70, hasUnit: "loaf" }, inScopeOf: ["commune-forge"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-workshop-bread", action: "transfer", resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 65, hasUnit: "loaf" }, inScopeOf: ["commune-workshop"], due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-olive-bread",    action: "transfer", resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 55, hasUnit: "loaf" }, inScopeOf: ["commune-olive"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-citrus-bread",   action: "transfer", resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 50, hasUnit: "loaf" }, inScopeOf: ["commune-citrus"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-mill-bread",     action: "transfer", resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 55, hasUnit: "loaf" }, inScopeOf: ["commune-mill"],     due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-bakery-bread",   action: "transfer", resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 60, hasUnit: "loaf" }, inScopeOf: ["commune-bakery"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-fisher-bread",   action: "transfer", resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 70, hasUnit: "loaf" }, inScopeOf: ["commune-fisher"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-salter-bread",   action: "transfer", resourceConformsTo: "bread", resourceQuantity: { hasNumericalValue: 60, hasUnit: "loaf" }, inScopeOf: ["commune-salter"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+
+    // ── Claimable: salt (all 10 communes — salter is the primary pool) ────────
+    { id: "ci-grain-salt",     action: "transfer", resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 45, hasUnit: "kg" }, inScopeOf: ["commune-grain"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-dairy-salt",     action: "transfer", resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" }, inScopeOf: ["commune-dairy"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-forge-salt",     action: "transfer", resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 35, hasUnit: "kg" }, inScopeOf: ["commune-forge"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-workshop-salt",  action: "transfer", resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" }, inScopeOf: ["commune-workshop"], due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-olive-salt",     action: "transfer", resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 35, hasUnit: "kg" }, inScopeOf: ["commune-olive"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-citrus-salt",    action: "transfer", resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 40, hasUnit: "kg" }, inScopeOf: ["commune-citrus"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-mill-salt",      action: "transfer", resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 35, hasUnit: "kg" }, inScopeOf: ["commune-mill"],     due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-bakery-salt",    action: "transfer", resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" }, inScopeOf: ["commune-bakery"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-fisher-salt",    action: "transfer", resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 45, hasUnit: "kg" }, inScopeOf: ["commune-fisher"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-salter-salt",    action: "transfer", resourceConformsTo: "salt", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" }, inScopeOf: ["commune-salter"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+
+    // ── Claimable: tools (forge + workshop as primary pool) ───────────────────
+    { id: "ci-grain-tools",    action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 18, hasUnit: "unit" }, inScopeOf: ["commune-grain"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-dairy-tools",    action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 14, hasUnit: "unit" }, inScopeOf: ["commune-dairy"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-forge-tools",    action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 12, hasUnit: "unit" }, inScopeOf: ["commune-forge"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-workshop-tools", action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 15, hasUnit: "unit" }, inScopeOf: ["commune-workshop"], due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-olive-tools",    action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 12, hasUnit: "unit" }, inScopeOf: ["commune-olive"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-citrus-tools",   action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 14, hasUnit: "unit" }, inScopeOf: ["commune-citrus"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-mill-tools",     action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 16, hasUnit: "unit" }, inScopeOf: ["commune-mill"],     due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-bakery-tools",   action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 12, hasUnit: "unit" }, inScopeOf: ["commune-bakery"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-fisher-tools",   action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 20, hasUnit: "unit" }, inScopeOf: ["commune-fisher"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-salter-tools",   action: "transfer", resourceConformsTo: "tools", resourceQuantity: { hasNumericalValue: 14, hasUnit: "unit" }, inScopeOf: ["commune-salter"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+
+    // ── Claimable: citrus (commune-citrus as primary pool) ────────────────────
+    { id: "ci-grain-citrus",   action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" }, inScopeOf: ["commune-grain"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-dairy-citrus",   action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg" }, inScopeOf: ["commune-dairy"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-forge-citrus",   action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 28, hasUnit: "kg" }, inScopeOf: ["commune-forge"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-workshop-citrus",action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" }, inScopeOf: ["commune-workshop"], due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-olive-citrus",   action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg" }, inScopeOf: ["commune-olive"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-mill-citrus",    action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 28, hasUnit: "kg" }, inScopeOf: ["commune-mill"],     due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-bakery-citrus",  action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" }, inScopeOf: ["commune-bakery"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-fisher-citrus",  action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 22, hasUnit: "kg" }, inScopeOf: ["commune-fisher"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-salter-citrus",  action: "transfer", resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg" }, inScopeOf: ["commune-salter"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+
+    // ── Claimable: fish (commune-fisher as primary pool) ──────────────────────
+    { id: "ci-grain-fish",     action: "transfer", resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg" }, inScopeOf: ["commune-grain"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-dairy-fish",     action: "transfer", resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" }, inScopeOf: ["commune-dairy"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-forge-fish",     action: "transfer", resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 22, hasUnit: "kg" }, inScopeOf: ["commune-forge"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-workshop-fish",  action: "transfer", resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" }, inScopeOf: ["commune-workshop"], due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-olive-fish",     action: "transfer", resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 18, hasUnit: "kg" }, inScopeOf: ["commune-olive"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-citrus-fish",    action: "transfer", resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 22, hasUnit: "kg" }, inScopeOf: ["commune-citrus"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-mill-fish",      action: "transfer", resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" }, inScopeOf: ["commune-mill"],     due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-bakery-fish",    action: "transfer", resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg" }, inScopeOf: ["commune-bakery"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-salter-fish",    action: "transfer", resourceConformsTo: "fish", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" }, inScopeOf: ["commune-salter"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+
+    // ── Claimable: dairy (commune-dairy as primary pool) ──────────────────────
+    { id: "ci-grain-dairy",    action: "transfer", resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 30, hasUnit: "kg" }, inScopeOf: ["commune-grain"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-forge-dairy",    action: "transfer", resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg" }, inScopeOf: ["commune-forge"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-workshop-dairy", action: "transfer", resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 28, hasUnit: "kg" }, inScopeOf: ["commune-workshop"], due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-olive-dairy",    action: "transfer", resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg" }, inScopeOf: ["commune-olive"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-citrus-dairy",   action: "transfer", resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg" }, inScopeOf: ["commune-citrus"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-mill-dairy",     action: "transfer", resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg" }, inScopeOf: ["commune-mill"],     due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-fisher-dairy",   action: "transfer", resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 22, hasUnit: "kg" }, inScopeOf: ["commune-fisher"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-salter-dairy",   action: "transfer", resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 25, hasUnit: "kg" }, inScopeOf: ["commune-salter"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+
+    // ── Claimable: olive oil (commune-olive as primary pool) ──────────────────
+    { id: "ci-grain-oil",      action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 12, hasUnit: "liter" }, inScopeOf: ["commune-grain"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-dairy-oil",      action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 10, hasUnit: "liter" }, inScopeOf: ["commune-dairy"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-forge-oil",      action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 15, hasUnit: "liter" }, inScopeOf: ["commune-forge"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-workshop-oil",   action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 12, hasUnit: "liter" }, inScopeOf: ["commune-workshop"], due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-citrus-oil",     action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 14, hasUnit: "liter" }, inScopeOf: ["commune-citrus"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-mill-oil",       action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 10, hasUnit: "liter" }, inScopeOf: ["commune-mill"],     due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-bakery-oil",     action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 15, hasUnit: "liter" }, inScopeOf: ["commune-bakery"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-fisher-oil",     action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 12, hasUnit: "liter" }, inScopeOf: ["commune-fisher"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-salter-oil",     action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 10, hasUnit: "liter" }, inScopeOf: ["commune-salter"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
   ]);
 
   // ---------------------------------------------------------------------------
@@ -1366,7 +1415,12 @@
           />
         </div>
         <div class="recipes-panel-wrap">
-          <ScopeRecipesPanel scopeId={selectedScope} {recipeStore} {specNames} />
+          <ScopeRecipesPanel
+            scopeId={selectedScope}
+            {recipeStore}
+            {specNames}
+            resources={mockResources.get(selectedScope) ?? []}
+          />
         </div>
         {#if selectedFlow}
           <div class="observe-panel">

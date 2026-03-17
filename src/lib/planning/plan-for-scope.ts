@@ -299,11 +299,15 @@ export function classifyScopeSlot(
 ): DemandSlotClass {
     const specId = slot.spec_id ?? '';
 
-    // Is there supply of this spec within the canonical scopes?
-    const localSupply = canonical.some(sid =>
-        querySupplyByScope(supplyIndex, sid).some(s => s.spec_id === specId && s.quantity > 0)
-    );
-    if (localSupply) return 'locally-satisfiable';
+    // Individual-claimable demands are always sourced from the commons pool
+    // (other scopes), never self-satisfied from local inventory.
+    // Skip the local supply check and route directly to transport-candidate.
+    if (!slot.classifiedAs?.includes('individual-claimable')) {
+        const localSupply = canonical.some(sid =>
+            querySupplyByScope(supplyIndex, sid).some(s => s.spec_id === specId && s.quantity > 0)
+        );
+        if (localSupply) return 'locally-satisfiable';
+    }
 
     // Is there supply elsewhere (any scope)?
     const allSupply = querySupplyBySpec(supplyIndex, specId);

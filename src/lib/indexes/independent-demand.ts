@@ -82,6 +82,9 @@ export interface DemandSlot {
 
     /** Scope IDs this demand is in (from intent.inScopeOf) */
     inScopeOf?: string[];
+
+    /** Resource classification tags from the intent (e.g. ['individual-claimable']) */
+    classifiedAs?: string[];
 }
 
 export interface IndependentDemandIndex {
@@ -234,6 +237,7 @@ export function buildIndependentDemandIndex(
             receiver:            intent.receiver,
             atLocation:          intent.atLocation,
             inScopeOf:           intent.inScopeOf,
+            classifiedAs:        intent.resourceClassifiedAs,
         };
 
         index.demands.set(intent.id, slot);
