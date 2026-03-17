@@ -25,24 +25,26 @@
 
   function eventIcon(kind: FederationEventKind): string {
     switch (kind) {
-      case 'scope-planned':       return '◆';
-      case 'deficit-announced':   return '▽';
-      case 'surplus-offered':     return '△';
-      case 'lateral-match':       return '⇄';
-      case 'deficit-propagated':  return '↑';
-      case 'residual-unresolved': return '✕';
+      case 'scope-planned':         return '◆';
+      case 'deficit-announced':     return '▽';
+      case 'surplus-offered':       return '△';
+      case 'lateral-match':         return '⇄';
+      case 'deficit-propagated':    return '↑';
+      case 'residual-unresolved':   return '✕';
+      case 'sacrifice-rebalanced':  return '⚖';
       default: return '·';
     }
   }
 
   function eventColor(kind: FederationEventKind): string {
     switch (kind) {
-      case 'scope-planned':       return 'rgba(255,255,255,0.45)';
-      case 'deficit-announced':   return '#e53e3e';
-      case 'surplus-offered':     return '#68d391';
-      case 'lateral-match':       return '#63b3ed';
-      case 'deficit-propagated':  return '#d69e2e';
-      case 'residual-unresolved': return '#fc8181';
+      case 'scope-planned':         return 'rgba(255,255,255,0.45)';
+      case 'deficit-announced':     return '#e53e3e';
+      case 'surplus-offered':       return '#68d391';
+      case 'lateral-match':         return '#63b3ed';
+      case 'deficit-propagated':    return '#d69e2e';
+      case 'residual-unresolved':   return '#fc8181';
+      case 'sacrifice-rebalanced':  return '#b794f4';
       default: return 'rgba(255,255,255,0.3)';
     }
   }
@@ -52,6 +54,8 @@
     if (e.targetScopeId) parts.push('→ ' + e.targetScopeId);
     if (e.specId) parts.push('| ' + e.specId);
     if (e.quantity !== undefined) parts.push('× ' + e.quantity);
+    if (e.sacrificePerMember !== undefined) parts.push(`actual ${e.sacrificePerMember.toFixed(2)}/member`);
+    if (e.targetSacrificePerMember !== undefined) parts.push(`target ${e.targetSacrificePerMember.toFixed(2)}/member`);
     return parts.join('  ');
   }
 </script>

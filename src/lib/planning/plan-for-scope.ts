@@ -76,6 +76,18 @@ export interface ScopePlanContext {
      * When absent, only tag:plan:replenishment-required specs are processed in Pass 2.
      */
     bufferAlerts?: Map<string, { onhand: number; tor: number; toy: number; tog: number; zone: 'red' | 'yellow' | 'green' | 'excess' }>;
+    /**
+     * Number of members in each scope. Used to weight sacrifice proportionally
+     * during backtracking: sacrifice_score[k] = accumulated_sacrifice[k] / members[k].
+     * Scopes absent from the map are treated as having 1 member.
+     */
+    memberCounts?: Map<string, number>;
+    /**
+     * Maximum number of demand-retractions the backtracking loop may perform.
+     * Each failed re-explode (demand permanently sacrificed) counts as one step.
+     * Undefined or 0 = unbounded (current behaviour — exhaust all candidates).
+     */
+    sacrificeDepth?: number;
 }
 
 /** Deficit signal for scope-based composition (replaces h3_cell with scopeId). */
@@ -539,12 +551,24 @@ export function planForScope(
     const derivedDemands: Array<{ specId: string; qty: number }> = [];
     for (const [specId, qty] of consumedBySpec) {
         const spec = ctx.recipeStore.getResourceSpec(specId);
-        if (spec?.resourceClassifiedAs?.includes('tag:plan:replenishment-required')) {
-            derivedDemands.push({ specId, qty });
+        if (!spec?.resourceClassifiedAs?.includes('tag:plan:replenishment-required')) continue;
+
+        if (ctx.bufferAlerts) {
+            const alert = ctx.bufferAlerts.get(specId);
+            if (alert) {
+                // Buffer zone data present: gate on zone, size by TOG − onhand
+                if (alert.zone === 'green' || alert.zone === 'excess') continue;
+                const replenQty = Math.max(0, alert.tog - alert.onhand);
+                if (replenQty > 1e-9) derivedDemands.push({ specId, qty: replenQty });
+                continue;
+            }
         }
+        // No buffer zone data: conservative fallback — replenish exactly what was consumed
+        derivedDemands.push({ specId, qty });
     }
 
-    // P7: inject buffer-zone alert demands (red/yellow-zone replenishment to TOG)
+    // P7: inject buffer-zone alert demands for specs NOT already in derivedDemands
+    // (specs in red/yellow that weren't consumed in Pass 1 — proactive buffer fill)
     if (ctx.bufferAlerts) {
         for (const [specId, alert] of ctx.bufferAlerts) {
             if (alert.zone === 'red' || alert.zone === 'yellow') {
@@ -588,54 +612,64 @@ export function planForScope(
 
     // --- Backtracking: if replenDebts remains, retract low-criticality Pass 1 ---
     if (replenDebts.length > 0) {
-        // Spec §551: external-dependency (class 3) retracted before locally-satisfiable (class 0);
-        // latest due date first within each class.
-        const retractOrder = [...pass1Records].sort((a, b) => {
-            const classDiff = (CLASS_ORDER[b.slotClass] ?? 3) - (CLASS_ORDER[a.slotClass] ?? 3);
-            if (classDiff !== 0) return classDiff;
-            return new Date(b.slot.due ?? 0).getTime() - new Date(a.slot.due ?? 0).getTime();
-        });
+        // Track sacrifice accumulated per scope in this backtracking session.
+        // sacrifice_score[k] = sacrificedQty[k] / memberCount[k]
+        // We retract from the scope with the LOWEST score (least relative sacrifice so far).
+        const scopeSacrificeQty = new Map<string, number>();
 
-        for (const candidate of retractOrder) {
-            if (replenDebts.length === 0) break;
+        const memberCounts = ctx.memberCounts;
+        function sacrificeScore(scopeId: string): number {
+            const qty = scopeSacrificeQty.get(scopeId) ?? 0;
+            const members = memberCounts?.get(scopeId) ?? 1;
+            return qty / members;
+        }
+
+        const maxSacrificeSteps = ctx.sacrificeDepth ?? Infinity;
+        let sacrificeSteps = 0;
+
+        // Working set — filtered/removed as we retract or exhaust candidates
+        const remaining = new Set(pass1Records);
+
+        while (replenDebts.length > 0 && remaining.size > 0) {
+            if (sacrificeSteps >= maxSacrificeSteps) break;   // ← depth limit
+
+            // Pick next candidate: lowest sacrifice score → if tied, highest D-class → latest due
+            let candidate: SlotRecord | undefined;
+            let bestKey = Infinity;
+            for (const r of remaining) {
+                const scopeId = r.slot.inScopeOf?.[0] ?? canonical[0];
+                const score = sacrificeScore(scopeId);
+                // Composite tie-break: sacrifice score primary, then descending D-class, then latest due
+                const classVal = CLASS_ORDER[r.slotClass] ?? 3;
+                const dueVal = new Date(r.slot.due ?? 0).getTime();
+                // (3 - classVal): higher D-class → smaller value → picked first
+                // (Date.now() - dueVal): later due date → smaller value → picked first
+                const key = score * 1e18 + (3 - classVal) * 1e9 + (Date.now() - dueVal);
+                if (key < bestKey) { bestKey = key; candidate = r; }
+            }
+            if (!candidate) break;
+            remaining.delete(candidate);
 
             netter.retract(candidate.result);
 
             const retryReplenNetter = netter.fork({ observer: undefined });
-
             const resolvedDebt: string[] = [];
             for (const debt of replenDebts) {
                 const retryPlanId = `replenish-retry-${generateId()}`;
                 planStore.addPlan({ id: retryPlanId, name: `Retry replenishment for ${debt.specId}` });
                 const reResult = dependentDemand({
-                    planId: retryPlanId,
-                    demandSpecId: debt.specId,
-                    demandQuantity: debt.shortfall,
-                    dueDate: horizon.to,
-                    recipeStore: ctx.recipeStore,
-                    planStore,
-                    processes,
-                    observer: undefined,
-                    netter: retryReplenNetter,
-                    agents: ctx.agents,
-                    generateId,
+                    planId: retryPlanId, demandSpecId: debt.specId, demandQuantity: debt.shortfall,
+                    dueDate: horizon.to, recipeStore: ctx.recipeStore, planStore, processes,
+                    observer: undefined, netter: retryReplenNetter, agents: ctx.agents, generateId,
                 });
                 allPurchaseIntents.push(...reResult.purchaseIntents);
-
                 const newPurchasedQty = reResult.purchaseIntents
                     .filter(i => i.resourceConformsTo === debt.specId)
                     .reduce((s, i) => s + (i.resourceQuantity?.hasNumericalValue ?? 0), 0);
-                if (newPurchasedQty < debt.shortfall - 1e-9) {
-                    debt.shortfall = newPurchasedQty;
-                }
-                if (newPurchasedQty <= 1e-9) {
-                    resolvedDebt.push(debt.specId);
-                }
+                if (newPurchasedQty < debt.shortfall - 1e-9) debt.shortfall = newPurchasedQty;
+                if (newPurchasedQty <= 1e-9) resolvedDebt.push(debt.specId);
             }
-
-            replenDebts.splice(0, replenDebts.length, ...replenDebts.filter(
-                d => !resolvedDebt.includes(d.specId),
-            ));
+            replenDebts.splice(0, replenDebts.length, ...replenDebts.filter(d => !resolvedDebt.includes(d.specId)));
 
             // §551: attempt re-explode with freed capacity before declaring unmet
             const reExplodePlanId = `reexplode-${generateId()}`;
@@ -645,32 +679,32 @@ export function planForScope(
                 demandSpecId: candidate.slot.spec_id,
                 demandQuantity: candidate.slot.remaining_quantity,
                 dueDate: candidate.slot.due ? new Date(candidate.slot.due) : horizon.to,
-                recipeStore: ctx.recipeStore,
-                planStore,
-                processes,
-                observer: ctx.observer,
-                netter,
-                atLocation: candidate.slot.atLocation,
-                agents: ctx.agents,
-                generateId,
+                recipeStore: ctx.recipeStore, planStore, processes,
+                observer: ctx.observer, netter, atLocation: candidate.slot.atLocation,
+                agents: ctx.agents, generateId,
             }) : null;
 
-            if (reResult && reResult.allocated.length > 0) {
+            if (reResult && (
+                reResult.allocated.length > 0 ||
+                reResult.allocatedScheduledIds.size > 0 ||
+                reResult.processes.length > 0
+            )) {
                 // Re-explode succeeded — keep the slot with updated result
                 const backtrackChildProv = childProvenanceByIntentId.get(candidate.slot.intent_id);
                 if (backtrackChildProv?.originScopeId) {
                     for (const commitment of reResult.commitments) {
-                        commitment.inScopeOf = [
-                            ...(commitment.inScopeOf ?? []),
-                            backtrackChildProv.originScopeId,
-                        ];
+                        commitment.inScopeOf = [...(commitment.inScopeOf ?? []), backtrackChildProv.originScopeId];
                     }
                 }
                 pass1Records.push({ slot: candidate.slot, slotClass: candidate.slotClass, result: reResult });
             } else {
-                // Re-explode failed — demand is truly unmet
-                unmetDemand.push(candidate.slot);
+                // Re-explode failed — demand is sacrificed. Update running sacrifice score.
+                const candidateScopeId = candidate.slot.inScopeOf?.[0] ?? canonical[0];
+                scopeSacrificeQty.set(candidateScopeId,
+                    (scopeSacrificeQty.get(candidateScopeId) ?? 0) + (candidate.slot.remaining_quantity ?? 0));
+                sacrificeSteps++;     // ← count each permanent sacrifice against depth limit
 
+                unmetDemand.push(candidate.slot);
                 const backtrackProv = childProvenanceByIntentId.get(candidate.slot.intent_id);
                 allDeficits.push({
                     plannedWithin: candidate.result.plan.id,
@@ -679,7 +713,7 @@ export function planForScope(
                     action: candidate.slot.action,
                     shortfall: candidate.slot.remaining_quantity,
                     due: candidate.slot.due,
-                    scopeId: candidate.slot.inScopeOf?.[0] ?? canonical[0],
+                    scopeId: candidateScopeId,
                     source: 'unmet_demand',
                     originalShortfall: backtrackProv?.originalShortfall ?? candidate.slot.remaining_quantity,
                     resolvedAt: backtrackProv?.resolvedAt,

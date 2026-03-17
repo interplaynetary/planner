@@ -915,6 +915,19 @@
   // planFederation — reactive, re-runs when demandIndex changes
   // ---------------------------------------------------------------------------
 
+  const memberCounts = new Map<string, number>([
+    ['commune-grain',    120],
+    ['commune-dairy',     80],
+    ['commune-forge',     60],
+    ['commune-workshop',  90],
+    ['commune-olive',     70],
+    ['commune-citrus',    85],
+    ['commune-mill',      50],
+    ['commune-bakery',    65],
+    ['commune-fisher',    75],
+    ['commune-salter',    55],
+  ]);
+
   const federationResult = $derived.by(() => planFederation(
     [
       "commune-grain", "commune-dairy", "commune-forge", "commune-workshop",
@@ -930,6 +943,8 @@
       demandIndex,
       supplyIndex,
       parentOf: parentOfMap,
+      memberCounts,
+      sacrificeDepth: 5,
     },
   ));
 

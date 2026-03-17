@@ -68,6 +68,19 @@ export interface FederationPlanContext {
      * and resolveAsync() falls back to remote fetch on local miss.
      */
     remoteTransport?: RemoteTransport;
+    /**
+     * Number of members in each leaf scope.  Passed through to every planForScope
+     * call so the backtracking loop can weight sacrifice proportionally.
+     * Intermediate/aggregate scopes need not be listed — their weight is the sum
+     * of their leaf descendants, computed on the fly if needed.
+     */
+    memberCounts?: Map<string, number>;
+    /**
+     * Maximum demand-retractions in the backtracking loop at each federation level.
+     * Passed through unchanged — each planForScope invocation enforces its own limit.
+     * Default (undefined): unbounded.
+     */
+    sacrificeDepth?: number;
 }
 
 export interface FederationPlanResult {
@@ -131,7 +144,8 @@ export type FederationEventKind =
     | 'surplus-offered'
     | 'lateral-match'
     | 'deficit-propagated'
-    | 'residual-unresolved';
+    | 'residual-unresolved'
+    | 'sacrifice-rebalanced';
 
 /** An event emitted during the federation planning process. */
 export interface FederationEvent {
@@ -142,6 +156,9 @@ export interface FederationEvent {
     targetScopeId?: string;
     specId?: string;
     quantity?: number;
+    /** For 'sacrifice-rebalanced': sacrifice per member at this scope vs. federation target. */
+    sacrificePerMember?: number;
+    targetSacrificePerMember?: number;
 }
 
 // =============================================================================
@@ -217,15 +234,17 @@ export function planFederation(
     const registry = new StoreRegistry(ctx.remoteTransport);
 
     const scopeCtx: ScopePlanContext = {
-        recipeStore:  ctx.recipeStore,
-        observer:     ctx.observer,
-        demandIndex:  ctx.demandIndex,
-        supplyIndex:  ctx.supplyIndex,
-        parentOf:     ctx.parentOf,
+        recipeStore:    ctx.recipeStore,
+        observer:       ctx.observer,
+        demandIndex:    ctx.demandIndex,
+        supplyIndex:    ctx.supplyIndex,
+        parentOf:       ctx.parentOf,
         generateId,
-        agents:       ctx.agents,
-        config:       ctx.config,
-        bufferAlerts: ctx.bufferAlerts,
+        agents:         ctx.agents,
+        config:         ctx.config,
+        bufferAlerts:   ctx.bufferAlerts,
+        memberCounts:   ctx.memberCounts,
+        sacrificeDepth: ctx.sacrificeDepth,
     };
 
     for (const scopeId of planOrder) {
@@ -368,6 +387,39 @@ export function planFederation(
         for (const d of result.deficits) {
             const resolved = finalShortfall.get(d.intentId);
             if (resolved !== undefined) d.shortfall = resolved;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Sacrifice analysis — report per-scope sacrifice vs. proportional target
+    // -------------------------------------------------------------------------
+    if (ctx.memberCounts && ctx.memberCounts.size > 0) {
+        // Collect remaining deficit per scope (after lateral matching resolved some)
+        const deficitPerScope = new Map<string, number>();
+        for (const d of deficitWork) {
+            if (d.shortfall <= 1e-9) continue;
+            deficitPerScope.set(d.scopeId, (deficitPerScope.get(d.scopeId) ?? 0) + d.shortfall);
+        }
+
+        const totalDeficit = [...deficitPerScope.values()].reduce((a, b) => a + b, 0);
+        const totalMembers = [...deficitPerScope.keys()]
+            .reduce((s, sid) => s + (ctx.memberCounts!.get(sid) ?? 1), 0);
+        const targetPerMember = totalMembers > 0 ? totalDeficit / totalMembers : 0;
+
+        for (const [sid, deficit] of deficitPerScope) {
+            const members = ctx.memberCounts.get(sid) ?? 1;
+            const actual = deficit / members;
+            // Only emit when the imbalance is meaningful (> 10% deviation from target)
+            if (Math.abs(actual - targetPerMember) > targetPerMember * 0.1 + 1e-9) {
+                events.push({
+                    kind: 'sacrifice-rebalanced',
+                    round: 2,
+                    scopeId: sid,
+                    quantity: deficit,
+                    sacrificePerMember: actual,
+                    targetSacrificePerMember: targetPerMember,
+                });
+            }
         }
     }
 
