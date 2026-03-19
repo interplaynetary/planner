@@ -1,17 +1,50 @@
 <script lang="ts">
   import { SvelteMap } from "svelte/reactivity";
-  import type { EconomicResource } from "$lib/schemas";
+  import type { EconomicResource, Intent } from "$lib/schemas";
   import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
-  import type { TradeProposal } from "$lib/planning/plan-federation";
+  import {
+    PLAN_TAGS, parseDeficitNote, deficitShortfall,
+    tradeFrom, tradeTo, tradeSpec, tradeQty,
+  } from "$lib/planning/planning";
+
+  interface BufferEntry {
+    specId: string;
+    zone: 'red' | 'yellow' | 'green' | 'excess';
+    onhand: number;
+    tor: number;
+    toy: number;
+    tog: number;
+  }
 
   interface Props {
     planOrder: string[];
     byScope: Map<string, ScopePlanResult>;
     parentOf: (id: string) => string | undefined;
-    tradeProposals?: TradeProposal[];
+    tradeProposals?: Intent[];
     resourcesByScope?: Map<string, EconomicResource[]>;
+    buffersByScope?: Map<string, BufferEntry[]>;
     selected?: string;
     onselect?: (id: string) => void;
+  }
+
+  // Helpers for deficit/surplus on ScopePlanResult
+  function scopeHasDeficits(r: ScopePlanResult): boolean {
+    return r.planStore.intentsForTag(PLAN_TAGS.DEFICIT).some(i => deficitShortfall(i) > 0);
+  }
+  function scopeSurplusQty(r: ScopePlanResult): number {
+    return r.planStore.intentsForTag(PLAN_TAGS.SURPLUS)
+      .reduce((s, i) => s + (i.resourceQuantity?.hasNumericalValue ?? 0), 0);
+  }
+  function scopeDeficitCount(r: ScopePlanResult): number {
+    return r.planStore.intentsForTag(PLAN_TAGS.DEFICIT).filter(i => deficitShortfall(i) > 0).length;
+  }
+  function scopeTotalOrig(r: ScopePlanResult): number {
+    return r.planStore.intentsForTag(PLAN_TAGS.DEFICIT)
+      .reduce((s, i) => s + parseDeficitNote(i).originalShortfall, 0);
+  }
+  function scopeTotalShort(r: ScopePlanResult): number {
+    return r.planStore.intentsForTag(PLAN_TAGS.DEFICIT)
+      .reduce((s, i) => s + deficitShortfall(i), 0);
   }
 
   let {
@@ -20,9 +53,17 @@
     parentOf,
     tradeProposals = [],
     resourcesByScope = new Map(),
+    buffersByScope = new Map(),
     selected = "",
     onselect,
   }: Props = $props();
+
+  function zoneColor(zone: 'red' | 'yellow' | 'green' | 'excess'): string {
+    if (zone === 'red')    return '#fc5858';
+    if (zone === 'yellow') return '#e8b04e';
+    if (zone === 'excess') return '#7eb3f5';
+    return '#7ee8a2';
+  }
 
   // Deterministic hue from a string (spec ID → consistent color)
   function specColor(id: string): string {
@@ -119,8 +160,8 @@
   function hierColor(toId: string): string {
     const r = byScope.get(toId);
     if (!r) return "var(--border-faint)";
-    if (r.deficits.some((d) => (d.originalShortfall ?? 0) > 0)) return "rgba(126,232,162,0.45)";
-    if (r.surplus.length > 0) return "rgba(126,232,162,0.35)";
+    if (scopeHasDeficits(r)) return "rgba(126,232,162,0.45)";
+    if (r.planStore.intentsForTag(PLAN_TAGS.SURPLUS).length > 0) return "rgba(126,232,162,0.35)";
     return "var(--border-dim)";
   }
 
@@ -189,11 +230,11 @@
 
   function nodeStroke(id: string): string {
     const r = byScope.get(id);
-    if (r?.deficits.some((d) => (d.originalShortfall ?? 0) > 0)) return "#7ee8a2";
+    if (r && scopeHasDeficits(r)) return "#7ee8a2";
     const role = nodeRole(id);
     if (role === "root") return "rgba(120,195,255,0.85)";
     if (role === "federation") return "rgba(160,210,255,0.40)";
-    if (tradeProposals.some((t) => t.fromScopeId === id || t.toScopeId === id))
+    if (tradeProposals.some((t) => tradeFrom(t) === id || tradeTo(t) === id))
       return "rgba(120,195,255,0.60)";
     return "rgba(160,210,255,0.26)";
   }
@@ -252,6 +293,11 @@
         <path d="M0,0 L7,3.5 L0,7 Z" fill={color} opacity="0.9" />
       </marker>
     {/each}
+    <!-- Zone-colored arrowheads for buffer-fill arcs -->
+    <marker id="barrow-red"    markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#fc5858" opacity="0.9" /></marker>
+    <marker id="barrow-yellow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#e8b04e" opacity="0.9" /></marker>
+    <marker id="barrow-green"  markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#7ee8a2" opacity="0.9" /></marker>
+    <marker id="barrow-excess" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#7eb3f5" opacity="0.9" /></marker>
   </defs>
 
   <!-- ── Hierarchy edges (bottom layer) ───────────────────────────────── -->
@@ -263,20 +309,24 @@
   {/each}
 
   <!-- ── INTER-SCOPE SUPPORT arcs ───────────────────────────────────────────── -->
+  <!-- Buffer-fill trades (solid, zone-colored) rendered first so regular trades draw on top -->
   {#each tradeProposals as proposal, idx (proposal.id)}
-    {@const color = TRADE_COLORS[idx % TRADE_COLORS.length]}
-    {@const path = tradeArcPath(proposal.fromScopeId, proposal.toScopeId)}
-    {@const lp = tradeLabelPos(proposal.fromScopeId, proposal.toScopeId)}
+    {@const bufEntry = (buffersByScope.get(tradeTo(proposal)) ?? []).find(b => b.specId === tradeSpec(proposal))}
+    {@const isBufferFill = !!bufEntry}
+    {@const bufZone = bufEntry?.zone ?? 'green'}
+    {@const color = isBufferFill ? zoneColor(bufZone) : TRADE_COLORS[idx % TRADE_COLORS.length]}
+    {@const path = tradeArcPath(tradeFrom(proposal), tradeTo(proposal))}
+    {@const lp = tradeLabelPos(tradeFrom(proposal), tradeTo(proposal))}
     {#if path}
       <path
         d={path}
         stroke={color}
-        stroke-width="1.5"
+        stroke-width={isBufferFill ? 2 : 1.5}
         fill="none"
-        stroke-dasharray="6 3"
-        opacity="0.72"
-        marker-end="url(#tarrow-{idx % TRADE_COLORS.length})"
-        class="trade-arc"
+        stroke-dasharray={isBufferFill ? 'none' : '6 3'}
+        opacity={isBufferFill ? 0.85 : 0.72}
+        marker-end={isBufferFill ? `url(#barrow-${bufZone})` : `url(#tarrow-${idx % TRADE_COLORS.length})`}
+        class={isBufferFill ? 'buffer-fill-arc' : 'trade-arc'}
       />
       {#if lp}
         <rect
@@ -297,7 +347,7 @@
           class="trade-lbl"
           fill={color}
         >
-          {proposal.specId} ×{proposal.quantity}
+          {isBufferFill ? '▣ ' : ''}{tradeSpec(proposal)} ×{tradeQty(proposal)}
         </text>
       {/if}
     {/if}
@@ -313,20 +363,12 @@
       {@const [line1, line2] = displayLines(id)}
       {@const isSelected = id === selected}
       {@const hasTrade = tradeProposals.some(
-        (t) => t.fromScopeId === id || t.toScopeId === id,
+        (t) => tradeFrom(t) === id || tradeTo(t) === id,
       )}
-      {@const surplusQty =
-        result?.surplus.reduce((s, x) => s + x.quantity, 0) ?? 0}
-      {@const defCount =
-        result?.deficits.filter((d) => d.shortfall > 0).length ?? 0}
-
-      {@const totalOrig =
-        result?.deficits.reduce(
-          (s, d) => s + (d.originalShortfall ?? d.shortfall),
-          0,
-        ) ?? 0}
-      {@const totalShort =
-        result?.deficits.reduce((s, d) => s + d.shortfall, 0) ?? 0}
+      {@const surplusQty = result ? scopeSurplusQty(result) : 0}
+      {@const defCount = result ? scopeDeficitCount(result) : 0}
+      {@const totalOrig = result ? scopeTotalOrig(result) : 0}
+      {@const totalShort = result ? scopeTotalShort(result) : 0}
       {@const resolvedW =
         totalOrig > 0 ? ((totalOrig - totalShort) / totalOrig) * (w - 14) : 0}
       <g
@@ -360,7 +402,7 @@
           {@const fedKids = planOrder.filter((i) => parentOf(i) === id)}
           {@const coherentKids = fedKids.filter((i) => {
             const r = byScope.get(i);
-            return !r || !r.deficits.some((d) => d.shortfall > 0);
+            return !r || !scopeHasDeficits(r);
           }).length}
           {@const coherence = fedKids.length > 0 ? coherentKids / fedKids.length : 1}
           {@const pieR = 11}
@@ -390,10 +432,10 @@
         {:else}
           <!-- Leaf commune -->
           {@const tradeIdxFrom = tradeProposals.findIndex(
-            (t) => t.fromScopeId === id,
+            (t) => tradeFrom(t) === id,
           )}
           {@const tradeIdxTo = tradeProposals.findIndex(
-            (t) => t.toScopeId === id,
+            (t) => tradeTo(t) === id,
           )}
           {@const tradeColor =
             tradeIdxFrom >= 0
@@ -444,13 +486,13 @@
           {#if defCount > 0}
             <rect x={20} y={-28} width={30} height={13} rx={2} fill="rgba(252,88,88,0.30)" />
             <text x={35} y={-19} text-anchor="middle" class="badge-txt" fill="#fc5858">{defCount}D</text>
-          {:else if result && result.deficits.length > 0}
+          {:else if result && result.planStore.intentsForTag(PLAN_TAGS.DEFICIT).length > 0}
             <rect x={20} y={-28} width={30} height={13} rx={2} fill="rgba(126,232,162,0.20)" />
             <text x={35} y={-19} text-anchor="middle" class="badge-txt" fill="#7ee8a2">✓</text>
           {/if}
 
           <!-- Residual bar -->
-          {#if result && result.deficits.length > 0}
+          {#if result && result.planStore.intentsForTag(PLAN_TAGS.DEFICIT).length > 0}
             <rect
               x={-72}
               y={6}
@@ -481,6 +523,69 @@
                 opacity="0.60"
               />
             {/if}
+          {/if}
+
+          <!-- Buffer zone pips — one per buffer zone, colored by zone status -->
+          {@const scopeBuffers = buffersByScope.get(id) ?? []}
+          {#if scopeBuffers.length > 0}
+            {@const pipW = 10}
+            {@const pipGap = 3}
+            {@const totalPipW = scopeBuffers.length * pipW + (scopeBuffers.length - 1) * pipGap}
+            {@const pipX = -totalPipW / 2}
+            {#each scopeBuffers as buf, bi (buf.specId)}
+              <rect
+                x={pipX + bi * (pipW + pipGap)}
+                y={30}
+                width={pipW}
+                height={5}
+                rx={1.5}
+                fill={zoneColor(buf.zone)}
+                opacity="0.82"
+              >
+                <title>{buf.specId}: {buf.onhand}/{buf.tog} ({buf.zone})</title>
+              </rect>
+            {/each}
+          {/if}
+
+          <!-- Selected: buffer detail panel rendered below the hexagon -->
+          {#if isSelected && scopeBuffers.length > 0}
+            {@const panelY = 48}
+            {@const panelH = scopeBuffers.length * 24 + 10}
+            {@const barW = 80}
+            <rect
+              x={-82} y={panelY}
+              width={164} height={panelH}
+              rx={3}
+              fill="rgba(10,18,38,0.97)"
+              stroke="rgba(120,195,255,0.22)"
+              stroke-width="0.75"
+            />
+            {#each scopeBuffers as buf, bi (buf.specId)}
+              {@const bY = panelY + 7 + bi * 24}
+              {@const torX  = buf.tog > 0 ? (buf.tor / buf.tog) * barW : 0}
+              {@const toyX  = buf.tog > 0 ? (buf.toy / buf.tog) * barW : 0}
+              {@const fillW = buf.tog > 0 ? Math.min(barW, (buf.onhand / buf.tog) * barW) : 0}
+              {@const provider = tradeProposals.find(t => tradeTo(t) === id && tradeSpec(t) === buf.specId)}
+              <text x={-76} y={bY + 9} class="buf-label">{buf.specId}</text>
+              <!-- Track -->
+              <rect x={-8} y={bY + 4} width={barW} height={5} rx={1.5} fill="rgba(255,255,255,0.07)" />
+              <!-- TOR / TOY zone ticks -->
+              <line x1={-8 + torX} y1={bY + 3} x2={-8 + torX} y2={bY + 10} stroke="rgba(252,88,88,0.55)" stroke-width="0.75" />
+              <line x1={-8 + toyX} y1={bY + 3} x2={-8 + toyX} y2={bY + 10} stroke="rgba(232,176,78,0.55)" stroke-width="0.75" />
+              <!-- Fill bar -->
+              {#if fillW > 0}
+                <rect x={-8} y={bY + 4} width={fillW} height={5} rx={1.5} fill={zoneColor(buf.zone)} opacity="0.75" />
+              {/if}
+              <text x={-8 + barW + 4} y={bY + 9} class="buf-val">{buf.onhand}</text>
+              <!-- Provider source sub-line -->
+              {#if provider}
+                <text x={-76} y={bY + 19} class="buf-provider" fill={zoneColor(buf.zone)}>
+                  ← {tradeFrom(provider).replace('commune-', '').toUpperCase()} ×{tradeQty(provider)}
+                </text>
+              {:else}
+                <text x={-76} y={bY + 19} class="buf-provider">self-supplied</text>
+              {/if}
+            {/each}
           {/if}
         {/if}
       </g>
@@ -566,5 +671,22 @@
     font-size: 0.49rem;
     letter-spacing: 0.04em;
     font-weight: 600;
+  }
+  :global(.buf-label) {
+    font-family: var(--font-mono);
+    font-size: 0.43rem;
+    fill: rgba(175, 205, 255, 0.72);
+    letter-spacing: 0.04em;
+  }
+  :global(.buf-val) {
+    font-family: var(--font-mono);
+    font-size: 0.43rem;
+    fill: rgba(175, 205, 255, 0.50);
+  }
+  :global(.buf-provider) {
+    font-family: var(--font-mono);
+    font-size: 0.38rem;
+    fill: rgba(160, 195, 255, 0.38);
+    letter-spacing: 0.03em;
   }
 </style>

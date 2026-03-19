@@ -1391,6 +1391,14 @@ export const BufferZoneSchema = z.object({
     toy: z.number().nonnegative(),
     /** Top of Green = full buffer ceiling */
     tog: z.number().nonnegative(),
+    /**
+     * Tipping point — on-hand level below which ecological recovery is impossible.
+     * When onhand < tippingPoint, the planner emits a ConservationSignal with
+     * tippingPointBreached: true so the federation can escalate immediately.
+     * Only meaningful for ecological buffers (tag:buffer:ecological on ResourceSpec).
+     * Must be ≤ tor; leave undefined for metabolic/social buffers.
+     */
+    tippingPoint: z.number().nonnegative().optional(),
 
     // --- N-6: Red zone decomposition (informational) ---
     /**

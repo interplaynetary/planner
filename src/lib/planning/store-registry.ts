@@ -96,6 +96,20 @@ export class StoreRegistry {
         return Array.from(this.stores.keys());
     }
 
+    /**
+     * Aggregate intents with a given tag across all registered stores.
+     * Returns each matching intent annotated with its owning scope ID.
+     */
+    intentsForTag(tag: string): Array<{ scopeId: string; intent: Intent }> {
+        const results: Array<{ scopeId: string; intent: Intent }> = [];
+        for (const [scopeId, store] of this.stores) {
+            for (const intent of store.intentsForTag(tag)) {
+                results.push({ scopeId, intent });
+            }
+        }
+        return results;
+    }
+
     // -------------------------------------------------------------------------
     // Cross-scope resolution
     // -------------------------------------------------------------------------

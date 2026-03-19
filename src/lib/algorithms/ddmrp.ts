@@ -105,6 +105,12 @@ export interface BufferStatusResult {
      * e.g. `redPct < 50` fires the on-hand alert at 50% of red zone.
      */
     redPct: number;
+    /**
+     * True when bufferZone.tippingPoint is defined and onhand < tippingPoint.
+     * Signals potential irreversible ecological collapse; the federation must escalate.
+     * Undefined when no tippingPoint is configured on the zone.
+     */
+    tippingPointBreached?: boolean;
 }
 
 export interface DailyProjectionEntry {
@@ -895,7 +901,11 @@ export function bufferStatus(onhand: number, bufferZone: BufferZone): BufferStat
         zone = 'excess';
     }
 
-    return { onhand, pct, zone, redPct };
+    const result: BufferStatusResult = { onhand, pct, zone, redPct };
+    if (bufferZone.tippingPoint !== undefined) {
+        result.tippingPointBreached = onhand < bufferZone.tippingPoint;
+    }
+    return result;
 }
 
 // =============================================================================
@@ -2441,6 +2451,52 @@ export function recommendBufferType(
     // Low variability AND stable ADU (CoV < 0.2) → min-max
     if (variabilityFactor <= 0.20 && (opts?.aduCoV == null || opts.aduCoV < 0.20)) return 'min_max';
     return 'replenished';
+}
+
+// =============================================================================
+// 30. orchestrateBufferRecalibration — pre-planning ADU refresh + zone update
+// =============================================================================
+
+/**
+ * Pre-planning orchestrator: refresh ADU from historical events and recalibrate
+ * all BufferZones in the store before planForScope / planForRegion runs.
+ *
+ * Call this once per planning cycle (before any planFor* invocation) so that
+ * buffer zone sizes reflect current demand patterns rather than stale estimates.
+ *
+ * Workflow for each zone:
+ *   1. computeADU() from the provided events slice
+ *   2. recalibrateBufferZone() with fresh ADU + DLT from zone.dltDays
+ *      (DLT segmentation — Gap 6 — would provide a segmented DLT here)
+ *   3. Store the updated zone back via bufferZoneStore.replaceZone()
+ *
+ * Zones without a matching profile in profileMap are skipped.
+ *
+ * DDMRP ref: Ptak & Smith Ch 10 — DDS&OP; Ch 7 §"Recalibration Process".
+ *
+ * @param bufferZoneStore  Store of all active buffer zones
+ * @param profileMap       profileId → BufferProfile mapping
+ * @param events           Historical EconomicEvents for ADU computation
+ * @param adjustments      Active DemandAdjustmentFactors for the period
+ * @param asOf             Reference date (today)
+ * @param opts.windowDays  ADU rolling window in days (default 84 — 12 weeks)
+ */
+export function orchestrateBufferRecalibration(
+    bufferZoneStore: BufferZoneStore,
+    profileMap: Map<string, BufferProfile>,
+    events: EconomicEvent[],
+    adjustments: DemandAdjustmentFactor[],
+    asOf: Date,
+    opts?: { windowDays?: number },
+): void {
+    const windowDays = opts?.windowDays ?? 84;
+    for (const zone of bufferZoneStore.allBufferZones()) {
+        const profile = profileMap.get(zone.profileId);
+        if (!profile) continue;
+        const { adu } = computeADU(events, zone.specId, windowDays, asOf);
+        const updated = recalibrateBufferZone(zone, adu, zone.dltDays, profile, adjustments, asOf);
+        bufferZoneStore.replaceZone(updated);
+    }
 }
 
 // =============================================================================

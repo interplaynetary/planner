@@ -1,38 +1,44 @@
 <script lang="ts">
-  import type { ReplenishmentSignal } from "$lib/schemas";
+  import type { Intent } from "$lib/schemas";
+  import { PLAN_TAGS, parseReplenishmentNote } from "$lib/planning/planning";
   import ZoneBadge from "$lib/components/ui/ZoneBadge.svelte";
 
   interface Props {
-    signals: ReplenishmentSignal[];
-    onApprove?: (signalId: string) => void;
-    onReject?: (signalId: string) => void;
+    signals: Intent[];
+    onApprove?: (intentId: string) => void;
+    onReject?: (intentId: string) => void;
     class?: string;
   }
 
   let { signals, onApprove, onReject, class: cls = "" }: Props = $props();
+
+  function parsed(s: Intent) {
+    return parseReplenishmentNote(s);
+  }
 </script>
 
 <ul class="rsp {cls}" role="list">
   {#each signals as s}
+    {@const note = parsed(s)}
     <li>
       <span class="id">{s.id.slice(0, 8)}</span>
-      <ZoneBadge zone={s.zone ?? "yellow"} />
-      <span class="qty">×{s.recommendedQty?.toFixed(1) ?? "?"}</span>
+      <ZoneBadge zone={note.zone ?? "yellow"} />
+      <span class="qty">&times;{note.recommendedQty?.toFixed(1) ?? "?"}</span>
       <span class="due"
-        >{s.dueDate
-          ? new Date(s.dueDate).toLocaleDateString()
+        >{note.dueDate
+          ? new Date(note.dueDate).toLocaleDateString()
           : "—"}</span
       >
       <span class="pct"
-        >{s.priority !== undefined
-          ? `${(s.priority * 100).toFixed(0)}%`
+        >{note.priority !== undefined
+          ? `${(note.priority * 100).toFixed(0)}%`
           : ""}</span
       >
       <div class="acts">
-        {#if onApprove}
+        {#if onApprove && !s.finished}
           <button class="yes" onclick={() => onApprove(s.id)}>↑</button>
         {/if}
-        {#if onReject}
+        {#if onReject && !s.finished}
           <button class="no" onclick={() => onReject(s.id)}>✕</button>
         {/if}
       </div>

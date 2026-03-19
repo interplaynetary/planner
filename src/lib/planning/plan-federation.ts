@@ -18,24 +18,22 @@
  */
 
 import { nanoid } from 'nanoid';
-
 import type { Intent } from '../schemas';
 import type { RecipeStore } from '../knowledge/recipes';
 import type { Observer } from '../observation/observer';
 import type { IndependentDemandIndex } from '../indexes/independent-demand';
 import type { IndependentSupplyIndex } from '../indexes/independent-supply';
-import type { PlanStore } from './planning';
+import { PlanStore, PLAN_TAGS, parseDeficitNote, parseConservationNote } from './planning';
+import { ProcessRegistry } from '../process-registry';
 import {
     planForScope,
-    buildScopePlanSignals,
     type ScopePlanContext,
     type ScopePlanResult,
-    type ScopeDeficitSignal,
-    type ScopePlanSignals,
-    type SurplusSignal,
 } from './plan-for-scope';
+import type { ConservationSignal } from './plan-for-region';
 import { StoreRegistry } from './store-registry';
 import type { RemoteTransport } from './remote-transport';
+import type { BufferZoneStore } from '../knowledge/buffer-zones';
 
 // =============================================================================
 // TYPES
@@ -62,6 +60,7 @@ export interface FederationPlanContext {
     bufferAlerts?: Map<string, {
         onhand: number; tor: number; toy: number; tog: number;
         zone: 'red' | 'yellow' | 'green' | 'excess';
+        tippingPointBreached?: boolean;
     }>;
     /**
      * When provided, StoreRegistry auto-announces each scope after planning
@@ -81,6 +80,12 @@ export interface FederationPlanContext {
      * Default (undefined): unbounded.
      */
     sacrificeDepth?: number;
+    /**
+     * When provided, bufferAlerts for each scope is derived automatically from
+     * BufferZoneStore + current observer inventory. Passed through to planForScope.
+     * Takes precedence over explicit bufferAlerts.
+     */
+    bufferZoneStore?: BufferZoneStore;
 }
 
 export interface FederationPlanResult {
@@ -97,46 +102,35 @@ export interface FederationPlanResult {
     /** All purchase intents emitted across all scope levels (deduplicated). */
     allPurchaseIntents: Intent[];
     /**
-     * Deficits that remain after the root-level planner has had its turn —
-     * demands the entire federation could not satisfy.
-     */
-    unresolved: ScopeDeficitSignal[];
-    /** Surpluses at the root level available for external trade. */
-    rootSurplus: SurplusSignal[];
-    /**
      * Distributed address space for the federation plan.
      * Maps scopeId → PlanStore and supports cross-scope reference resolution
      * via qualify("scopeId::recordId") and reactive subscriptions.
      */
     registry: StoreRegistry;
     /**
-     * Peer trade proposals from the lateral matching pass.
-     * These represent surplus-to-deficit matches between scopes that are not
-     * in an ancestor/descendant relationship — true peer trades.
+     * Lateral-transfer Intents (tag:plan:lateral-transfer) from the peer matching pass.
+     * Query: federationStore.intentsForTag(PLAN_TAGS.LATERAL_TRANSFER)
+     * Fields: provider = fromScopeId, inScopeOf[0] = toScopeId,
+     *         resourceConformsTo = specId, resourceQuantity.hasNumericalValue = quantity
      */
-    tradeProposals: TradeProposal[];
+    federationStore: PlanStore;
     /**
      * Ordered federation event log across all planning rounds.
      * Round 0 = bottom-up hierarchy pass, Round 1 = lateral matching.
      */
     events: FederationEvent[];
+    /**
+     * All conservation signals emitted across all scopes.
+     * Ecological buffers in yellow/red zone; each signal instructs upstream
+     * demand sources to reduce extraction of the affected resource.
+     * Signals with tippingPointBreached: true require immediate escalation.
+     */
+    allConservationSignals: ConservationSignal[];
 }
 
 // =============================================================================
-// LATERAL MATCHING TYPES
+// FEDERATION EVENT TYPES
 // =============================================================================
-
-/** A peer trade proposal created during the lateral matching pass. */
-export interface TradeProposal {
-    id: string;
-    /** Scope offering surplus. */
-    fromScopeId: string;
-    /** Scope with the unmet demand. */
-    toScopeId: string;
-    specId: string;
-    quantity: number;
-    status: 'proposed' | 'accepted' | 'settled';
-}
 
 export type FederationEventKind =
     | 'scope-planned'
@@ -242,17 +236,15 @@ export function planFederation(
         generateId,
         agents:         ctx.agents,
         config:         ctx.config,
-        bufferAlerts:   ctx.bufferAlerts,
-        memberCounts:   ctx.memberCounts,
-        sacrificeDepth: ctx.sacrificeDepth,
+        bufferAlerts:    ctx.bufferAlerts,
+        bufferZoneStore: ctx.bufferZoneStore,
+        memberCounts:    ctx.memberCounts,
+        sacrificeDepth:  ctx.sacrificeDepth,
     };
 
     for (const scopeId of planOrder) {
         const children = childrenOf.get(scopeId) ?? [];
 
-        const childSignals: ScopePlanSignals[] = children.map(c =>
-            buildScopePlanSignals(byScope.get(c)!),
-        );
         const subStores: PlanStore[] = children.map(c =>
             byScope.get(c)!.planStore,
         );
@@ -262,7 +254,6 @@ export function planFederation(
             horizon,
             scopeCtx,
             children.length > 0 ? subStores : undefined,
-            children.length > 0 ? childSignals : undefined,
         );
 
         byScope.set(scopeId, result);
@@ -299,22 +290,28 @@ export function planFederation(
     }));
 
     // -------------------------------------------------------------------------
-    // Step 5 — Lateral matching pass (peer trade proposals)
+    // Step 5 — Lateral matching pass (peer trade proposals as VF Intents)
     //
     // After the bottom-up hierarchy pass, any deficits that remain are those
     // that couldn't be resolved within a sub-tree. We attempt to match them
     // against surplus in unrelated scopes (not ancestor/descendant).
     // -------------------------------------------------------------------------
-    const tradeProposals: TradeProposal[] = [];
 
-    // Build a mutable surplus pool
-    const surplusPool = new Map<string, Array<{ scopeId: string; qty: number }>>();
-    for (const [sid, result] of byScope) {
-        for (const s of result.surplus) {
-            const bucket = surplusPool.get(s.specId) ?? [];
-            bucket.push({ scopeId: sid, qty: s.quantity });
-            surplusPool.set(s.specId, bucket);
-        }
+    // federationStore holds lateral-transfer Intents (tag:plan:lateral-transfer)
+    const federationStore = new PlanStore(new ProcessRegistry(generateId), generateId);
+
+    // Build a mutable surplus pool from planStore intents (cross-scope query via registry)
+    const surplusPool = new Map<string, Array<{ scopeId: string; qty: number; intentId: string; unit: string }>>();
+    for (const { scopeId: sid, intent: i } of registry.intentsForTag(PLAN_TAGS.SURPLUS)) {
+        const specId = i.resourceConformsTo ?? '';
+        const bucket = surplusPool.get(specId) ?? [];
+        bucket.push({
+            scopeId: sid,
+            qty: i.resourceQuantity?.hasNumericalValue ?? 0,
+            intentId: i.id,
+            unit: i.resourceQuantity?.hasUnit ?? 'unit',
+        });
+        surplusPool.set(specId, bucket);
     }
 
     // Emit surplus-offered events
@@ -336,17 +333,26 @@ export function planFederation(
         return false;
     };
 
-    // Collect unresolved deficits (deduplicated by intentId)
+    // Collect unresolved deficits (deduplicated by intentId, cross-scope query via registry)
     const seenDeficitIds = new Set<string>();
-    const deficitWork: Array<{ scopeId: string; specId: string; shortfall: number; intentId: string }> = [];
-    for (const [sid, result] of byScope) {
-        for (const d of result.deficits) {
-            if (d.shortfall <= 1e-9) continue;
-            if (seenDeficitIds.has(d.intentId)) continue;
-            seenDeficitIds.add(d.intentId);
-            deficitWork.push({ scopeId: sid, specId: d.specId, shortfall: d.shortfall, intentId: d.intentId });
-            events.push({ kind: 'deficit-announced', round: 1, scopeId: sid, specId: d.specId, quantity: d.shortfall });
-        }
+    const deficitWork: Array<{
+        scopeId: string; specId: string; shortfall: number; intentId: string;
+        unit: string; isMetabolicDebt: boolean;
+    }> = [];
+    for (const { scopeId: sid, intent: i } of registry.intentsForTag(PLAN_TAGS.DEFICIT)) {
+        const shortfall = i.resourceQuantity?.hasNumericalValue ?? 0;
+        if (shortfall <= 1e-9) continue;
+        if (seenDeficitIds.has(i.id)) continue;
+        seenDeficitIds.add(i.id);
+        deficitWork.push({
+            scopeId: sid,
+            specId: i.resourceConformsTo ?? '',
+            shortfall,
+            intentId: i.id,
+            unit: i.resourceQuantity?.hasUnit ?? 'unit',
+            isMetabolicDebt: i.resourceClassifiedAs?.includes(PLAN_TAGS.METABOLIC_DEBT) ?? false,
+        });
+        events.push({ kind: 'deficit-announced', round: 1, scopeId: sid, specId: i.resourceConformsTo ?? '', quantity: shortfall });
     }
 
     // Lateral matching: try to match each deficit against a non-hierarchical surplus
@@ -362,13 +368,14 @@ export function planFederation(
             const qty = Math.min(deficit.shortfall, entry.qty);
             entry.qty -= qty;
             deficit.shortfall -= qty;
-            tradeProposals.push({
-                id: generateId(),
-                fromScopeId: entry.scopeId,
-                toScopeId: deficit.scopeId,
-                specId: deficit.specId,
-                quantity: qty,
-                status: 'proposed',
+            federationStore.addIntent({
+                action: 'transfer',
+                provider: entry.scopeId,
+                inScopeOf: [deficit.scopeId],
+                resourceConformsTo: deficit.specId,
+                resourceQuantity: { hasNumericalValue: qty, hasUnit: entry.unit },
+                resourceClassifiedAs: [PLAN_TAGS.LATERAL_TRANSFER],
+                finished: false,
             });
             events.push({ kind: 'lateral-match', round: 1, scopeId: entry.scopeId, targetScopeId: deficit.scopeId, specId: deficit.specId, quantity: qty });
             if (deficit.shortfall <= 1e-9) break;
@@ -378,17 +385,26 @@ export function planFederation(
         }
     }
 
-    // Write resolved shortfalls back to ALL copies of each deficit in byScope.
-    // deficitWork mutated shortfall in-place on local copies; byScope still has
-    // the original values — the resolvedPct stat reads from byScope so we must sync.
+    // Write resolved shortfalls back to ALL deficit Intents in every planStore that holds them.
     const finalShortfall = new Map<string, number>();
     for (const d of deficitWork) finalShortfall.set(d.intentId, d.shortfall);
     for (const result of byScope.values()) {
-        for (const d of result.deficits) {
-            const resolved = finalShortfall.get(d.intentId);
-            if (resolved !== undefined) d.shortfall = resolved;
+        for (const i of result.planStore.intentsForTag(PLAN_TAGS.DEFICIT)) {
+            const newShortfall = finalShortfall.get(i.id);
+            if (newShortfall === undefined) continue;
+            if (Math.abs(newShortfall - (i.resourceQuantity?.hasNumericalValue ?? 0)) < 1e-9) continue;
+            const { originalShortfall, resolvedAt } = parseDeficitNote(i);
+            result.planStore.removeRecords({ intentIds: [i.id] });
+            result.planStore.addIntent({
+                ...i,
+                resourceQuantity: { hasNumericalValue: newShortfall, hasUnit: i.resourceQuantity?.hasUnit ?? 'unit' },
+                note: JSON.stringify({ originalShortfall, resolvedAt }),
+            });
         }
     }
+
+    // Register federationStore in the registry for cross-scope queries
+    registry.register('federation', federationStore);
 
     // -------------------------------------------------------------------------
     // Sacrifice analysis — report per-scope sacrifice vs. proportional target
@@ -424,9 +440,36 @@ export function planFederation(
     }
 
     // Residual unresolved (survived all passes)
-    for (const d of root.deficits) {
-        if (d.shortfall > 1e-9) {
-            events.push({ kind: 'residual-unresolved', round: 2, scopeId: rootId, specId: d.specId, quantity: d.shortfall });
+    for (const i of root.planStore.intentsForTag(PLAN_TAGS.DEFICIT)) {
+        const shortfall = i.resourceQuantity?.hasNumericalValue ?? 0;
+        if (shortfall > 1e-9) {
+            events.push({ kind: 'residual-unresolved', round: 2, scopeId: rootId, specId: i.resourceConformsTo ?? '', quantity: shortfall });
+        }
+    }
+
+    // Collect conservation signals from all scopes (deduplicated by specId — one per ecological resource)
+    const seenConservationSpecIds = new Set<string>();
+    const allConservationSignals: ConservationSignal[] = [];
+    for (const result of byScope.values()) {
+        for (const i of result.planStore.intentsForTag(PLAN_TAGS.CONSERVATION)) {
+            const specId = i.resourceConformsTo ?? '';
+            const cn = parseConservationNote(i);
+            if (!seenConservationSpecIds.has(specId)) {
+                seenConservationSpecIds.add(specId);
+                allConservationSignals.push({
+                    plannedWithin: i.plannedWithin ?? `conservation:${specId}`,
+                    specId,
+                    onhand: cn.onhand, tor: cn.tor, toy: cn.toy, tog: cn.tog,
+                    zone: cn.zone,
+                    tippingPointBreached: cn.tippingPointBreached,
+                });
+            } else {
+                // Merge: if any scope sees a tipping point breach, escalate
+                if (cn.tippingPointBreached) {
+                    const existing = allConservationSignals.find(s => s.specId === specId)!;
+                    existing.tippingPointBreached = true;
+                }
+            }
         }
     }
 
@@ -435,10 +478,9 @@ export function planFederation(
         root,
         planOrder,
         allPurchaseIntents,
-        unresolved: root.deficits,
-        rootSurplus: root.surplus,
         registry,
-        tradeProposals,
+        federationStore,
         events,
+        allConservationSignals,
     };
 }

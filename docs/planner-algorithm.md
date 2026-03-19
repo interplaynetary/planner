@@ -1,240 +1,205 @@
 # Planner Algorithm Design Notes
 
-This document captures the design decisions behind `planForScope` and its
-relationship to DDMRP (Demand-Driven Material Requirements Planning).
-Intended audience: contributors who need to extend or debug the two-pass
-planning engine.
+This document captures the design decisions behind the two-pass planning engine
+(`planForScope`, `planForRegion`, `dependentDemand`).
+Intended audience: contributors who need to extend or debug the planning logic.
 
 ---
 
-## 0. Architectural Identity
+## §0 — Architectural Identity
 
-**This system is MRP-VF with an optional DDMRP overlay.**
+**Primary architecture: DDMRP-VF.**
 
-"MRP-VF" means: standard Material Requirements Planning logic — demand
-explosion through a BOM/recipe graph, inventory netting, purchase intents for
-unresolvable remainder — expressed entirely in ValueFlows primitives
-(Intents, Commitments, Processes, RecipeFlows, EconomicResources).
+MRP-style full BFS explosion is the **fallback** for specs not tagged
+`tag:plan:replenishment-required`.
 
-"Optional DDMRP overlay" means: when the caller supplies buffer zone data
-(`ctx.bufferAlerts`), Pass 2 replenishment sizing and gating shifts to
-DDMRP semantics (zone-gated, TOG − onhand sizing). When that data is absent,
-the system falls back to the MRP default (replenish exactly what was consumed).
+> The `tag:plan:replenishment-required` tag on a `ResourceSpec` is a **DDMRP
+> decoupling point declaration** (Component 1: Strategic Inventory Positioning),
+> and a **spec-v2 political decision** encoded in the knowledge layer by the scope
+> assembly. Pass 1 treats tagged specs as buffer boundaries: it allocates from
+> on-hand inventory if available, then stops. It never continues upstream into the
+> spec's production recipe during Pass 1 — instead it records a replenishment signal
+> (`boundaryStops`). Pass 2 fires the buffer's full recipe chain (unrestricted BFS).
+> Specs without this tag receive full MRP-style BFS explosion in Pass 1.
 
-This is a deliberate, stable architectural choice. The alternative — building
-DDMRP-VF scope composition from the start — would require a fundamentally
-different information flow (§5). We are not building toward that. The
-`bufferAlerts` interface is a clean integration seam, not a migration path.
+**Deliberate divergence from distribution DDMRP:** When a buffer is depleted,
+pure DDMRP fires a larger replenishment order and allows human expediting —
+demand is backordered, not dropped. Our commune planning model makes a deliberate
+architectural choice: boundary-stopped demand is declared **unmet in the current
+planning cycle**. This surfaces buffer-sizing failures clearly and is consistent
+with spec-v2's local/global inversion — the commune's failure at the buffer
+boundary is the correct level of failure to propagate upward, not raw-material-level
+shortfalls.
+
+"The recipe set is the politics; the planner is the arithmetic" — the BFS stop
+simply executes the scope assembly's buffer placement decision.
 
 ---
 
-## 1. Two-Pass Planning Overview
+## §1 — Two-Pass Structure
 
-The planner runs in two sequential passes within a single scope invocation.
-
-**Pass 1 — Independent demands**
+### Pass 1 — Independent demand explosion with decoupling-point stops
 
 Each demand slot (sourced from `IndependentDemandIndex`) is classified and
 processed in priority order: locally-satisfiable → transport-candidate →
 producible-with-imports → external-dependency, then by due date ascending.
 
-For each slot the algorithm calls `dependentDemand()`, which:
-- allocates existing inventory via the `PlanNetter`
-- fires recipe explosions (BFS) to satisfy what inventory cannot cover
-- emits `purchaseIntents` for anything still unresolvable
+For each slot `dependentDemand()` is called with `honorDecouplingPoints: true`.
+The BFS:
+- allocates existing inventory at each spec via `PlanNetter`
+- if the spec is tagged `replenishment-required` and `remaining > 0` after netting:
+  records the remainder in `result.boundaryStops` and **stops** (no recipe explosion)
+- for non-buffer specs: continues full MRP BFS explosion upstream
 
 `transport-candidate` slots are short-circuited: a single transfer intent is
-created and no recipe explosion occurs, since the supply physically exists
-elsewhere and should be matched at the federation level, not consumed locally.
+created and no recipe explosion occurs.
 
-**Derived step — Replenishment demand computation**
+**Result:** `boundaryStops` Map (specId → qty remaining at boundary) plus
+`allocated` (inventory consumed from on-hand).
 
-After Pass 1 completes, the allocations are scanned to identify which
-`ResourceSpec`s tagged `tag:plan:replenishment-required` were consumed.
-These become the inputs to Pass 2.
+### Derived — Pass 2 inputs
 
-Default (MRP) behavior: replenish exactly the quantity consumed.
+After Pass 1 completes, two maps are computed:
 
-When `ctx.bufferAlerts` is provided (DDMRP overlay), each consumed spec is
-checked per-alert:
-- `green` / `excess`: skip — buffer is healthy, no replenishment needed
-- `red` / `yellow`: size the demand by `TOG − onhand` (fill-to-target),
-  not by the consumption quantity
+- `consumedBySpec` — buffer inventory drawn down in Pass 1 (needs restocking)
+- `boundaryBySpec` — demand that hit an empty buffer (genuine buffer deficit)
+
+These are unioned: `allBufferSpecs = consumedBySpec ∪ boundaryBySpec`.
+For each spec in the union, `qty = consumed + boundary`.
+
+Sizing override: when `bufferAlerts` is provided and the spec has an alert,
+`TOG − onhand` replaces the combined qty (fills to target regardless of
+per-cycle consumption). `green`/`excess` zones suppress replenishment entirely.
 
 A P7 sub-step injects proactive buffer-fill demands for `red`/`yellow` specs
-that were *not* consumed in Pass 1 (buffer eroded by prior periods, not this
-run). This only fires when `bufferAlerts` is present — it is a DDMRP overlay
-behaviour with no MRP equivalent.
+not already in the derived set (buffers eroded in prior periods, not this run).
 
-**Pass 2 — Replenishment / metabolic demands**
+### Pass 2 — Replenishment
 
-Each derived demand is exploded via `dependentDemand()` against a forked
-netter that does not see on-hand inventory (replenishment is about restocking,
-not consuming what is already there).
+Each derived demand is exploded via `dependentDemand()` with
+`honorDecouplingPoints` **not set** (full unrestricted BFS). The observer is
+also omitted so replenishment fires production recipes rather than re-sourcing
+existing stock.
 
 Unresolvable replenishment demands accumulate as `MetabolicDebt` and are
 emitted as `source: 'metabolic_debt'` deficit signals upward.
 
 ---
 
-## 2. BFS Algorithm Properties
+## §2 — BFS Algorithm Properties
 
-`dependentDemand()` runs an exhaustive BFS over the recipe graph:
+Queue-based iterative BFS. Four decision points in `processDemand`, in order:
 
-- **Exhaustive** — all recipe branches are explored before the demand is
-  declared unresolvable
-- **Per-task lazy exit** — once a task (process node) is fully allocated,
-  its subtree is not re-explored
-- **Netting model** — `PlanNetter` tracks what has been allocated in this
-  planning session; subsequent calls see a net-reduced inventory, preventing
-  double-allocation across slots
+1. **Netting:** `if remaining <= 0 return` — fully covered by on-hand inventory
+   or previously scheduled outputs.
 
-The BFS produces:
-- `processes` — process nodes created
-- `commitments` — input commitments consuming inventory or labor
-- `allocated` — concrete inventory allocations (physical resources from Observer)
-- `allocatedScheduledIds` — IDs of scheduled receipts (future supply) absorbed
-- `purchaseIntents` — unresolvable remainder emitted as purchase/transfer intents
+2. **Decoupling stop (DDMRP-VF):** if `honorDecouplingPoints` AND spec tagged
+   `replenishment-required` AND `remaining > 0` → record in `result.boundaryStops`,
+   return. No purchaseIntent is emitted — demand is unmet this cycle.
+
+3. **No-recipe:** emit `purchaseIntent` and return (MRP fallback for terminal
+   raw materials that have no production recipe).
+
+4. **Recipe found:** scale, back-schedule, enqueue inputs (MRP explosion
+   continues upstream).
+
+Point 2 fires before point 3: `replenishment-required` specs with recipes never
+emit purchaseIntents in Pass 1.
 
 ---
 
-## 3. Backtracking Semantics
+## §3 — Backtracking Semantics
 
-When Pass 2 replenishment fails (metabolic debt remains), the backtracking
-loop attempts to free capacity by retracting low-criticality Pass 1 demands.
+When Pass 2 replenishment fails (metabolic debt remains), the backtracking loop
+retracts low-criticality Pass 1 demands to free capacity.
 
 **Retraction order:**
-1. Lowest sacrifice score (sacrificed qty / member count) among remaining Pass 1 records
+1. Lowest sacrifice score (sacrificed qty / member count)
 2. Highest demand class (external-dependency before locally-satisfiable)
 3. Latest due date
 
 **Steps for each candidate:**
-1. `netter.retract(candidate.result)` — undo all allocations for this demand
-2. Retry replenishment with the freed capacity
-3. Attempt re-explode of the retracted demand with the now-available resources
+1. `netter.retract(candidate.result)` — undo all allocations
+2. Retry Pass 2 replenishment with freed capacity
+3. Attempt re-explode of the retracted demand (`honorDecouplingPoints: true`)
 
-**Re-explode success condition:**
-A re-explode is considered successful if *any* of the following is true:
-- `allocated.length > 0` — inventory was consumed
-- `allocatedScheduledIds.size > 0` — a scheduled receipt was absorbed
-- `processes.length > 0` — a production recipe was triggered (no inventory needed)
+**Re-explode and freed buffer inventory:** Re-explode calls use
+`honorDecouplingPoints: true`. If retraction freed buffer inventory (e.g. flour),
+the netting step (Decision A) satisfies the demand before the boundary check
+fires — so freed inventory is always usable by re-explodes. The boundary stop
+only fires when the buffer is still empty after netting. ✓
 
-The third condition is the critical one: a recipe-only resolution creates
-processes and commitments but leaves `allocated` empty. Without this check,
-recipe-resolved re-explodes were falsely treated as failures and the demand
-was permanently sacrificed.
+If re-explode fails on all three counts (no allocated, no scheduled receipts,
+no processes created), the demand is permanently sacrificed (`unmetDemand`) and
+a `source: 'unmet_demand'` deficit signal is emitted.
 
-If re-explode fails on all three counts, the demand is permanently sacrificed
-(`unmetDemand`) and a `source: 'unmet_demand'` deficit signal is emitted.
-
-The `sacrificeDepth` context option caps the number of permanent sacrifices,
-preventing runaway backtracking on pathological inputs.
+The `sacrificeDepth` context option caps the number of permanent sacrifices.
 
 ---
 
-## 4. Scope Boundaries as Demand Decoupling Points
+## §4 — Scope Hierarchy as Multi-Echelon Buffer Network
 
-`planForScope` uses VF Agent scope boundaries as demand information barriers:
+Each scope boundary is a demand decoupling point (spec-v2 local/global
+inversion). The `replenishment-required` BFS stop prevents Pass 1 from reaching
+upstream buffer specs that may be custodied by parent scopes.
 
-- Each scope runs an independent planning pass and emits deficit/surplus signals
-- Parent scopes consume child deficit signals as demand slots, injecting them
-  into their own Pass 1 (upward composition via `childSignals`)
-- Surplus signals are matched laterally at the federation level
+Child scopes emit `ScopeDeficitSignal` for unmet demands; parent scopes inject
+these as demand slots in their own Pass 1 and re-explode them against federation-
+level recipes and inventory.
 
-A child commune does not propagate raw recipe explosions upward — it propagates
-a clean shortfall quantity, which the parent resolves with its own recipe and
-inventory knowledge. This is the MRP-VF decoupling mechanism: structural
-(scope boundary), not signal-based (NFP threshold).
-
-This is similar in effect to a DDMRP decoupling point — both break the demand
-amplification chain — but the trigger and sizing logic are different (see §5).
+**Multi-echelon note:** DDMRP's prioritized-share protocol (fill all buffers to
+TOR first → then TOY → proportional green) is not yet implemented in
+`plan-federation.ts`.
 
 ---
 
-## 5. MRP-VF vs DDMRP-VF: What We Are and What We Are Not
+## §5 — MRP Fallback for Non-Buffer Specs
 
-This section exists to prevent future contributors from inadvertently pushing
-the system toward DDMRP-VF semantics and creating hybrid behaviour.
+Specs without `replenishment-required` receive full BFS in Pass 1 regardless of
+`honorDecouplingPoints`. Decision 2 only fires when the tag is present.
 
-### What MRP-VF does
-
-1. **Demand explosion crosses replenishment boundaries.** Pass 1 BFS allocates
-   inventory from a `replenishment-required` spec. The spec boundary is not a
-   stop point — the explosion passes through it and consumes stock.
-2. **Pass 2 is triggered by consumption.** If nothing consumed a
-   `replenishment-required` spec in Pass 1, Pass 2 does not fire for it
-   (unless `bufferAlerts` is present and the zone is red/yellow — DDMRP overlay).
-3. **Replenishment is sized by consumption** (MRP default) or by
-   `TOG − onhand` (DDMRP overlay when `bufferAlerts` supplied).
-4. **Scope boundaries decouple structurally.** Child scopes emit shortfall
-   quantities. Parents treat them as ordinary demand slots and re-explode.
-
-### What DDMRP-VF would do instead
-
-1. **Demand explosion stops at a decoupling point.** When BFS reaches a
-   `replenishment-required` spec, it would short-circuit instead of consuming
-   inventory, and instead generate a replenishment signal for that spec's
-   buffer. Downstream demand never directly causes upstream replenishment.
-2. **Replenishment is triggered by NFP, not consumption.**
-   `NFP = on-hand + on-order − qualified_demand`. An order fires when
-   `NFP ≤ TOY`, sized as `TOG − NFP`. This fires even in periods with zero
-   consumption if on-order quantities don't cover projected demand.
-3. **On-order is part of the netting equation.** Open purchase intents/
-   commitments for a spec reduce the replenishment quantity. Currently
-   `PlanNetter` does not include external open POs.
-4. **Demand spike qualification.** Large one-off spikes are separated from
-   average demand before computing NFP, preventing over-ordering.
-5. **Buffers are self-managing.** Each decoupled spec monitors its own NFP
-   independently of whatever demand flows triggered the draw-down.
-6. **Scope boundaries decouple by signal.** Instead of re-exploding a child
-   shortfall at the parent, each scope's buffer emits its own NFP-derived
-   replenishment signal. The parent never sees raw demand; it only sees buffer
-   replenishment requests.
-
-### The seam: `bufferAlerts`
-
-`ctx.bufferAlerts` is the integration point between the two models. When
-present, Pass 2 sizing and gating use DDMRP zone semantics. When absent,
-pure MRP behaviour applies. The seam is intentionally narrow:
-
-- `bufferAlerts` changes **how much** to replenish and **whether** to replenish
-- It does not change **when** replenishment is triggered (still consumption-based)
-- It does not change **whether** the BFS explosion crosses the spec boundary (it still does)
-
-A true DDMRP-VF implementation would require the BFS itself to be
-decoupling-point-aware, and would require NFP + on-order data to be available
-at plan time. Those are architectural changes, not additions to the
-`bufferAlerts` interface.
-
-### Summary table
-
-| Dimension | MRP-VF (this system) | DDMRP-VF (not this system) |
-|---|---|---|
-| BFS crosses replenishment boundary | Yes — consumes inventory | No — short-circuits, emits buffer signal |
-| Replenishment trigger | Consumption in Pass 1 | NFP ≤ TOY |
-| Replenishment sizing (no overlay) | Qty consumed | TOG − NFP |
-| Replenishment sizing (with `bufferAlerts`) | TOG − onhand | TOG − NFP |
-| On-order in netting | Scheduled receipts only | All open supply commitments |
-| Demand spike handling | None | Qualified spike filter |
-| Scope decoupling mechanism | Structural (scope boundary, re-explode at parent) | Signal (NFP-derived buffer request, no re-explode) |
-| Buffer zone computation | External input (`bufferAlerts`) | Internally derived from ADU × DLT × LTF × VF |
+This is correct for project/capital demand where there are no strategic buffer
+positions — the full recipe chain is always explored.
 
 ---
 
-## 6. Known Gaps Within MRP-VF
+## §6 — DDMRP Infrastructure Already Implemented (`ddmrp.ts`)
 
-These are gaps in the MRP-VF implementation itself, not steps toward DDMRP-VF.
+All of the following are implemented and ready to wire into the planning cycle:
 
-- **Open-PO netting** — externally-sourced purchase orders should reduce
-  `netAvailableQty` in Pass 2 to avoid double-ordering
-- **DLT in lead time scheduling** — `criticalPath()` gives total CLT; per-leg
-  lead time is needed for accurate due-date back-scheduling
-- **OTIF tracker** — actual vs. planned delivery performance per spec/scope;
-  feeds buffer profile tuning when `bufferAlerts` is in use
-- **S&OP aggregation** — roll-up of scope plans to federation-level capacity
-  review; a reporting layer over existing `ScopePlanResult` data
+- `computeADU`, `bootstrapADU`, `blendADU` — rolling Average Daily Usage
+- `computeBufferZone` → TOR / TOY / TOG zone thresholds
+- `netFlowPosition` — NFP = on-hand + on-order − qualified demand (signed)
+- `qualifiedDemand`, `orderSpikeThreshold` — OST demand spike filter
+- `aggregateAdjustmentFactors` — DAF / zone / lead-time adjustments
+- `deriveVariabilityFactor`, `standardProfileTemplate`
+- `BufferZone`, `BufferProfile`, `ReplenishmentSignal`, `DemandAdjustmentFactor`
+  schemas
 
-Items that would only matter for DDMRP-VF (NFP calculator, qualified demand
-spike filter, ADU, buffer zone formula, self-managing buffers) are out of
-scope and should not be added to this planner without a deliberate decision
-to change the architectural identity in §0.
+---
+
+## §7 — Remaining Gaps
+
+- **NFP replenishment trigger:** `netFlowPosition()` exists; not called from
+  orchestrators. Currently Pass 2 is triggered by consumption, not NFP ≤ TOY.
+- **Open-PO netting:** external purchase commitments not included in on-order
+  for NFP computation.
+- **ADU not wired:** `computeADU()` exists; not called from planning cycle.
+- **Qualified demand OST filter:** `qualifiedDemand()` exists; not used in
+  `PlanNetter`.
+- **Prioritized share:** DDMRP Ch 9 sequential zone-fill not in
+  `plan-federation.ts`.
+
+### Wired in this pass
+
+- **Buffer-level deficit signals** (gap #6 — now wired): boundary stops now
+  emit buffer-level `ScopeDeficitSignal` (e.g. `specId='flour'`) in addition
+  to the demand-level signal. Federation receives "flour buffer depleted" and
+  can replenish flour directly without re-discovering the bread→flour dependency.
+  `intentId` format: `boundary:<intentId>:<bufferSpecId>`.
+- **`bufferZoneStore` wiring** (now wired): `BufferZoneStore` is now the
+  preferred input to all planning orchestrators (`planForScope`,
+  `planForRegion`, `planFederation`). `effectiveAlerts` is derived
+  automatically via `bufferStatus(onhand, zone)` for each zone in the store.
+  The explicit `bufferAlerts` map remains a manual override path when
+  `bufferZoneStore` is absent.

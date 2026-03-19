@@ -1,5 +1,6 @@
 <script lang="ts">
   import { recipes, refresh } from '$lib/vf-stores.svelte';
+  import { PLAN_TAGS } from '$lib/planning/planning';
 
   interface Props {
     open: boolean;
@@ -38,7 +39,7 @@
       .filter(Boolean);
 
     if (replenishmentRequired) {
-      resourceClassifiedAs.push('tag:plan:replenishment-required');
+      resourceClassifiedAs.push(PLAN_TAGS.REPLENISHMENT_REQUIRED);
     }
 
     recipes.addResourceSpec({

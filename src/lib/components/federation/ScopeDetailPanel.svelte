@@ -6,8 +6,12 @@
     SimpleCapacityBuffer,
   } from "./ScopeNetworkDiagram.svelte";
   import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
+  import {
+    PLAN_TAGS, parseDeficitNote, deficitShortfall,
+    tradeFrom, tradeTo, tradeSpec, tradeQty,
+  } from "$lib/planning/planning";
   import type { StoreRegistry } from "$lib/planning/store-registry";
-  import type { TradeProposal } from "$lib/planning/plan-federation";
+  import type { Intent } from "$lib/schemas";
   import type { Observer } from "$lib/observation/observer";
   import type { FlowSelectCtx } from "$lib/components/vf/observe-types";
 
@@ -17,7 +21,7 @@
     observer: Observer;
     specNames: Record<string, string>;
     registry: StoreRegistry;
-    tradeProposals?: TradeProposal[];
+    tradeProposals?: Intent[];
     bufferZones?: SimpleBufferZone[];
     capacityBuffers?: SimpleCapacityBuffer[];
     onclose: () => void;
@@ -35,20 +39,24 @@
     onclose,
   }: Props = $props();
 
+
   const outgoingTrades = $derived(
-    tradeProposals.filter((t) => t.fromScopeId === scopeId),
+    tradeProposals.filter((t) => tradeFrom(t) === scopeId),
   );
   const incomingTrades = $derived(
-    tradeProposals.filter((t) => t.toScopeId === scopeId),
+    tradeProposals.filter((t) => tradeTo(t) === scopeId),
   );
   const hasTrades = $derived(
     outgoingTrades.length > 0 || incomingTrades.length > 0,
   );
 
-  function tradeStatusColor(status: TradeProposal["status"]): string {
-    if (status === "settled") return "#68d391";
-    return "#63b3ed";
-  }
+  // Deficit/surplus helpers reading from planStore
+  const deficits = $derived(result.planStore.intentsForTag(PLAN_TAGS.DEFICIT));
+  const surplus = $derived(result.planStore.intentsForTag(PLAN_TAGS.SURPLUS));
+  const metabolicDebt = $derived(result.planStore.intentsForTag(PLAN_TAGS.METABOLIC_DEBT));
+
+  function deficitOrigShortfall(i: Intent): number { return parseDeficitNote(i).originalShortfall; }
+  function deficitResolvedAt(i: Intent): string[] { return parseDeficitNote(i).resolvedAt; }
 
   let mode = $state<"plan" | "observe">("plan");
 
@@ -136,35 +144,35 @@
 
   <!-- Signals band — always visible -->
   <div class="signals-band">
-    {#if result.deficits.length > 0}
+    {#if deficits.length > 0}
       <div class="section-label">DEFICITS</div>
-      {#each result.deficits as deficit (deficit.intentId)}
+      {#each deficits as deficit (deficit.id)}
         <DeficitResidualBar
-          specId={deficit.specId}
-          shortfall={deficit.shortfall}
-          originalShortfall={deficit.originalShortfall}
-          resolvedAt={deficit.resolvedAt ?? []}
+          specId={deficit.resourceConformsTo ?? ''}
+          shortfall={deficitShortfall(deficit)}
+          originalShortfall={deficitOrigShortfall(deficit)}
+          resolvedAt={deficitResolvedAt(deficit)}
         />
       {/each}
     {/if}
 
-    {#if result.surplus.length > 0}
+    {#if surplus.length > 0}
       <div class="section-label">SURPLUS</div>
-      {#each result.surplus as s, i (s.specId + '-' + i)}
+      {#each surplus as s, i (s.id + '-' + i)}
         <div class="signal-row">
-          <span class="signal-spec">{s.specId}</span>
-          <span class="green">{s.quantity}</span>
-          {#if s.availableFrom}<span class="muted">{s.availableFrom}</span>{/if}
+          <span class="signal-spec">{s.resourceConformsTo ?? ''}</span>
+          <span class="green">{s.resourceQuantity?.hasNumericalValue ?? 0}</span>
+          {#if s.hasPointInTime}<span class="muted">{s.hasPointInTime}</span>{/if}
         </div>
       {/each}
     {/if}
 
-    {#if result.metabolicDebt.length > 0}
+    {#if metabolicDebt.length > 0}
       <div class="section-label">METABOLIC DEBT</div>
-      {#each result.metabolicDebt as debt, i (debt.specId + '-' + i)}
+      {#each metabolicDebt as debt, i (debt.id + '-' + i)}
         <div class="signal-row">
-          <span class="signal-spec">{debt.specId}</span>
-          <span class="yellow">{debt.shortfall}</span>
+          <span class="signal-spec">{debt.resourceConformsTo ?? ''}</span>
+          <span class="yellow">{debt.resourceQuantity?.hasNumericalValue ?? 0}</span>
         </div>
       {/each}
     {/if}
@@ -174,28 +182,24 @@
       {#each outgoingTrades as t (t.id)}
         <div class="trade-row">
           <span class="trade-arrow" style="color:#63b3ed">→</span>
-          <span class="trade-peer">{t.toScopeId}</span>
-          <span class="trade-spec">{t.specId}</span>
-          <span class="trade-qty">×{t.quantity}</span>
-          <span class="trade-status" style="color:{tradeStatusColor(t.status)}"
-            >{t.status.toUpperCase()}</span
-          >
+          <span class="trade-peer">{tradeTo(t)}</span>
+          <span class="trade-spec">{tradeSpec(t)}</span>
+          <span class="trade-qty">×{tradeQty(t)}</span>
+          <span class="trade-status" style="color:#63b3ed">PROPOSED</span>
         </div>
       {/each}
       {#each incomingTrades as t (t.id)}
         <div class="trade-row">
           <span class="trade-arrow" style="color:#68d391">←</span>
-          <span class="trade-peer">{t.fromScopeId}</span>
-          <span class="trade-spec">{t.specId}</span>
-          <span class="trade-qty">×{t.quantity}</span>
-          <span class="trade-status" style="color:{tradeStatusColor(t.status)}"
-            >{t.status.toUpperCase()}</span
-          >
+          <span class="trade-peer">{tradeFrom(t)}</span>
+          <span class="trade-spec">{tradeSpec(t)}</span>
+          <span class="trade-qty">×{tradeQty(t)}</span>
+          <span class="trade-status" style="color:#63b3ed">PROPOSED</span>
         </div>
       {/each}
     {/if}
 
-    {#if result.deficits.length === 0 && result.surplus.length === 0 && result.metabolicDebt.length === 0 && !hasTrades}
+    {#if deficits.length === 0 && surplus.length === 0 && metabolicDebt.length === 0 && !hasTrades}
       <p class="empty">No signals.</p>
     {/if}
   </div>

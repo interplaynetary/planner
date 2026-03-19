@@ -44,7 +44,7 @@ import type {
 } from '../schemas';
 import { ACTION_DEFINITIONS } from '../schemas';
 import type { RecipeStore } from '../knowledge/recipes';
-import type { PlanStore } from '../planning/planning';
+import { PLAN_TAGS, type PlanStore } from '../planning/planning';
 import { PlanNetter } from '../planning/netting';
 import type { Observer } from '../observation/observer';
 import type { ProcessRegistry } from '../process-registry';
@@ -82,6 +82,12 @@ export interface DependentDemandResult {
      * detect, since those flows still exist in the planStore).
      */
     allocatedScheduledIds: Set<string>;
+    /**
+     * DDMRP buffer boundary stops: specId → qty remaining after netting
+     * that was not satisfied because the spec is a decoupling point.
+     * Feeds Pass 2 replenishment. Simplified ReplenishmentSignal.
+     */
+    boundaryStops: Map<string, number>;
 }
 
 interface DemandTask {
@@ -159,6 +165,15 @@ export function dependentDemand(params: {
     sneIndex?: SNEIndex;
     /** SpatialThing ID — where the final output is needed. */
     atLocation?: string;
+    /**
+     * DDMRP-VF decoupling mode. When true, specs tagged
+     * 'tag:plan:replenishment-required' are treated as buffer boundaries:
+     * inventory is allocated as normal, but if remaining > 0 after netting,
+     * the BFS stops and records the remainder in result.boundaryStops.
+     * Default false (backward-compatible full BFS).
+     * Pass 1 sets this true; Pass 2 leaves it false/unset.
+     */
+    honorDecouplingPoints?: boolean;
 }): DependentDemandResult {
     const {
         planId,
@@ -183,6 +198,7 @@ export function dependentDemand(params: {
         purchaseIntents: [],
         allocated: [],
         allocatedScheduledIds: new Set(), // populated after BFS
+        boundaryStops: new Map(),
     };
 
     // Prevent infinite recursion (circular recipes)
@@ -319,6 +335,19 @@ function processDemand(
     let remaining = afterNetting;
 
     if (remaining <= 0) return; // Fully covered by inventory / scheduled Intents
+
+    // DDMRP-VF: buffer boundary stop — Pass 2 handles replenishment.
+    // No purchaseIntent: demand is unmet this cycle; Pass 2 fires the recipe chain.
+    if (params.honorDecouplingPoints) {
+        const specMeta = params.recipeStore.getResourceSpec(demand.specId);
+        if (specMeta?.resourceClassifiedAs?.includes(PLAN_TAGS.REPLENISHMENT_REQUIRED)) {
+            result.boundaryStops.set(
+                demand.specId,
+                (result.boundaryStops.get(demand.specId) ?? 0) + remaining,
+            );
+            return;
+        }
+    }
 
     // --- Step 1.5: location mismatch → try transport before production ---
     // When a resource is needed at location B but only exists at location A,

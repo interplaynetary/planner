@@ -1,5 +1,15 @@
 <script lang="ts">
 	import { tune as tuneState } from '$lib/tune-state.svelte';
+	import { page } from '$app/stores';
+	import { base } from '$app/paths';
+
+	const NAV = [
+		{ href: `${base}/buffers`,    label: 'BUFFERS' },
+		{ href: `${base}/federation`, label: 'FEDERATION' },
+		{ href: `${base}/inventory`,  label: 'INVENTORY' },
+		{ href: `${base}/recipes`,    label: 'RECIPES' },
+		{ href: `${base}/settings`,   label: 'SETTINGS' },
+	];
 
 	let inputEl = $state<HTMLInputElement | undefined>(undefined);
 
@@ -21,6 +31,15 @@
 </script>
 
 <header class="appbar">
+	<nav class="nav-row">
+		{#each NAV as n (n.href)}
+			<a
+				href={n.href}
+				class="nav-link"
+				class:nav-active={$page.url.pathname === n.href || $page.url.pathname.startsWith(n.href + '/')}
+			>{n.label}</a>
+		{/each}
+	</nav>
 	<div class="tune-cluster" class:connecting={tuneState.status === 'connecting'} class:live={tuneState.status === 'live'} class:fault={tuneState.status === 'error'}>
 		<button
 			class="sat-btn"
@@ -87,13 +106,47 @@
 		top: 0;
 		z-index: 900;
 		display: flex;
-		justify-content: flex-end;
+		justify-content: space-between;
 		align-items: center;
 		padding: 4px 10px;
 		background: var(--bg-surface);
 		border-bottom: 1px solid rgba(130, 175, 255, 0.12);
 		height: 34px;
 		box-sizing: border-box;
+		gap: 12px;
+	}
+
+	/* ── Nav links ── */
+	.nav-row {
+		display: flex;
+		align-items: center;
+		gap: 2px;
+		flex-shrink: 0;
+	}
+
+	.nav-link {
+		font-family: var(--font-mono);
+		font-size: 0.6rem;
+		font-variant: small-caps;
+		letter-spacing: 0.07em;
+		color: rgba(130, 175, 255, 0.4);
+		text-decoration: none;
+		padding: 2px 7px;
+		border-radius: 3px;
+		border: 1px solid transparent;
+		transition: color 0.15s, background 0.15s;
+		white-space: nowrap;
+	}
+
+	.nav-link:hover {
+		color: rgba(130, 175, 255, 0.85);
+		background: var(--bg-overlay);
+	}
+
+	.nav-link.nav-active {
+		color: var(--zone-green);
+		border-color: rgba(72, 187, 120, 0.3);
+		background: rgba(72, 187, 120, 0.06);
 	}
 
 	/* ── Cluster ── */

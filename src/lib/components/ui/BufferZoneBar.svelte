@@ -28,6 +28,8 @@
      * high values are red (used for capacity utilisation bars).
      */
     invert?: boolean;
+    /** Ecological tipping point — renders a hard vertical line when set */
+    tippingPoint?: number;
     /** Extra CSS class */
     class?: string;
   }
@@ -41,6 +43,7 @@
     showLabels = false,
     orientation = "horizontal",
     invert = false,
+    tippingPoint,
     class: cls = "",
   }: Props = $props();
 
@@ -95,6 +98,10 @@
         <div class="seg green" style="flex:{greenPct}"></div>
       {/if}
       <div class="cursor h" style="left:{cursorPct}%"></div>
+      {#if tippingPoint !== undefined && tog > 0 && tippingPoint > 0 && tippingPoint < tog}
+        {@const tipPct = clamp((tippingPoint / tog) * 100, 0, 100)}
+        <div class="tipping-line" style="left:{tipPct}%" title="Tipping point — irreversible below"></div>
+      {/if}
     </div>
     {#if showLabels}
       <div class="labels">
@@ -180,5 +187,16 @@
   }
   .labels span:last-child {
     transform: none;
+  }
+
+  .tipping-line {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    width: 2px;
+    background: #38b2ac;
+    z-index: 3;
+    pointer-events: none;
+    transform: translateX(-50%);
   }
 </style>

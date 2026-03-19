@@ -176,7 +176,7 @@
 </script>
 
 <svelte:head>
-  <title>VF Inspector</title>
+  <title>Free Association</title>
 </svelte:head>
 
 <div class="page">

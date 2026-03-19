@@ -1,0 +1,1155 @@
+# Free Association — Buffer-Centric Social Planner
+
+TypeScript · ValueFlows · federated social planning engine for composable communes
+
+---
+
+## What Is a Buffer?
+
+A buffer is a stock that mediates between supply and demand across time. Every resource that matters in a living economy — soil nutrients, aquifer levels, strategic inventory, tool libraries, community skills — is managed as a buffer with three zones:
+
+- **Red (TOR — Top of Red):** Minimum viable level. Never cross except in declared emergency.
+- **Yellow (TOY — Top of Yellow):** Replenishment trigger. When on-hand ≤ TOY, generate a signal.
+- **Green (TOG — Top of Green):** Target range. Replenish up to TOG when signal fires.
+
+Buffer *type* is derived from three fundamental dimensions, not chosen arbitrarily:
+
+| Dimension | Question |
+|-----------|----------|
+| **Depletion source** | How does this buffer get drawn down? |
+| **Replenishment mechanism** | How does it get filled? |
+| **Accountability scope** | Who is responsible? |
+
+Crossing these three dimensions yields six fundamental buffer types:
+
+| Type | Depletion | Replenishment | Accountability |
+|------|-----------|---------------|----------------|
+| **Metabolic** | Consumption | Production | Scope |
+| **Ecological** | Consumption / Degradation | Regeneration (natural) | Universal / Intergenerational |
+| **Strategic** | Withdrawal | Production / Transfer | Federation |
+| **Reserve** | Risk (emergency only) | Production / Transfer | Scope / Federation |
+| **Social** | Obligation / Degradation | Social recognition | Scope |
+| **Consumption** | Consumption | Production / Transfer | Individual |
+
+These types have fundamentally different behavior in the planner. Ecological buffers cannot be expedited — their lead time is set by nature. They have tipping points below which recovery is impossible. Strategic buffers sit at network decoupling points and are weighted by how many downstream scopes depend on them. Reserve buffers are held strictly separate from normal inventory and require an emergency declaration to access. Social buffers are measured in validated hours and replenished through participation, not production. The type determines which signal fires, who must act, and whether the deficit can even be closed.
+
+---
+
+## Design Goals
+
+We are designing a composable planner that enables global cooperation.
+
+The aim is to formulate good-enough plans that satisfy all constraints (metabolic sustainability etc.), and maximize all objectives, in such a way that is:
+
+- **Tractable** — each scope plans independently within its boundary; no global search is required
+- **Massively parallel** — scope Planners run simultaneously and independently; they do not wait for each other
+- **Mergeable and composable** — PlanStores merge cleanly; Planners compose at every level; plans can be decomposed back to scope level without loss
+- **Characterised by exponential residual reduction** — at each federation level, the Planner deals only with what could not be resolved below; residuals shrink at each level when boundaries are aligned with metabolic coherence
+
+## Planner Objectives and Constraints
+
+**PRIMARY OBJECTIVE (Constrained):**
+
+- **Maintain all buffers within their target zones** — Green preferred, Yellow acceptable, Red unacceptable
+
+**SECONDARY OBJECTIVE (Optimize subject to primary):**
+
+- **Maximise independent demand satisfaction** (ranked by criticality), subject to buffer constraints
+
+**TERTIARY OBJECTIVE (Minimize effort subject to above):**
+
+- **Minimise total Socially Necessary Effort (SNE)**
+- **Unit of effort:** `<Time>`
+
+**CONSTRAINTS (in priority order):**
+
+1. Never let any ecological buffer fall below TOR — tipping points are irreversible
+2. Never let any strategic buffer fall below TOR — supply chain collapse propagates to all dependent scopes
+3. Satisfy all buffer replenishment signals (Red before Yellow)
+4. Respect `max_individual_effort_time` per day (with granular limits by age, health, caring responsibilities)
+5. Satisfy independent demands to the extent possible after constraints 1–4 are met
+
+_Buffers are the fundamental planning primitive. Independent demands are satisfied only to the extent that doing so does not deplete buffers below their replenishment triggers. The planner's primary job is buffer maintenance; demand satisfaction is secondary, derived from buffer health._
+
+## Local/Global Inversion
+
+_Every global constraint is a local objective. Every local failure becomes a global constraint._
+
+Planners try to maintain all buffers within their target zones and satisfy demands within their scope. When a buffer enters Yellow, the scope generates a **ReplenishmentSignal** — a derived demand with priority over new independent demands. When a buffer enters Red, the scope emits a **buffer failure signal** upward through the federation hierarchy. Planner composition converts these signals into constraints at the next level, routing them upward until resolved or declared genuinely infeasible.
+
+Infeasibility results in a controlled local contraction: independent demands are pruned back in reverse priority order until buffers can be replenished. Buffer health is never sacrificed — demands are, if necessary. The load of net-sacrifice is distributed by independent demand priority.
+
+_This property guarantees that plans resolved to the federation level satisfy metabolic constraints. The strain on planners is drastically reduced when the recipes being composed are themselves metabolically sustainable. Much of the politics of planning — with its consequences for ecology, working conditions, and distribution — resides in restricting which recipes are available for composition: monoculture vs. permaculture, syntropic agroforestry, circular material flows. The recipe set is the politics; the planner is the arithmetic._
+
+Global bottlenecks — rare materials whose independent supply is concentrated in specific space-times — receive special treatment as hard constraints on valid plans. This does not imply a permanent global division of labor for those materials: recipes can be formulated for recycling, substitution, and extraction from waste streams (landfill mining etc.). The bottleneck is a constraint on current planning; it is also a signal for where long-run recipe development is most needed.
+
+Our planner should also classify resources by their mode of consumption (communal or individually-claimable).
+
+Our planner will only propose plans from codified knowledge. All plans it produces will be materially feasible given codified knowledge. However, scopes will be required to select/prune/modify those plans and the codified knowledge used during planning, drawing on the tacit (uncodified) knowledge in those scopes.
+
+Scopes should be composed so as to harness all tacit knowledge relevant to a planning scope in the selection/pruning/modification of plans generated by planners.
+
+The way scopes should be composed to allow for global constraints to be satisfied and for planners to find solutions quickly and effectively, staying responsive to local information.
+
+Participants in scope-planning must remain embedded in and responsible to the scopes they plan for — they must feel in their own lives the consequences of the decisions they make during plan merging. Otherwise, we create a professional planning class, and with it, the division between mental and physical labor reasserts itself in a new form.
+
+- For example, the merge planner scope for a region could be composed of temporarily elected delegates - with binding mandates, immediately revocable by electors - from local scopes, each bringing their plans and their mandate.
+
+Knowledge Infrastructure must support scope assemblies in their planning and be properly indexed so as to inform their decisions.
+
+## The Scope
+
+A scope is the fundamental unit of the system. It is simultaneously:
+
+- **The planning unit** — it runs its own Planner over its own PlanStore, producing plans from codified knowledge within its boundary
+- **The custodial unit** — it is the responsible manager of the resources within its boundary; its collective entrustment capacity is the sum of its members' individual claim capacities converted to market-equivalent terms
+- **The democratic unit** — its assembly is the coordination body; there is no separate planning class, no coordination body that is not already a scope
+
+_These three roles are inseparable. A scope that cannot insure its own flows (low custodial coverage) cannot reliably participate in the social plan. A scope whose boundary is misaligned with actual metabolic flows (low coherence) cannot plan effectively. A scope whose assembly is disconnected from the consequences of its decisions cannot govern honestly. Planning capacity, custodial capacity, and democratic legitimacy co-evolve._
+
+Each scope carries three tools:
+
+```
+scope[k] = {
+  resources:  Sₖ        — the agents and resources under this scope's management
+  PlanStore:  event graph — records intentions, commitments, EconomicEvents
+  Planner:    f(PlanStore[k], signal_from_federation) → Plan[k]
+  Observer:   g(PlanStore[k]) → metrics[k]
+}
+```
+
+## Composable Architecture
+
+_The system should be composable from the ground up: federation is the composition of scopes, running the same three tools over the merged graph._
+
+A federation F over member scopes {k₁, k₂, ..., kₙ} is itself a scope at the next level:
+
+```
+scope[F] = compose({ scope[kᵢ] }) = {
+  resources:  ∪ Sₖᵢ
+  PlanStore:  merge({ PlanStore[kᵢ] })  +  inter-scope EconomicEvents
+  Planner:    coordinate({ Planner[kᵢ] })
+              — merge plans, detect conflicts, route signals
+  Observer:   aggregate({ Observer[kᵢ] })  +  cross-scope boundary metrics
+}
+```
+
+This composition is recursive to any depth without new protocols. An industrial federation is a scope over scopes. A regional federation could be a scope over industrial federations. The Universal Commune is a scope over all. PlanStore, Planner, and Observer are closed under composition because they were designed to be: PlanStores are content-addressable and mergeable; Planners are graph-agnostic; Observer functions are pure.
+
+**The Universal Commune** is not declared — it is _computed_. It is the scope auto-generated by the composition of all scopes that are not themselves members of any higher-order scope. Its membership is maintained through two indexes managed by the Universal Commune as guarantor of universal membership:
+
+```
+Citizen Index:     CIT = { cᵢ }
+— all persons within free association; every human being prior to any
+  particular association. The Universal Commune guarantees that no person
+  falls outside this index. Unlike all other membership, withdrawal from
+  CIT is impossible: it is the expression of inescapable mutual
+  interdependence as inhabitants of a single planet.
+
+Membership Index:  MEM : CIT → S     (citizen → scope)
+                   MEM : S   → S     (scope → parent scope)
+— records the actual associative choices of citizens and scopes. No double
+  counting: each citizen belongs to exactly one scope; each scope belongs to
+  at most one parent scope. This index is the operational definition of the
+  agent partition S.
+```
+
+From MEM, two derived indexes enable democratic weighting at every federation level:
+
+```
+Commune Citizen Shares:  citizenShare(k) = { cᵢ : proportion }
+— derived by recursively unfolding MEM downward to citizens. Used to weight
+  individual sacrifice and benefit equitably across the human total.
+
+Commune Shares:  communeShare(F) = { Sₖ : member-proportion }
+— derived by retaining the scope abstraction. Used for voting weights in
+  federation assemblies where scopes vote as units, ensuring federations
+  reflect the demographic weight of their constituent communities.
+```
+
+The Universal Commune's own Membership List and Commune Shares are stored separately from intermediate indexes — they are computed as the residual of MEM after all intermediate federations are accounted for.
+
+**Disjoint membership is structurally necessary**, not just efficient. Each node in V must belong to exactly one scope in the partition S. This is required for:
+
+- `internal_flow` and `external_flow` (coherence metric) to be well-defined
+- Liability attribution in the custody protocol to be unambiguous
+- The composition operator to remain associative and conflict-free
+
+_A strict disjoint federation is not an arbitrary constitutional choice. It is the condition under which the three tools remain compositionally coherent._
+
+**Disjoint custody is equally structurally necessary.** Each communal EconomicResource must be custodied by exactly one scope at any time. This resource custody partition C = {C₁, C₂, ..., Cₙ} mirrors the agent partition S and is required for:
+
+- `onhandQuantity` to unambiguously locate physical stock within a single scope's ledger
+- Liability attribution in the custody protocol to have a unique responsible scope
+- The merge/compose operator to detect and surface custody conflicts — not silently double-count physical inventory
+
+_Custody disjointness and membership disjointness are the same structural requirement at different levels: the partition S assigns agents to scopes; the partition C assigns resources to custodian scopes. A resource whose custodian scope is scope[k] must be stewarded by agents who belong to Sₖ. One invariant implies the other._
+
+## The Goal
+
+_We are not trying to find a globally optimal solution to need satisfaction within the currently-existing global division of labor. That problem is NP-hard, politically captured, and premised on the assumption that the current distribution of productive capacity is fixed. It is not._
+
+The planner's goal is to reshape the flow graph so that local optimality approximates global optimality — not by searching globally, but by steadily increasing metabolic coherence at every scope:
+
+```
+coherence[k] = internal_flow[k] / total_flow[k]    ∈ [0, 1]
+```
+
+When coherence[k] is high, most of what scope k produces it consumes, and most of what it consumes it produces. Planning is then nearly self-contained; residuals that propagate upward are small. The federation's planner deals only with what local planners genuinely cannot resolve.
+
+_Coherence is not an end in itself — it is a strategy for making the federation's job tractable. Planning effort should scale with interdependence, not with size. High coherence means small residuals, few conflicts, and a federation that can focus on what genuinely requires coordination rather than endlessly resolving disputes that should have been internal._
+
+_This is why the system aims to increase social_input_fraction and social_output_fraction — not as abstract metrics but as measures of how much each scope's flow graph has been reshaped away from market dependence toward social-plan integration. As these fractions rise, coherence rises, and the exponential residual reduction property holds more strongly._
+
+The efficiency of global supply chains under capitalism is an illusion maintained by suppressed wages, externalised ecological costs, and the international division of labor enforced by centuries of colonial dispossession. Our planner does not treat this as a baseline to optimise around. It treats it as a condition to be superseded — gradually, metabolically, scope by scope.
+
+_The orientation toward local satisfaction is essential to dissolving the division between town and country, and with it the division between mental and physical labor. A scope that produces what it consumes and consumes what it produces is a community governing its own material life — not a node in a supply chain it does not control._
+
+But local satisfaction is not enough. A community that consumes its ecological inheritance — depleting soil, drawing down aquifers, cutting forests without regeneration — is governing only for the present, stealing from its children. The buffer-first orientation makes this visible and actionable. When soil nitrogen enters Yellow, the assembly sees it. When the aquifer drops toward Red, the federation intervenes. When a forest buffer is drawn down for timber, a replenishment signal appears automatically, requiring replanting before new timber can be planned.
+
+**Buffer health is intergenerational justice made computable.** The planner cannot optimize away the needs of future people because their claims are encoded in buffer targets set by previous generations. Each assembly, in setting buffer policies, negotiates with the unborn. The architecture ensures that negotiation is explicit, transparent, and binding.
+
+## Architecture Properties
+
+_Exponential residual reduction is a maintenance property, not a fixed architectural guarantee. It holds when scope boundaries track metabolic reality. When boundaries are misaligned — a scope split across a dense metabolic cluster — residuals propagate upward in full and the property breaks. Keeping boundaries aligned with the flow graph is therefore a planning responsibility, not a setup task._
+
+In the limit, as boundaries converge on actual metabolic flows, federation-level merge conflicts approach zero. Every scope is self-governing over the flows it actually controls; what crosses boundaries is either trivial, genuinely global, or coordination that all parties have chosen. Perfect coherence is an asymptote, not a destination — new technologies, ecological shifts, and deliberate specialisation will always create some cross-boundary flows. The goal is to make those flows chosen and manageable, not chaotic and conflict-ridden.
+
+## Scope Boundaries as Data
+
+Scope boundaries are not fixed by constitution. Each planning cycle, the Observer computes the boundary health metrics from the EconomicEvent stream:
+
+```
+coherence[k] = internal_flow[k] / total_flow[k]
+interdependence[k, l] = bilateral_flow[k,l] / (external_flow[k] + external_flow[l])
+```
+
+The federation proposes:
+
+- **Merge** when `interdependence[k,l] > θ_merge` and combined assembly size is viable
+- **Split** when `coherence[k] < θ_split` and a natural seam (bipartition with low internal interdependence) exists
+
+Proposals require democratic approval by affected assemblies. The thresholds θ_merge and θ_split are set by the federation assembly each cycle — they encode the collective's current judgment about the trade-off between coordination and autonomy.
+
+_Boundaries are discovered through planning, not decreed in advance. Each cycle's data reveals whether the current partition is aligned with actual metabolic interdependence. Over successive cycles, the partition converges toward the configuration that maximises flow-weighted coherence subject to democratic viability. Stability is not permanence — ecological shifts, new infrastructure, and new supply relationships can restart the process._
+
+## Buffer Types and Hierarchies
+
+Not all buffers are equal. Buffer type determines planning logic, signal type, who bears accountability, and whether deficit is even recoverable.
+
+### Tier 1: Ecological Buffers (Non-Negotiable)
+
+- **Depletion:** Consumption or degradation
+- **Replenishment:** Regeneration — natural processes that cannot be commanded or expedited
+- **Accountability:** Universal + Intergenerational
+- **Examples:** Soil nutrients, aquifers, forests, biodiversity, clean air, carbon sinks
+- **Planning logic:** Replenishment lead time is fixed by nature. Have tipping points below which recovery is impossible. When NFP ≤ TOY, emit a **ConservationSignal** (reduce consumption) rather than a ReplenishmentSignal (increase production). You cannot produce your way out of ecological collapse.
+- **TOR is set by federation assembly with supermajority** — cannot be overridden by local scope
+- **Tipping point breach** triggers automatic federation-level intervention regardless of local assembly preferences
+
+### Tier 2: Strategic Buffers (DDMRP Core)
+
+- **Depletion:** Withdrawal or consumption
+- **Replenishment:** Production or transfer
+- **Accountability:** Federation (or Scope, depending on downstream reach)
+- **Examples:** Medicine stockpiles, seed banks, fuel reserves, critical spares
+- **Planning logic:** Standard DDMRP with extra weighting for network decoupling. Weighted by `downstreamCount` — how many scopes depend on this buffer. Located at decoupling points; failure triggers federation-level intervention.
+- **Buffer failure** at this tier triggers merge planner resolution
+
+### Tier 3: Metabolic Buffers
+
+- **Depletion:** Consumption (used in production)
+- **Replenishment:** Production (human labor)
+- **Accountability:** Scope collective
+- **Examples:** Compost, animal feed, raw materials, semi-finished goods, tools
+- **Planning logic:** Standard DDMRP. ADU × DLT. Can be expedited with additional effort. Failure means production stops but no irreversible damage.
+
+### Tier 4: Reserve Buffers (Emergency Only)
+
+- **Depletion:** Risk (statistical expectation; emergency declaration required to access)
+- **Replenishment:** Production or transfer
+- **Accountability:** Scope or Federation
+- **Examples:** Emergency food, disaster supplies, contingency stocks
+- **Planning logic:** Strictly separated from normal inventory. Access requires assembly vote. Replenishment triggered by time since last refresh, not consumption rate. Unauthorized access is a custody violation.
+
+### Tier 5: Social Buffers
+
+- **Depletion:** Obligation (commitments) or degradation (skill attrition)
+- **Replenishment:** Social recognition — participation, training, relationship-building
+- **Accountability:** Scope collective
+- **Examples:** Skill inventories, mutual aid capacity, childcare availability, trust networks
+- **Planning logic:** Measured in validated hours, not physical units. Cannot be stockpiled like goods. Have attrition rates. Cannot be transferred between scopes easily (trust is local).
+
+### Tier 6: Consumption Buffers
+
+- **Depletion:** Consumption (direct use by individuals)
+- **Replenishment:** Production or transfer
+- **Accountability:** Individual (via claim capacity)
+- **Examples:** Personal food rations, household goods, discretionary items
+- **Planning logic:** Independent demands with criticality rankings. Satisfied after all other buffers are healthy. Individual claim capacity limits total access.
+
+### Buffer Priority Hierarchy
+
+When allocating scarce capacity, buffers are served in this order:
+
+1. Ecological buffers below TOR (tipping point risk — existential)
+2. Strategic buffers below TOR (supply chain collapse risk)
+3. Ecological buffers in Yellow (preventative — ecological time is the longest lead time)
+4. Reserve buffers below TOR (emergency capacity depleted)
+5. Strategic buffers in Yellow (standard replenishment)
+6. Metabolic buffers below TOR (production at risk)
+7. Metabolic buffers in Yellow (standard replenishment)
+8. Social buffers below target (community resilience)
+9. Independent demands (consumption)
+
+This hierarchy ensures that **ecological health precedes supply chain health precedes production capacity precedes consumption**. Each layer protects the next.
+
+## Democratic Governance and Tacit Knowledge
+
+_The scope assembly IS the coordination body. There is no separate planning class._
+
+The Planner produces plans from codified knowledge; it generates all materially feasible plans given the available recipes. The assembly governs what knowledge is codified, which plans are selected, and how the plan is modified to incorporate tacit knowledge — local conditions, social relations, ecological particulars — that no codified recipe can fully capture.
+
+The assembly:
+
+- Selects and prunes the recipe set available to the Planner
+- Reviews and approves boundary change proposals from the Observer
+- Sets policy thresholds: α (custody safety factor), θ_merge/θ_split (boundary update), target_communal_ratio (transitional wage phase-out)
+- **Sets buffer zone parameters** (TOR, TOY, TOG) for all buffers within scope — this is the primary site of political decision-making about ecological and intergenerational obligations
+- Approves cross-scope commitments and external trade plans
+- Interprets surplus/deficit and ConservationSignal outputs and decides what to escalate
+
+_Participants in the assembly must remain embedded in and responsible to the communities whose resources they govern. They must feel in their own lives the consequences of the decisions they make during plan merging. Delegates to higher federation assemblies carry imperative mandates, immediately revocable by their electors. Otherwise, we create a professional planning class, and with it the division between mental and physical labor reasserts itself in new form._
+
+Knowledge infrastructure — indexed recipes, SNE moving averages, Observer reports, boundary health metrics, **buffer health dashboards** — must be openly published and navigable by any assembly member. Transparency is not a courtesy; it is the condition under which democratic deliberation can be genuine rather than nominal.
+
+---
+
+# Scope Architecture — Formal Definitions
+
+_The architecture sections above state the structure; these definitions make it computable. All metrics are derived from the existing EconomicEvent stream — no additional data collection required._
+
+**Flow Graph:**
+
+```
+G = (V, E, w)
+V    = all agents and resources in the federation
+E    = all material flows (EconomicEvents) between them
+w(e) = resourceQuantity × market_price_index   [value-weighted]
+```
+
+A partition S = {S₁, S₂, ..., Sₙ} assigns every node in V to exactly one scope. S is backed by the Membership Index:
+
+```
+MEM : CIT → S        citizen → leaf scope  (injective, no double-counting)
+MEM : S   → S        scope → parent scope  (partial; top-level scopes unmatched)
+```
+
+The Universal Commune is the scope whose members are all top-level scopes:
+
+```
+scope[UC] = compose({ Sₖ : Sₖ ∉ range(MEM_{S→S}) })
+```
+
+A custody partition C = {C₁, C₂, ..., Cₙ} assigns every communal EconomicResource to exactly one scope, in parallel with S:
+
+```
+custodian(r) = k      iff   r ∈ Cₖ
+Disjointness invariant:  |{ k : r ∈ Cₖ }| = 1   for all communal r
+```
+
+C is maintained by `transferCustody` events: r moves from Cₖ to Cₗ atomically at the receiver's confirmation. Violation (same resource in two sub-stores with differing custodianScope values) = `custody_conflict` signal at merge time.
+
+**Flow Weights per Scope:**
+
+```
+internal_flow[k]    = Σ w(e)  :  source(e) ∈ Sₖ  AND  target(e) ∈ Sₖ
+external_flow[k]    = Σ w(e)  :  source(e) ∈ Sₖ  XOR  target(e) ∈ Sₖ
+bilateral_flow[k,l] = Σ w(e)  :  { source(e), target(e) } = { Sₖ, Sₗ }
+```
+
+_`custody_incident_rate` on a flow degrades its effective w(e) — a disrupted flow is less metabolically reliable. Persistent incidents on inter-scope flows are a weak merge signal: two scopes whose shared flows keep failing may need tighter coordination._
+
+**Boundary Optimality:**
+
+```
+maximise:   Σₖ coherence[k] × total_flow[k]  /  Σₖ total_flow[k]
+subject to: assembly_size[k]  ∈  [min_assembly, max_assembly]   for all k
+```
+
+_This objective is never directly solved — it is approached iteratively as each cycle's data reveals deviations from optimality. The assembly sets thresholds θ_merge and θ_split each cycle, encoding the collective's current judgment on the trade-off between coordination and autonomy._
+
+**Democratic Constraint (Boundary Changes):**
+
+```
+approve_merge(k, l):  assembly[k] approves  AND  assembly[l] approves  AND  federation approves
+approve_split(k):     assembly[k] approves  AND  federation approves
+```
+
+_Approval is not a formality — it is the mechanism by which social logic modifies what metabolic logic alone would suggest. The equations identify candidates; assemblies decide._
+
+**Custodial Capacity:**
+
+```
+entrustment_capacity[scope[k]] = Σ entrustment_limit[i]   for all i ∈ Sₖ
+```
+
+_A scope that cannot cover its own flows (low custodial coverage relative to value in custody) cannot reliably participate in the social plan. Custodial capacity, planning capacity, and democratic legitimacy co-evolve — a scope whose members have built validated_hours builds both claim capacity and entrustment limit simultaneously._
+
+Cₖ is the operative domain of custodial capacity: scope[k]'s entrustment capacity covers the value in Cₖ, not the value of resources merely assigned to Sₖ by membership. A scope may have members (agents in Sₖ) without currently holding custody of the resources they work with — that custody may be at a higher federation level awaiting handoff. The custody partition and the agent partition are parallel but not identical.
+
+---
+
+# General Process
+
+**Aggregators/Indexes/Filters:**
+
+- Resources
+- Plan (re)-classifies resources according to their mode-of-consumption < communal | individual-claimable >
+- Socially Necessary Effort (SNE) Tracking: Moving Average of historical effort/unit (which always includes historical SNE cost of inputs to processes). The actual effort worked is recorded at the Observation Layer by the EconomicEvent (`action: 'work'`, tracked in `effortQuantity`). actual-effort moving-average informs average expected effort. EconomicEvents are spatio-temporally indexed in order to avoid gross-generalizations in SNE estimations.
+- Recipes define how to create/transform resources
+- SNE Tracking: In Valueflows `RecipeFlow.effortQuantity` (for `action: 'work'`), relates to expected-effort on average for a recipe.
+- Independent supply: current resource quantities across space (present tense)
+- Dependent supply: emerge from composing recipes from independent supply into Plans (exploratory search-space of what is possible, given existing independent supply).
+- Independent demands: desired resource quantities across space-time (present-future)
+- **Derived Independent demands**: derived from network data.
+  - For example: food/nutritional demand in a region as a function of population density/age.
+- **Dependent demands:** emerge from composing recipes (this is production expansion) into Plans to satisfy independent demands.
+- **Derived Dependent demands:**
+  - **Buffer replenishment demands** — the fundamental planning activity. Generated automatically when any buffer's NFP ≤ TOY. For ecological buffers (`tag:buffer:ecological`), emit a ConservationSignal instead of a replenishment demand — the response is reduced consumption, not increased production.
+  - Replenishment demands (classifiedAs) restore net-losses created by a Plan, up to — if specified — desired ranges (min/max) across space-time. This is metabolic sustainability.
+  - For example replenishing the nutrients taken from the soil during harvest, or repairing machines.
+  - Reserves/buffers demands (classifiedAs) are untouchable except in emergencies.
+  - Administration demands (classifiedAs) for Plan coordination & enforcement of resource usage-rights & responsibilities in accordance with Plan.
+
+**Buffer Zones — Computed Parameters:**
+
+Every buffer zone has three boundaries derived from demand-driven parameters:
+
+```
+NFP (Net Flow Position) = onhand + onorder − qualifiedDemand
+qualifiedDemand excludes demand spikes above the Order Spike Threshold (OST)
+
+TOR = ADU × DLT × LTF_lower         (Red base — minimum viable)
+TOY = ADU × DLT × LTF_upper         (Yellow base — replenishment trigger)
+TOG = max(TOY + order_cycle, TOY + red_base, MOQ)   (Green base — target)
+
+ADU  = Average Daily Usage (rolling from EconomicEvents, blended with forward estimate)
+DLT  = Decoupled Lead Time (from recipe critical path)
+LTF  = Lead Time Factor (variability adjustment)
+```
+
+When `NFP ≤ TOY`, a ReplenishmentSignal fires with recommended quantity `TOG − NFP`.
+When `NFP ≤ TOR`, the signal is urgent.
+For ecological buffers: when `NFP ≤ TOY`, a ConservationSignal fires. When `onhand < tippingPoint`, `tippingPointBreached = true` and the signal propagates upward through the federation unconditionally.
+
+**Derived demands** are computed from actual consumption records of the primary planning pass. They cannot be pre-sorted alongside independent demands — they are not definite until primary planning is complete.
+
+**Planning proceeds in passes over the same PlanStore:**
+
+- **Pass 0 — Buffer Health Check:** Evaluate all buffers within scope. Compute NFP for each. Generate ReplenishmentSignals for buffers already in Yellow or Red. For ecological buffers in Yellow/Red, emit ConservationSignals. These have highest priority — they represent existing metabolic debt before the cycle even begins.
+
+- **Pass 1 — Independent Demands with Buffer Guards:** Satisfy independent demands, sorted by criticality. For each demand, verify that satisfying it does not deplete any critical buffer below TOY when timely replenishment is impossible. Ecological and strategic buffers that cannot be replenished within DLT impose hard consumption caps.
+
+- **Pass 2 — Derived Buffer Replenishment:** After Pass 1 consumption is known, update buffer levels. Generate replenishment demands for all buffers now in Yellow or Red. Satisfy against remaining capacity. `dependentDemand()` + recipe expansion per signal.
+
+- **Backtrack (if metabolicDebt after Pass 2):** Walk Pass 1 allocations in reverse priority (lowest D-category first, latest due date first within category). Retract process subgraphs (by `provenanceId`) until freed capacity covers unmet replenishment qty. Re-explode retracted demands against newly freed capacity — their shortfall becomes `unmetDemand[]`. If `metabolicDebt` persists after exhausting all lower-priority retractable allocations, escalate to merge hierarchy.
+
+**Failure in Pass 2 = metabolic debt**, qualitatively worse than unmet independent demand satisfaction.
+
+**Planner Objectives/Constraints — Across space-time:**
+
+- **Primary: Maintain all buffers within target zones** (Red unacceptable, Yellow tolerable, Green target)
+- **Objective: Maximize Independent Demand satisfaction** (ranked by criticality, subject to buffer constraints)
+- **Satisfy Replenishment demands** (ranked by criticality: Red before Yellow, ecological before strategic before metabolic)
+- **Satisfy Reserve/Buffers demands** (ranked by criticality)
+- **Constraint: Respect Max-Individual-Effort-Time/Day** (individuals classifiedAs child etc. enable granular limitations)
+- **Objective: Minimize Total Socially Necessary Effort (SNE)**
+- **Unit of Effort:** `<Time>`
+
+**Local/global inversion:** every global constraint is a local objective. Planners try to maintain all buffers within target zones and satisfy demands, emitting surplus/deficit/ConservationSignals. Planner composition converts buffer failure signals into global constraints by routing them upward until resolved or declared genuinely infeasible, resulting in local contraction of those dependent demands leading into those independent demands that are consuming capacity needed to satisfy those buffer constraints (in doing so attempting to distribute the load of net-sacrifice evenly: sacrifice determined by independent demand priority, but buffer health is never sacrificed).
+
+**Social Recipient:** Any named entity within the social plan — a commune, a scope under Scope Committee management, a public works body, a school, a hospital, or a reserve — that receives outputs from a producing scope as part of a planned flow. A social recipient must be identified by name in the PlanStore; delivery to an unnamed entity is not social delivery and generates no validation. The social recipient's act of recording a confirmed receipt EconomicEvent in the PlanStore is the sole basis for social validation of the producing scope's labour. The social recipient may confirm partial quantity (e.g. accepting 80 of 100 units on quality grounds); only the confirmed quantity generates validation. Validation is bounded by the Planned Effort of the relevant work-intent.
+
+**Social Validation of Effort:**
+
+**The social recipient validates work-intent satisfaction** in a Process by recording a confirmed receipt EconomicEvent in the PlanStore.
+
+```
+validated_hours[i] = confirmed_output_fraction × hours_worked[i]
+```
+
+_Validation originates with the recipient, not the producing scope. Unconfirmed deliveries generate no claim._
+
+Validation is bounded by the Planned Effort of the work-intent: a recipient cannot validate more effort than the plan anticipated for that output.
+
+- **recognition-of-contribution** is non-transferable and retractable by the recognizer (the social recipient).
+  - A plan's failure to produce desired outcomes is a risk shared by society. Process inputs/outputs are recorded and inform future plans. Reserves/buffers aim to limit the harm of failures.
+
+**Capacity & Individual Claim Equations:**
+
+- **Individual Claimable Resource Price = SNE/unit cost**
+- **Total Socially Validated Contribution:**
+  ```
+  total_social_svc = Σ(all socially-validated effort)
+  ```
+- **Total Pool Validated Contribution:**
+  ```
+  <pool>_svc = Σ(SVC of all resources classified as <pool>)
+  ```
+  Pool Examples: individual-claimable, replenishment, reserve/buffer, administration, unspecified, social-welfare. Recall, plans classify resources as belonging to these pools.
+- **Individual Contribution Capacity Factor:** `contribution_capacity_factor = f(age, health, caring responsibilities, etc.)` — Ranges from 0 (unable to contribute) to 1 (full contribution capacity). Determined through participatory health and social assessment, not binary classification. This factor represents the degree to which a person is able to participate in socially-validated work, not a judgment on the value of their actual work.
+- **Social Welfare Fund:**
+  ```
+  sum_unmet_capacity      = Σ (1 − contribution_capacity_factor[i])
+  sum_met_capacity        = Σ contribution_capacity_factor[i]
+  total_capacity_mass     = sum_met_capacity + sum_unmet_capacity
+  welfare_allocation_rate = sum_unmet_capacity / total_capacity_mass
+  social_welfare_fund     = individual_claimable_pool_svc × welfare_allocation_rate
+  available_claimable_pool = individual_claimable_pool_svc − social_welfare_fund
+  ```
+  The welfare allocation rate is self-computed from aggregate incapacity: the fraction of total capacity-mass that is unmet. No manual tuning — when all members are at full capacity the rate is 0%; when all are fully incapacitated it is 100%. The social welfare fund supplements the claim capacity of those with reduced capacity to contribute, without creating a separate track.
+- **Contribution-Based Claim (from actual work):**
+  ```
+  contribution_claim = gross_contribution_credited × (available_claimable_pool / total_social_svc)
+  ```
+  _This is what their actual work entitles them to from the contribution-based pool._
+- **Solidarity Supplement:**
+  ```
+  solidarity_supplement = (1 - contribution_capacity_factor[i]) × (social_welfare_fund / Σ(1 - contribution_capacity_factor[i]))
+  ```
+  _The welfare fund is distributed proportional to unmet capacity. This is a social dividend, not a wage adjustment. Everyone below full capacity receives a supplement scaled to their degree of incapacity; those at full capacity receive none._
+- **Total Claim Capacity:**
+  ```
+  total_claim_capacity = contribution_claim + solidarity_supplement
+  ```
+- **Current Potential Claims:** Remaining capacity after claims are made.
+  ```
+  current_potential_claim_capacity = total_claim_capacity - claimed_capacity
+  ```
+- **Social Share:** The individual's portion of total outstanding claims.
+  ```
+  current_share_of_claims = current_potential_claim_capacity / social_total_potential_claims
+  ```
+- **Actual Claim Capacity:** The real-world purchasing power relative to the available individual-claimable pool.
+  ```
+  current_actual_claim_capacity = current_share_of_claims × current_claimable_pool
+  ```
+
+**Resource Usage-Rights & Responsibilities:**
+
+Only Resources classified as Individual-Claimable can be transferred to agents classified as Person.
+
+All other Resources are owned by the Universal Commune Federation, with usage-rights and responsibilities determined by recursive/compositional merging/resolution of Plans across the Universal Commune Federation according to Planner Process.
+
+**Ownership and custody are distinct.** Ownership by the Universal Commune Federation means that no individual scope or person can alienate a communal resource without collective agreement — this is expressed in the data model by setting `primaryAccountable = 'universal-commune'` on all communal EconomicResources, regardless of which scope currently holds them.
+
+Custody is the operational complement: `custodianScope` records which scope is currently stewarding the resource — who bears day-to-day liability under the custody protocol. A scope has custody of resources it does not own. Universal Commune ownership does not imply that the Universal Commune operationally holds the resource.
+
+The two change by different mechanisms:
+
+- `transferCustody` updates `custodianScope` (operational handoff between scopes; `primaryAccountable` is untouched — `accountableEffect: 'noEffect'`)
+- `transferAllRights` updates `primaryAccountable` (a de-socialization event — the resource exits the social plan into market exchange)
+
+The custody partition C is therefore directly computable from the Observer:
+
+```
+Cₖ = { r : r.custodianScope = scope[k].id }
+```
+
+And the Universal Commune ownership invariant is:
+
+```
+∀ communal r :  r.primaryAccountable = 'universal-commune'
+```
+
+The plan is the complete record of who may do what, with what, and for whom. A responsibility is an obligation that appears in the plan: a derived demand for replenishment, a commitment to provide labor, a duty to deliver to another commune.
+
+There is no right without a corresponding plan element. There is no responsibility that is not visible in the PlanStore.
+
+When the plan changes, rights and responsibilities change with it. The planning process is the continuous renegotiation of all rights and responsibilities among the associated producers.
+
+---
+
+# Custody Protocol
+
+Every valuable thing moving through the social plan should have a custodian at every moment — the PlanStore's `transferCustody` events are the custody ledger, requiring no separate infrastructure.
+
+Custody work should generate validated hours at the same rate as production work, feeding into the same pool of socially-validated effort.
+
+Every custodian's exposure should be bounded by the portion of their claim capacity they stake as collateral. Custody chain design should make theft irrational: the value accessible without detection must be less than the claim capacity at stake.
+
+**Custodians are always individuals.** A resource's custodian at any moment is a specific person who has confirmed receipt and is personally liable for safekeeping. Scopes do not hold custody — they organize and insure the custodianship of their members.
+
+**Buffer Custody is Collective.** While individual resources have individual custodians, buffers as aggregates have collective custody. The scope assembly is collectively responsible for maintaining each buffer within its target zones. This means:
+
+- No single individual can deplete a buffer below TOY without assembly approval
+- Buffer status is a public dashboard, visible to all scope members
+- Buffer failure triggers collective review, not just individual penalties
+- The assembly sets buffer policy; individuals execute custody of specific items within the buffer
+
+This creates a nested custody model:
+
+```
+Buffer (scope collective responsibility)
+  ├── Item A (individual custodian Maria)
+  ├── Item B (individual custodian Javier)
+  └── Item C (individual custodian collective k-of-n)
+```
+
+The collective is liable for buffer health; individuals are liable for the specific items they hold. A depleted buffer triggers collective investigation — did individuals fail to safeguard? Was policy wrong? Was demand miscalculated?
+
+When a resource is said to be "in custody of a scope," this is shorthand for: the resource is assigned to that scope's custody pool, and at any moment some member of that scope (or a threshold coalition of members, in k-of-n arrangements) has signed it out and is personally liable. When not signed out, the last confirmer remains liable until the next person confirms receipt. The scope's assembly sets policy — who may assume custody, under what conditions, with what rotation — but individuals execute that policy and bear personal stakes.
+
+Scopes appear in the custody hierarchy not as custodians but as _principals_: the scope's entrustment capacity is the sum of members' limits that can be brought to bear through collective arrangement. This is insurance and organizational backing, not custody itself. The `transferCustody` event always names specific persons as provider and receiver — a scope is never the named party in the atomic liability event.
+
+Per-worker custody additions (alongside `claim_capacity`, `validated_hours`):
+
+```
+entrustment_limit[i]   = α × total_claim_capacity[i] × svc_market_equivalent
+α ∈ (0,1]              — safety factor, democratically set; default 0.5
+current_liability[i]   — Σ market_value of items currently held; updated by each transferCustody event
+pending_penalty[i]     — deducted from future total_claim_capacity[i] on confirmed loss
+```
+
+Incentive compatibility condition (custody chain design constraint):
+
+```
+value_accessible_solo / n_colluders_required < entrustment_limit[i]
+```
+
+Three design levers:
+
+- physical security — reduces value accessible without detection
+- threshold custody (k-of-n) — increases colluders required
+- grow claim capacity — increases `entrustment_limit[i]` through validated custody work
+
+**Confirmation as the Atomic Liability Event:**
+
+Custody transfers on a single atomic event: the receiver's confirmation. Liability releases from sender and attaches to receiver at that moment — the chain always identifies exactly one responsible party at every instant.
+
+```
+custody_state(item) ∈ { held_by[A] | transferring[A→B] | held_by[B] | settled }
+
+EconomicEvent(action = transferCustody):
+  provider: current custodian   — liability released on receiver's confirmation
+  receiver: new custodian       — liability assumed at confirmation
+  resourceQuantity:  amount
+  market_value: dollar-denominated value  (for entrustment calculation only)
+```
+
+_The `market_value` field is used only for limit enforcement during the transitional period. It is denominated in external currency because the theft risk is market-denominated: goods in transit can be sold in the external economy regardless of the social plan's internal accounting._
+
+**Custody Routing:**
+
+Custody is assigned at the lowest level whose available capacity covers the full value — responsibility is kept as local as possible.
+
+```
+custody_level(V) = min { L ∈ hierarchy : entrustment_limit[L] ≥ V }
+
+hierarchy (ordered): individual < scope < industrial_federation
+                     < regional_federation < universal_commune
+```
+
+The hierarchy refers to the level at which entrustment capacity is organized, not the level of the custodian. A value that exceeds any single individual's limit requires a coalition of custodians whose combined `entrustment_limits ≥ V`. If the scope's pooled capacity covers it, that coalition is drawn from scope members; if not, from the wider federation. At every moment, every resource has a specific set of named individuals who are personally on the hook — the hierarchy determines where their insurance backing is drawn from.
+
+_Higher-level custody is a last resort when value exceeds local capacity. The right design always tries to bring capacity to the asset — through growing claim capacity and physical partition — rather than escalating custody level._
+
+**Penalty Mechanism:**
+
+```
+penalty_svc[i] = min( missing_value / svc_market_equivalent, total_claim_capacity[i] )
+total_claim_capacity[i] ← total_claim_capacity[i] − pending_penalty[i]
+
+Loss coverage through tranches (each exhausted before the next):
+  Tranche 1:  individual penalties of directly responsible custodians
+  Tranche 2:  scope welfare pool
+  Tranche 3:  industrial federation pool
+  Tranche 4:  regional federation pool
+  Tranche ∞:  universal commune social welfare fund
+```
+
+_Investigation and assembly review trigger at Tranche 2 and above — collective loss implies systemic failure, not individual fault. The deterrence layer (individual penalty) and insurance layer (welfare pools) are independent._
+
+The custody protocol does not begin with a declaration of principles — "All goods shall be defended!" — and then search for a way to enforce it. It begins with the material relations of production and circulation — the movement of use-values, the stake each producer has in the social product, the collective liability for loss — and from those relations, the necessity of defense emerges as a derived demand.
+
+Armed defense is a dependent demand. It is not an independent demand, an abstract desire for weapons. It is a demand derived from the existence of valuable communal stockpiles and the persistent threat of capitalist seizure. The custody protocol, by creating a transparent ledger of what is valuable, where it is located, and who is collectively responsible for it, does not merely identify the threat — it generates the social basis for the response.
+
+_The custody protocol is denominated in market terms because the threat it guards against — theft for external sale or exchange — is market-denominated. A medicine shipment stolen and smuggled across a border is worth its market price regardless of what the social plan says. The `svc_market_equivalent` bridge is therefore not a concession to capitalist accounting; it is the minimum necessary interface with the external world during transition._
+
+_As `import_dependence_ratio → 0` and the federation's external fund becomes less critical, the volume of dollar-denominated flows in custody shrinks. As the social economy matures and `svc_market_equivalent` rises (SVC buys more relative to dollars), the collateral base strengthens even as the need for it diminishes. At full transition — when all essential goods are produced and allocated within the social plan — external-cash custody, external-markets, and the temptation to sell communal property become a marginal concern. The protocol retires gracefully. Until then, it is the operational interface between the two worlds: the precise mechanism by which collective ownership of external revenue is maintained through individual accountability._
+
+---
+
+# Technical Planner
+
+**Aggregators / Indexes:**
+
+- Resources classified as `communal | individual-claimable`
+- SNE Tracking: moving average of historical effort/unit (includes SNE cost of all inputs). Actual effort recorded at observation layer via `EconomicEvent(action: 'work', effortQuantity)`. Indexed spatio-temporally to avoid gross-generalizations in SNE estimation.
+- Recipes define how to create/transform resources
+- **BufferZones:** TOR/TOY/TOG parameters per spec + location, computed from ADU × DLT × LTF. Loaded before planning begins. ConservationSignals for ecological buffers; ReplenishmentSignals for all others.
+- Independent supply: current resource quantities across scope (present tense)
+- Dependent supply: emerges from composing recipes from independent supply into Plans
+- Independent demands: desired resource quantities across space-time (present-future)
+- Derived independent demands: derived from network data (e.g. food demand as a function of scope population)
+- Dependent demands: emerge from composing recipes to satisfy independent demands
+  - **Buffer replenishment demands (primary):** generated automatically when NFP ≤ TOY; Red before Yellow; ecological emit ConservationSignal not replenishment demand
+  - Replenishment demands: restore net-losses created by a plan (metabolic sustainability)
+  - Reserve/buffer demands: untouchable except in emergencies
+  - Administration demands: for plan coordination
+
+_Derived demands are computed from actual consumption records of the primary planning pass. They cannot be pre-sorted alongside independent demands — they do not exist until primary planning is complete. Planning proceeds in passes over the same PlanStore: Pass 0 (buffer health, pre-existing debt), Pass 1 (independent demands with buffer guards), Pass 2 (replenishment from actual consumption). Failure in Pass 2 = metabolic debt, qualitatively worse than unmet independent demand._
+
+---
+
+**`PlanStore`** — per-invocation, scope-bound. Holds Plans | Processes | Commitments | Intents.
+
+- Mergeable: `planStore.merge(sub)` imports another store's records. Coordination between scopes emerges from merge planners only.
+- Observer must be mergeable across scopes — the same compositionality that applies to PlanStore applies to the observation layer beneath it.
+
+**`PlanNetter`** — per-session soft-allocation ledger. Reads Observer + PlanStore; never mutates either.
+
+- `netDemand(specId, qty, opts?)`: claims inventory + scheduled outputs; marks source IDs in allocated
+- `netSupply(specId, qty, opts?)`: absorbs scheduled consumptions; marks consumption IDs in allocated
+- `netAvailableQty(specId, opts?)`: READ-ONLY — inventory + outputOf flows − inputOf flows
+- `allocated: Set<id>` — prevents double-claiming across all calls within one session
+
+---
+
+**`planForScope(scope_k, horizon, ctx, subStores?)`**
+
+_The planning unit is the scope partition Sₖ ⊆ V — not a geographic cell. Spatial indexing (H3) is used internally for proximity-based supply matching and transport recipe evaluation; it scopes data queries, not the planning unit itself._
+
+- **Phase 0 — Normalize:** Resolve scope_k membership Sₖ. Eliminate redundant or dominated sub-scope inclusions. Result: the canonical resource set; no slot loaded twice.
+- **Phase 1 — Extract:** `queryDemandByScope` + `querySupplyByScope` over Sₖ. Horizon filter `(from, to)` applied to `slot.due`.
+- **Phase 2 — Classify:** Each open demand slot: `locally-satisfiable | transport-candidate | producible-with-imports | external-dependency`. Locally satisfiable planned first (lowest overhead).
+- **Phase 3 — Formulate with Buffer Priority:** One PlanNetter per invocation.
+
+  - **Pass 0 — Buffer Replenishment First:**
+    - Load all `BufferZone` configurations for resources in scope (from `BufferZoneStore`)
+    - Run `orchestrateBufferRecalibration()` to refresh ADU and zone boundaries
+    - For each buffer, compute NFP = `onhand + onorder − qualifiedDemand`
+    - If ecological buffer (`tag:buffer:ecological`) and `NFP ≤ TOY`: emit `ConservationSignal`; check `tippingPointBreached`
+    - If non-ecological buffer and `NFP ≤ TOY`: emit `ReplenishmentSignal` with qty = `TOG − NFP`
+    - Sort signals: Red before Yellow, then by buffer priority tier (ecological > strategic > metabolic > reserve > social)
+    - Allocate capacity to replenishment signals in this order BEFORE any independent demands
+
+  - **Pass 1 — Independent Demands (primary):** All pre-existing demands sorted by D-category then due date. `dependentDemand` per slot; `netter.allocated` grows from highest priority down. For each demand, verify projected buffer impact does not cross TOY for any buffer whose DLT prevents timely replenishment.
+
+  - **Compute:** endogenous replenishment demands from Pass 1's consumption records (consumed qty × replenishment rate per spec). These do not exist before Pass 1.
+
+  - **Pass 2 (derived):** replenishment + buffer demands against remaining capacity. Same PlanStore, same netter — no merge step needed.
+
+  - **Backtrack (if `metabolicDebt` after Pass 2):** walk Pass 1 allocations in reverse priority (lowest D-category first, latest due date first within category). Retract process subgraphs (by `provenanceId`) until freed capacity covers unmet replenishment qty. Re-explode retracted demands against newly freed capacity — their shortfall becomes `unmetDemand[]`. If `metabolicDebt` persists after exhausting all lower-priority retractable allocations, escalate to merge hierarchy.
+
+  - **Phase B (Supply):** unabsorbed supply (not in `allocated`) forward-scheduled via `dependentSupply`. Supply that could replenish Yellow/Red buffers gets priority routing.
+
+- **Phase 4 — Collect:** `replenishmentSignals[] | conservationSignals[] | purchaseIntents[] | surplus[] | unmetDemand[] | laborGaps[]`
+
+---
+
+**Merge Planner:** Same `planForScope` with `subStores` provided. Merges sub-PlanStores; runs Phase 3 treating leaf `unmetDemand[]` + `metabolicDebt[]` + `conservationSignals[]` signals as new demand inputs. `dependentDemand` at inter-scope federation level — can traverse into a neighbouring scope's capacity, discover transport or production recipes, and back-schedule their full dependency chain as sub-demands. The inter-scope supply being routed may itself be the output of a dependent production chain — `dependentSupply` runs forward from unabsorbed inter-scope capacity. PlanNetter initialised from merged PlanStore: `netter.allocated` contains all leaf allocations; inter-scope processes claim only unallocated capacity. Surgical retraction can reach into any leaf's allocations to liberate capacity on the inter-scope dependency path.
+
+`ConservationSignals` from child scopes propagate upward and are aggregated at each federation level — ecological buffer stress is visible across the full hierarchy. A `tippingPointBreached` signal at any child scope triggers federation-level review regardless of local plan status.
+
+- **Conflict Detection:** Scan merged PlanStore after formulation. Types: inventory over-claim (Σ committed qty > `onhandQuantity`) | receipt over-claim | capacity contention (Σ committed effort > available labor capacity for agent/period).
+- **Surgical Resolution:**
+  - Identify contested resources: trace the inter-scope demand's dependency path (`dependentDemand` subgraph). Retraction candidates = allocations competing for those specific contested resources — targeted to the dependency path, not a global priority walk.
+  - Retraction unit = process subgraph (by `provenanceId`). Retract in reverse priority; stop as soon as freed capacity resolves each contention.
+  - Re-explode at federation scope: `dependentDemand` on each retracted root demand → fallback ladder: alt local inventory → transport recipe → scheduled receipt → production → `purchaseIntent`. Re-exploded demands gain visibility into inter-scope supply routes unavailable at leaf level — net sacrifice is often less than gross retraction.
+  - Cascade: `detectConflicts()` again. If new conflicts → extend retraction set, repeat. Termination: `detectConflicts() = []`.
+- **Recursion:** Merge planner PlanStores may themselves conflict → `planForScope` for their union. Depth bounded by federation nesting depth (typically 1–2 levels). `metabolicDebt[]` and `conservationSignals[]` routed with elevated priority over `unmetDemand[]` at every federation level.
+
+---
+
+**Key Properties:**
+
+- **Scope-bound, not global:** Each `planForScope` invocation owns its own PlanStore corresponding to its scope partition. There is no single global store. Coordination between planners happens only when a merge planner is created for the federation spanning both.
+- **Maximal leaf parallelism:** Leaf planners share nothing — no coordination, no shared state, no locks. Conflicts between them are only visible when a higher-order federation planner spans both. If no merge is requested, leaf PlanStores coexist independently.
+- **Merge = a planner for the union scope:** Conflict resolution is not a special operation — it is `planForScope` called with sub-PlanStores. The function is identical; only the starting state differs.
+- **Substitution is emergent:** Retracted fragments are re-exploded; `dependentDemand` tries the next available option on its own fallback ladder. No guidance from the merge planner — only the constraint that the retracted resource is no longer available in the netter.
+- **Recursion is shallow in practice:** Most conflicts are between adjacent leaf scopes and resolve in a single merge step. The hierarchy recurses up only when a merge planner's PlanStore itself conflicts with another scope's — bounded by federation nesting depth, typically 1–2 levels.
+- **Indexes are the scoping filter; never mutated:** Demand and supply indexes tell the planner what exists and where — before any allocation. Rebuild from the updated PlanStore state before the next horizon.
+- **Three orthogonal axes:** Scope partition Sₖ, PlanStore, and Plans do not constrain each other. Sₖ scopes what data gets loaded (Phases 0–2). PlanStore is owned by an invocation. Plans are organizational labels — they can span multiple scopes, or many Plans can exist within one scope. The PlanNetter is the consistency boundary, not the Plan.
+- **Buffer health is a pre-condition, not a derived output:** Pass 0 runs before any demand satisfaction. Buffer signals are the first thing generated each cycle. Demand satisfaction is authorized by buffer health, not the reverse.
+
+---
+
+**Inspirations:**
+
+_Critique of the Gotha Program_, Karl Marx
+_Grundrisse_, Karl Marx
+_Capital Vol. 1_, Karl Marx
+_Capital Vol. 2_, Karl Marx
+_Capital Vol. 3_, Karl Marx
+_The Paris Commune_, Karl Marx
+_Negotiated Coordination_, Pat Devine
+_Towards a New Socialism_, Paul Cockshott
+_People's Republic of Walmart_, Leigh Phillips and Michael Rozworski
+Project Cybersyn, Revolutionary Chile
+OGAS, Soviet Union
+
+---
+
+# Implementation
+
+## Architecture Overview
+
+The codebase is organised into four cleanly-separated layers that map directly onto the VF lifecycle:
+
+```
+Knowledge  →  Plan  →  Observation  →  Algorithm
+(recipes)    (commitments / intents)   (events / inventory)   (computations)
+```
+
+| Layer           | Primary concern                                      | Key files                         |
+| --------------- | ---------------------------------------------------- | --------------------------------- |
+| **Knowledge**   | BOM, routing, recipes, buffer profiles               | `src/lib/knowledge/`              |
+| **Plan**        | Supply orders, demand signals, scheduling            | `src/lib/planning/`               |
+| **Observation** | Actual events, on-hand inventory, fulfillment        | `src/lib/observation/observer.ts` |
+| **Algorithm**   | Pure-function computations: MRP, DDMRP, cost, trace  | `src/lib/algorithms/`             |
+| **Indexes**     | Spatio-temporal fast lookups for distributed queries | `src/lib/indexes/`                |
+
+The canonical VF temporal ladder:
+
+```
+Intent  →  Commitment  →  EconomicEvent
+  ↑ satisfies    ↑ fulfills
+```
+
+- **Intent** — unilateral desire (provider _or_ receiver, never both)
+- **Commitment** — bilateral promise (both provider _and_ receiver); satisfies an Intent
+- **EconomicEvent** — immutable observed fact; fulfills a Commitment _or_ satisfies an Intent (never both)
+
+---
+
+## ValueFlows Core
+
+### Schemas (`src/lib/schemas.ts`)
+
+Full Zod-validated TypeScript types for the entire VF ontology (~1800 lines), including:
+
+- **EconomicResource** — `accountingQuantity` (rights) + `onhandQuantity` (custody), `stage`, `containedIn`, `lot`, `previousEvent`
+- **EconomicEvent** — all VF actions with `ACTION_DEFINITIONS` (accounting/onhand/location/containment/stage/state effects per action)
+- **Process / ProcessSpecification** — scheduling substrate; `hasBeginning`/`hasEnd`; `basedOn` → ProcessSpecification links to decoupling points
+- **RecipeProcess / RecipeFlow / Recipe** — BOM + routing templates; `minimumBatchQuantity` (MOQ); `hasDuration`; `stage`/`state` filters on flows
+- **Plan / Scenario / ScenarioDefinition** — planning hierarchy; `refinementOf`; `hasIndependentDemand[]`
+- **Commitment / Intent** — `fulfills`/`satisfies` links; `independentDemandOf`; `availability_window`; `minimumQuantity`/`availableQuantity`
+- **Agreement / AgreementBundle / Proposal / ProposalList** — exchange and marketplace constructs
+- **Claim** — receiver-initiated obligation tracking
+- **BufferZone / BufferProfile / ReplenishmentSignal / DemandAdjustmentFactor** — full DDMRP schema extensions; `tag:buffer:ecological` marks ecological buffers for ConservationSignal routing
+- **SpatialThing / Agent / AgentRelationship** — network participants with H3-indexed location
+
+### Observer (`src/lib/observation/observer.ts`)
+
+Event-sourced stockbook. The `Observer` class:
+
+- Receives `EconomicEvent` records (immutable facts)
+- Derives `EconomicResource` state by applying action effects (accounting/onhand/location/containment/accountable/stage/state)
+- Implements all VF action semantics including split-custody for `pickup`/`dropoff`, implied-transfer ownership propagation, and containment via `separate`/`combine`
+- Tracks **fulfillment** (`Commitment` → `FulfillmentState`) and **satisfaction** (`Intent` → `SatisfactionState`) — mutually exclusive per event
+- Tracks **claim settlement** (`Claim` → `ClaimState`)
+- Auto-creates batch/lot records on `produce` events
+- Emits typed stream events (`recorded`, `resource_created`, `resource_updated`, `batch_created`, `fulfilled`, `over_fulfilled`, `satisfied`, `claim_settled`, `process_completed`)
+- Maintains multi-dimensional indexes: by resource, process, agent, action
+- Chained `previousEvent` breadcrumbs for track & trace
+- Correction events (`EconomicEvent.corrects`) for immutable amendment
+
+Key queries: `inventory()`, `inventoryForSpec()`, `inventoryAtLocation()`, `inventoryForAgent()`, `conformingResources()`, `eventsForProcess()`, `eventsForResource()`, `eventsForAgent()`.
+
+### PlanStore (`src/lib/planning/planning.ts`)
+
+The planning-layer state machine:
+
+- CRUD for **Plans**, **Commitments**, **Intents**, **Agreements**, **AgreementBundles**, **Proposals**, **ProposalLists**, **Scenarios**, **ScenarioDefinitions**, **Claims**
+- VF constraint enforcement: Intents enforce `provider XOR receiver`; `promoteToCommitment()` validates `minimumQuantity` and decrements `availableQuantity` (ATP mechanism)
+- `acceptProposal()` — full Intent→Commitment→Agreement lifecycle with `unitBased` scaling and `proposedTo` access control
+- `publishOffer()` / `publishRequest()` — convenience helpers for marketplace participation
+- `instantiateRecipe()` / `buildRecipeGraph()` — BOM explosion from recipe templates into scheduled Processes and Commitments/Intents with back-scheduling from due date
+- `merge()` / `removeRecords()` / `removeRecordsForPlan()` — batch operations for backtracking
+
+### PlanNetter (`src/lib/planning/netting.ts`)
+
+Shared stateful netting engine across a planning session:
+
+- `netDemand()` — nets demand against (1) observer inventory, (2) scheduled output Intents, (3) scheduled output Commitments; with stage/state/location/temporal guards
+- `netSupply()` — nets supply against scheduled consumption flows
+- `netUse()` — books time-slot `[from, to)` reservations for durable resources with double-booking prevention
+- `netAvailableQty()` — read-only peek at net available inventory
+- `fork()` — creates a child netter inheriting current allocation state (for speculative planning)
+- `retract()` — releases allocations and removes plan records atomically
+- `pruneStale()` — cleans stale soft-allocations after plan retraction
+- Per-plan attribution via `claimedForPlan()` enables surgical retraction without affecting sibling plans
+
+### RecipeStore (`src/lib/knowledge/recipes.ts`)
+
+Knowledge-layer recipe registry:
+
+- `getProcessChain()` — ordered `RecipeProcess` sequence for a recipe (topological sort)
+- `flowsForProcess()` — inputs and outputs for a recipe process
+- `recipesForOutput()` — all recipes that produce a given spec
+- `recipesForTransport()` — recipes for transporting a spec (enables location mismatch detection)
+- `allResourceSpecs()` — all registered `ResourceSpecification` entities
+
+### ScheduleBook (`src/lib/planning/schedule-book.ts`)
+
+Unified schedule view across Intents and Commitments:
+
+- `blocksFor(entityId)` — `ScheduleBlock[]` for an agent or resource (unified over Intents + Commitments)
+- `committedEffortOn(agentId, dt)` — confirmed work hours on a calendar date (work Commitments only, not Intents)
+- `hasUseConflict(resourceId, from, to)` — half-open interval `[from, to)` conflict detection
+- `isResourceAvailable(resourceId, dt)` — checks `availability_window` via `TemporalExpression`
+
+---
+
+## Core Algorithms
+
+### Dependent Demand (`src/lib/algorithms/dependent-demand.ts`)
+
+Full recursive **BOM explosion** (MRP backward explosion):
+
+1. Starts with `(specId, quantity, dueDate)` demand
+2. Nets against observer inventory + scheduled output flows (via `PlanNetter`)
+3. Selects the most labor-efficient recipe — ranked by **SNLT** (Socially Necessary Labour Time) or **SNE** (Socially Necessary Effort, including embodied labour) when an `sneIndex` is provided
+4. Back-schedules the recipe process chain from due date
+5. Creates `Process` records and `Commitment`/`Intent` flows scaled to demand quantity
+6. Respects `minimumBatchQuantity` (MOQ) — rounds up scale factor and produces surplus
+7. Handles **durable inputs**: `use` → time-slot scheduling via `PlanNetter.netUse()`; `cite` → existence gate only
+8. Detects **location mismatches** and prefers transport recipes over production when stock exists at a different location
+9. Creates `purchaseIntents` for external sourcing when no recipe exists
+10. Supports **shared netter** (Mode C) for coordinated demand+supply explosions
+11. Cycle protection via visited-recipe tracking; `allocatedScheduledIds` enables surgical retraction
+
+### Dependent Supply (`src/lib/algorithms/dependent-supply.ts`)
+
+Forward supply explosion — the counterpart to dependent demand. Explodes what a supply schedule _produces_ and nets it against downstream demand, enabling full bidirectional planning in Mode C.
+
+### SNE — Socially Necessary Effort (`src/lib/algorithms/SNE.ts`)
+
+Recursive **embodied labour** computation:
+
+- `buildSNEIndex(recipeStore)` — builds a complete `Map<specId, effortHours/unit>` index in one pass
+- `computeRecipeSNE()` / `computeSNEForRecipe()` — per-spec and per-recipe SNE with memoization
+- Includes direct labour (work flows), embodied labour (consumed inputs × SNE(input)), and equipment depreciation (`(duration/lifespan) × SNE(equipment)`)
+- Cycle detection via `computing` Set — breaks circular recipes safely
+- `updateSNEFromActuals()` / `updateSNEFromPlan()` — EMA update from observed events (blends prior estimate with actuals at `alpha = 0.1`)
+
+### Critical Path (`src/lib/algorithms/critical-path.ts`)
+
+Standard **CPM** on instantiated plan processes:
+
+- `criticalPath(planId, planStore, processReg)` — forward + backward pass on all Plan processes
+- Dependencies derived from matching `resourceConformsTo` across output/input flows
+- Returns `CriticalPathNode[]` with `earliestStart`, `earliestFinish`, `latestStart`, `latestFinish`, `float`, `isCritical`, predecessors, successors
+- Also returns the ordered `criticalPath` (process IDs) and absolute `projectStart`/`projectEnd`
+- Used for DLT computation on instantiated plans (DDMRP C2/C3)
+
+### Value Rollup (`src/lib/algorithms/rollup.ts`)
+
+Two-mode cost accounting:
+
+- `rollupStandardCost(recipeId, ...)` — **standard cost** from recipe (BOM + routing traversal)
+- `rollupActualCost(startId, ...)` — **actual cost** by tracing backwards from a resource/event to all contributing input events
+- `costVariance(standard, actual)` — variance analysis (positive = under budget)
+- Per-stage breakdown and grand totals in a configurable common unit (USD, hours, credits)
+
+### Value Equations (`src/lib/algorithms/value-equations.ts`)
+
+**Income distribution** for value networks (Sensorica pattern):
+
+- `distributeIncome(incomeEventId, observer, processReg, equation)` — traces backwards from a sale event and distributes income to contributors proportional to their weighted score
+- Built-in scorers: `effortScorer` (work hours), `resourceScorer` (consumed quantity), `equalScorer` (flat share)
+- Built-in equations: `effortEquation`, `equalEquation`, `hybridEquation` (70% effort + 30% resource)
+- `makeDepreciationScorer()` — scores `use` events by `(duration/lifespan) × SNE(tool)` — properly credits tool owners for embodied labour consumed
+- `makeHybridWithDepreciationEquation()` — 60% labor + 40% depreciation
+- `distributeMultipleIncome()` — batch distribution for multi-deliverable sales
+
+### Track & Trace (`src/lib/algorithms/track-trace.ts`)
+
+Bidirectional resource provenance as required by the VF spec:
+
+- `trace(startId, observer, processReg)` — **backwards** DFS from a resource or event to all causal origin nodes; returns ordered `FlowNode[]` tree
+- `track(startId, observer, processReg)` — **forwards** DFS to all downstream destinations
+- Nodes are typed as `event | process | resource` with parent breadcrumb links
+- `{ includeStale: true }` includes corrected events for audit purposes
+- Used internally by `rollupActualCost()` and `distributeIncome()`
+
+### Resource Flows (`src/lib/algorithms/resource-flows.ts`)
+
+Inventory and cash-flow timeline generation along the event-process graph.
+
+---
+
+## DDMRP Algorithm Layer
+
+Full **Demand Driven MRP** algorithm layer — all functions are pure and stateless:
+
+| Function                        | DDMRP chapter | Description                                                                                                      |
+| ------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `computeADU()`                  | Ch 9          | Rolling past ADU from EconomicEvents; `onhandEffect: 'decrement'` actions only                                   |
+| `computeForwardADU()`           | Ch 9          | Forward ADU from recurring Intents (`availability_window` + `due`)                                               |
+| `blendADU()`                    | Ch 9          | Past/forward blend via `aduBlendRatio`                                                                           |
+| `recipeLeadTime()`              | Ch 8          | Template DLT via longest-path through a RecipeProcess DAG                                                        |
+| `aggregateAdjustmentFactors()`  | Ch 10         | Compound active DAF/Zone AF/LT AF for a spec+location on a date                                                  |
+| `qualifyDemand()`               | Ch 9          | OST-filtered qualified demand (spike threshold + OST horizon)                                                    |
+| `computeNFP()`                  | Ch 9          | **Signed NFP** = `onhand + onorder − qualifiedDemand`; zone classification (red/yellow/green/excess); priority % |
+| `computeBufferZone()`           | Ch 8          | TOR/TOY/TOG from ADU × DLT × LTF/VF; three-way Green zone max (order-cycle, redBase, MOQ)                        |
+| `recalibrateBufferZone()`       | Ch 8/10       | Refresh a zone with new ADU, DLT, and active adjustment factors; stamps `lastComputedAt`                         |
+| `bufferStatus()`                | Ch 10         | On-hand % vs TOR/TOY/TOG (C5 execution metric using `onhandQuantity`)                                            |
+| `projectOnHand()`               | Ch 10         | Day-by-day projected on-hand over DLT horizon; `stockout` zone when negative                                     |
+| `generateReplenishmentSignal()` | Ch 9          | NFP ≤ TOY → `ReplenishmentSignal` with recommended qty = TOG − NFP; MOQ enforcement                              |
+| `orchestrateBufferRecalibration()` | Ch 8/10    | Pre-planning ADU refresh + zone boundary update for all zones in scope                                           |
+| `sortBySchedulingPriority()`    | Ch 11         | NFP%-based scheduling queue; composite sort with sequence group (allergen/regulatory)                            |
+| `prioritizedShare()`            | Ch 11         | Scarce supply allocation: fill all locations to TOR → TOY → proportional within green                            |
+| `signalIntegrityReport()`       | Ch 12         | Recommendation vs. actual: deviation in qty + due-date compliance; `over_fulfilled` detection                    |
+| `onhandAlert()`                 | Ch 10         | Configurable alert threshold on `onhand / tor`; returns alert entries with zone color                            |
+| `ltmAlert()`                    | Ch 10         | Lead Time Managed alert: open supply orders, days remaining, G/Y/R sub-zones within last-third of DLT            |
+
+---
+
+## Knowledge Layer
+
+### BufferZoneStore (`src/lib/knowledge/buffer-zones.ts`)
+
+Registry for DDMRP buffer configuration and replenishment signals:
+
+- `addBufferZone()` / `findZone(specId, atLocation?)` — exact-match (spec + location) with fallback to global zone
+- `updateZone()` / `replaceZone()` — incremental patch or full replacement after recalibration
+- `zonesDueForRecalibration(asOf, profileMap)` — cadence-based recalc trigger (`daily` / `weekly` / `monthly`)
+- `addSignal()` / `openSignals()` / `overdueSignals()` / `updateSignalStatus()` — full `ReplenishmentSignal` lifecycle
+
+---
+
+## Spatio-Temporal Indexes (`src/lib/indexes/`)
+
+All indexes are built from VF entities and expose identical query patterns using **H3 hexagonal grid** spatial indexing (`h3-js`) at configurable resolutions.
+
+### AgentIndex (`indexes/agents.ts`)
+
+Aggregates agent labor supply from `work` Intents:
+
+- One `AgentCapacity` record per `(agent, space_time_signature)` — prevents double-counting when an agent publishes multiple skill Intents for the same window
+- `spec_index` (skill index): `specId → Set<capacityId>` — safe hour summation
+- `spatial_hierarchy`: H3 hex tree over capacity nodes
+- `buildAgentIndex(intents, agents, locations, commitments)` — tallies `committed_hours` from work Commitments; computes `remaining_hours`
+- Queries: `queryAgentsBySpec()`, `queryAgentsByLocation()`, `queryAgentsBySpecAndLocation()`, `netEffortHours(agentId, dt, index, location?)`
+
+### IndependentDemandIndex (`indexes/independent-demand.ts`)
+
+Indexes all non-finished Intents as demand slots:
+
+- Tracks `fulfilled_quantity` / `remaining_quantity` from satisfying Commitments and Events
+- Indexes: `cell_index` (H3), `spec_index`, `action_index`, `space_time_index`, `plan_demand_index`, `spatial_hierarchy`
+- Queries: `queryDemandBySpec()`, `queryDemandByLocation()`, `queryDemandBySpecAndLocation()`, `queryOpenDemands()`, `queryPlanDemands()`
+
+### CommitmentIndex (`indexes/commitments.ts`)
+
+Fast lookup for planned supply/demand flows by spec, agent, location, and time signature.
+
+### EconomicEventIndex (`indexes/economic-events.ts`)
+
+Historical event lookup by spec, action, agent, location, time window.
+
+### EconomicResourceIndex (`indexes/economic-resources.ts`)
+
+Inventory snapshot indexed by spec, location, accountable agent, stage, H3 cell.
+
+### IntentIndex (`indexes/intents.ts`)
+
+Full Intent catalog for marketplace discovery — all Intents (open and fulfilled), indexed by action, spec, location.
+
+### IndependentSupplyIndex (`indexes/independent-supply.ts`)
+
+Supply-side counterpart to `IndependentDemandIndex` — indexes supply Intents and Commitments for matching against demand.
+
+---
+
+## Planning Orchestrator
+
+### planForScope (`src/lib/planning/plan-for-scope.ts`)
+
+Scope-level two-pass DDMRP planning cycle with buffer-first pass ordering:
+
+- **Pass 0** — buffer health check: compute NFP for all buffered specs, emit `ReplenishmentSignal`s and `ConservationSignal`s, allocate replenishment capacity before any independent demands
+- **Pass 1** — independent demand satisfaction with buffer guards
+- **Pass 2** — derived replenishment from actual Pass 1 consumption
+- `ScopePlanSignals` — emitted for parent scope: deficit slots, surplus slots, conservation signals
+- `buildScopePlanSignals()` — extracts signals from a completed `ScopePlanResult` for passing to a parent planner
+
+### planForRegion (`src/lib/planning/plan-for-region.ts`)
+
+H3-cell based, two-pass DDMRP planning cycle:
+
+- **Pass 1** — classifies demand slots per H3 cell: `locally-satisfiable` / `transport-candidate` / `producible-with-imports` / `external-dependency`
+- **Pass 2** — triggers dependent demand explosion for replenishment signals (`tag:plan:replenishment-required`)
+- Detects conflicts: inventory overclaim + capacity contention via `ScheduleBook`
+- Backtracking via `PlanNetter.retract()` — releases soft-allocations and removes plan records atomically
+- `DeficitSignal` / `SurplusSignal` — planning gap and surplus reporting
+- `ConservationSignal` — emitted for ecological buffers (`tag:buffer:ecological`) in Yellow/Red; `tippingPointBreached` flag triggers unconditional federation escalation
+- `MetabolicDebt` — tracks orphan demands with no available recipe
+- `ScenarioIndex` / `paretoFront()` / `mergeFrontier()` — content-addressed speculative scenarios by H3 × ProcessSpec
+
+### planFederation (`src/lib/planning/plan-federation.ts`)
+
+Federates child scope results:
+
+- Absorbs child **surplus** as synthetic supply slots before running own Pass 1 (Gap 2 implementation)
+- Absorbs child **deficits** as derived demands in Pass 2
+- Aggregates `ConservationSignal`s from all children — ecological buffer stress is visible at federation level
+- `tippingPointBreached` on any child signal propagates to federation result unconditionally
+
+---
+
+## Utilities
+
+| Module                         | Description                                                                                                                      |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `utils/space-time-index.ts`    | H3 hex index core (`HexIndex`, `HexNode`, `addItemToHexIndex`, `queryHexIndexRadius`, `queryHexOnDate`)                          |
+| `utils/space-time-keys.ts`     | Space-time signature generation; VF intent → context bridges                                                                     |
+| `utils/space.ts`               | `spatialThingToH3()` and coordinate helpers                                                                                      |
+| `utils/time.ts`                | `TemporalExpression`, `AvailabilityWindow`, `isWithinTemporalExpression()`, `hoursInWindowOnDate()`                              |
+| `utils/recurrence.ts`          | `materializeOccurrenceDates()`, `groupEventsByOccurrence()`, `unfulfilledOccurrences()`, `dateMatchesWindow()` — ADU data source |
+| `utils/space-time-scenario.ts` | `ScenarioIndex`, `paretoFront()`, `mergeFrontier()` — speculative plan scoring                                                   |
+| `query.ts`                     | `VfQueries` — unified query API across Observer + PlanStore                                                                      |
+| `agents.ts`                    | `AgentStore` with relationship tracking                                                                                          |
+| `process-registry.ts`          | Shared `ProcessRegistry` — same Process instances in planning and observation layers                                             |
+
+---
+
+## Developing
+
+Install dependencies:
+
+```sh
+bun install
+```
+
+Start the development server:
+
+```sh
+bun run dev
+
+# or open the app in a new browser tab
+bun run dev -- --open
+```
+
+Run tests:
+
+```sh
+bun test
+```
+
+## Building
+
+```sh
+bun run build
+```
+
+Preview the production build:
+
+```sh
+bun run preview
+```
+
+> To deploy, install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.

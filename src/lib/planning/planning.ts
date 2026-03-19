@@ -52,6 +52,101 @@ import { ProcessRegistry } from '../process-registry';
 import { Observer } from '../observation/observer';
 
 // =============================================================================
+// SHARED CONSTANTS
+// =============================================================================
+
+/** Canonical tag strings used on planning Intents and ResourceSpecs. */
+export const PLAN_TAGS = {
+    DEFICIT: 'tag:plan:deficit',
+    SURPLUS: 'tag:plan:surplus',
+    LATERAL_TRANSFER: 'tag:plan:lateral-transfer',
+    METABOLIC_DEBT: 'tag:plan:metabolic-debt',
+    REPLENISHMENT_REQUIRED: 'tag:plan:replenishment-required',
+    CONSERVATION: 'tag:plan:conservation',
+    REPLENISHMENT: 'tag:plan:replenishment',
+} as const;
+
+/** VF actions that do not consume inventory (no quantity decrement). */
+export const NON_CONSUMING_ACTIONS = new Set(['use', 'work', 'cite', 'deliverService']);
+
+// =============================================================================
+// SIGNAL INTENT HELPERS
+// =============================================================================
+
+/** Parse the structured note stored on a `tag:plan:deficit` Intent. */
+export function parseDeficitNote(i: Intent): { originalShortfall: number; resolvedAt: string[] } {
+    const note = i.note ? JSON.parse(i.note) as { originalShortfall?: number; resolvedAt?: string[] } : {};
+    return {
+        originalShortfall: note.originalShortfall ?? i.resourceQuantity?.hasNumericalValue ?? 0,
+        resolvedAt: note.resolvedAt ?? [],
+    };
+}
+
+/** Current remaining shortfall on a deficit Intent. */
+export function deficitShortfall(i: Intent): number {
+    return i.resourceQuantity?.hasNumericalValue ?? 0;
+}
+
+/** True when the deficit was fully resolved (shortfall reduced to 0 from a positive original). */
+export function isDeficitResolved(i: Intent): boolean {
+    return deficitShortfall(i) === 0 && parseDeficitNote(i).originalShortfall > 0;
+}
+
+/** Read the provider scope from a lateral-transfer Intent. */
+export function tradeFrom(t: Intent): string { return t.provider ?? ''; }
+
+/** Read the receiver scope from a lateral-transfer Intent. */
+export function tradeTo(t: Intent): string { return t.inScopeOf?.[0] ?? ''; }
+
+/** Read the resource spec from a lateral-transfer Intent. */
+export function tradeSpec(t: Intent): string { return t.resourceConformsTo ?? ''; }
+
+/** Read the quantity from a lateral-transfer Intent. */
+export function tradeQty(t: Intent): number { return t.resourceQuantity?.hasNumericalValue ?? 0; }
+
+/** Parse the structured note stored on a `tag:plan:replenishment` Intent. */
+export function parseReplenishmentNote(i: Intent): {
+    onhand: number; onorder: number; qualifiedDemand: number; nfp: number;
+    priority: number; zone: 'red' | 'yellow' | 'green' | 'excess';
+    recommendedQty: number; dueDate: string;
+    bufferZoneId: string; createdAt: string;
+    status: 'open' | 'approved' | 'rejected';
+    approvedCommitmentId?: string;
+} {
+    const note = i.note ? JSON.parse(i.note) as Record<string, unknown> : {};
+    return {
+        onhand: (note.onhand as number) ?? 0,
+        onorder: (note.onorder as number) ?? 0,
+        qualifiedDemand: (note.qualifiedDemand as number) ?? 0,
+        nfp: (note.nfp as number) ?? 0,
+        priority: (note.priority as number) ?? 0,
+        zone: (note.zone as 'red' | 'yellow' | 'green' | 'excess') ?? 'red',
+        recommendedQty: (note.recommendedQty as number) ?? 0,
+        dueDate: (note.dueDate as string) ?? '',
+        bufferZoneId: (note.bufferZoneId as string) ?? '',
+        createdAt: (note.createdAt as string) ?? '',
+        status: (note.status as 'open' | 'approved' | 'rejected') ?? 'open',
+        approvedCommitmentId: note.approvedCommitmentId as string | undefined,
+    };
+}
+
+/** Parse the structured note stored on a `tag:plan:conservation` Intent. */
+export function parseConservationNote(i: Intent): {
+    onhand: number; tor: number; toy: number; tog: number;
+    zone: 'red' | 'yellow'; tippingPointBreached?: boolean;
+} {
+    const note = i.note ? JSON.parse(i.note) as Record<string, unknown> : {};
+    return {
+        onhand: (note.onhand as number) ?? 0,
+        tor: (note.tor as number) ?? 0,
+        toy: (note.toy as number) ?? 0,
+        tog: (note.tog as number) ?? 0,
+        zone: (note.zone as 'red' | 'yellow') ?? 'red',
+        tippingPointBreached: note.tippingPointBreached as boolean | undefined,
+    };
+}
+
+// =============================================================================
 // PLAN STORE
 // =============================================================================
 
@@ -151,6 +246,14 @@ export class PlanStore {
      */
     openIntents(): Intent[] {
         return Array.from(this.intents.values()).filter(i => !i.finished);
+    }
+
+    /**
+     * Get all intents classified with a given tag.
+     * Used to query signal artifacts (tag:plan:deficit, tag:plan:surplus, tag:plan:lateral-transfer, etc.)
+     */
+    intentsForTag(tag: string): Intent[] {
+        return Array.from(this.intents.values()).filter(i => i.resourceClassifiedAs?.includes(tag));
     }
 
     /**
@@ -318,21 +421,9 @@ export class PlanStore {
     }
 
     /**
-     * Promote a ReplenishmentSignal to an approved supply Commitment.
+     * @deprecated Use approveReplenishment() for Intent-based replenishment signals.
      *
-     * Creates a Commitment with the signal's recommended quantity and due date,
-     * then stamps `signal.status = 'approved'` and `signal.approvedCommitmentId`.
-     *
-     * VF supply order types by sourcing strategy:
-     *   MO (manufactured in-house) → action: 'produce', outputOf: processId
-     *   PO (purchased externally)  → action: 'transferAllRights' or 'transfer'
-     *   TO (transfer from depot)   → action: 'transferCustody' or 'transfer'
-     *
-     * @param signal    Open ReplenishmentSignal to approve (mutated in place)
-     * @param aduUnit   Unit string for the recommended quantity (from BufferZone.aduUnit)
-     * @param provider  Agent ID providing the supply
-     * @param receiver  Agent ID receiving the supply
-     * @param opts      Optional: action (default 'produce'), outputOf, plannedWithin
+     * Promote a legacy ReplenishmentSignal struct to a Commitment.
      */
     promoteSignalToCommitment(
         signal: ReplenishmentSignal,
@@ -358,7 +449,6 @@ export class PlanStore {
                 hasNumericalValue: signal.recommendedQty,
                 hasUnit: aduUnit,
             },
-            // ReplenishmentSignal.dueDate is YYYY-MM-DD; Commitment.due is ISO datetime
             due: `${signal.dueDate}T00:00:00.000Z`,
             ...(signal.atLocation ? { atLocation: signal.atLocation } : {}),
             provider,
@@ -372,6 +462,82 @@ export class PlanStore {
         signal.approvedCommitmentId = commitment.id;
 
         return commitment;
+    }
+
+    /**
+     * Approve a replenishment Intent (tag:plan:replenishment) → Commitment.
+     *
+     * This is the VF-native approval path. The replenishment Intent was emitted
+     * during planning when a buffer entered red/yellow zone. Approval promotes it
+     * to a bilateral Commitment via the standard Intent → Commitment lifecycle.
+     *
+     * The Intent's note is updated with status='approved' and the commitment ID
+     * for audit trail. The Intent is marked finished.
+     *
+     * @param intentId  ID of the replenishment Intent to approve
+     * @param provider  Agent ID providing the supply
+     * @param receiver  Agent ID receiving the supply
+     * @param opts      Optional: action override, outputOf, plannedWithin
+     */
+    approveReplenishment(
+        intentId: string,
+        provider: string,
+        receiver: string,
+        opts?: {
+            action?: VfAction;
+            outputOf?: string;
+            plannedWithin?: string;
+        },
+    ): Commitment {
+        const intent = this.intents.get(intentId);
+        if (!intent) throw new Error(`Replenishment Intent ${intentId} not found`);
+        if (intent.finished) {
+            throw new Error(`Replenishment Intent ${intentId} is already finished`);
+        }
+        if (!intent.resourceClassifiedAs?.includes(PLAN_TAGS.REPLENISHMENT)) {
+            throw new Error(`Intent ${intentId} is not a replenishment signal`);
+        }
+
+        // Override the action if specified (MO=produce, PO=transfer, TO=transferCustody)
+        const action = opts?.action ?? intent.action;
+
+        const commitment = this.addCommitment({
+            action,
+            resourceConformsTo: intent.resourceConformsTo,
+            resourceQuantity: intent.resourceQuantity,
+            due: intent.due,
+            ...(intent.atLocation ? { atLocation: intent.atLocation } : {}),
+            provider,
+            receiver,
+            ...(opts?.outputOf ? { outputOf: opts.outputOf } : {}),
+            ...(opts?.plannedWithin ? { plannedWithin: opts.plannedWithin } : {}),
+            satisfies: intentId,
+            finished: false,
+        });
+
+        // Update the Intent note with approval status and mark finished
+        const note = intent.note ? JSON.parse(intent.note) : {};
+        note.status = 'approved';
+        note.approvedCommitmentId = commitment.id;
+        intent.note = JSON.stringify(note);
+        intent.finished = true;
+
+        return commitment;
+    }
+
+    /**
+     * Reject a replenishment Intent. Marks it finished with status='rejected'.
+     */
+    rejectReplenishment(intentId: string): void {
+        const intent = this.intents.get(intentId);
+        if (!intent) throw new Error(`Replenishment Intent ${intentId} not found`);
+        if (!intent.resourceClassifiedAs?.includes(PLAN_TAGS.REPLENISHMENT)) {
+            throw new Error(`Intent ${intentId} is not a replenishment signal`);
+        }
+        const note = intent.note ? JSON.parse(intent.note) : {};
+        note.status = 'rejected';
+        intent.note = JSON.stringify(note);
+        intent.finished = true;
     }
 
     // =========================================================================

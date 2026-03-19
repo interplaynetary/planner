@@ -19,13 +19,12 @@ import {
     classifySlot,
     detectConflicts,
     planForRegion,
-    buildPlanSignals,
     type RegionPlanContext,
 } from '../planning/plan-for-region';
 import { buildIndependentDemandIndex } from '../indexes/independent-demand';
 import { buildIndependentSupplyIndex } from '../indexes/independent-supply';
 import { buildAgentIndex } from '../indexes/agents';
-import { PlanStore } from '../planning/planning';
+import { PlanStore, PLAN_TAGS } from '../planning/planning';
 import { ProcessRegistry } from '../process-registry';
 import { RecipeStore } from '../knowledge/recipes';
 import { Observer } from '../observation/observer';
@@ -57,7 +56,7 @@ function makeRecipes() {
     // Register specs
     rs.addResourceSpec({ id: 'spec:bread', name: 'Bread', resourceClassifiedAs: [] });
     rs.addResourceSpec({ id: 'spec:wheat', name: 'Wheat', resourceClassifiedAs: [] });
-    rs.addResourceSpec({ id: 'spec:soil-nutrients', name: 'Soil Nutrients', resourceClassifiedAs: ['tag:plan:replenishment-required'] });
+    rs.addResourceSpec({ id: 'spec:soil-nutrients', name: 'Soil Nutrients', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
 
     // compost → soil-nutrients (replenishment recipe)
     const compostRP = rs.addRecipeProcess({ name: 'Compost', hasDuration: { hasNumericalValue: 2, hasUnit: 'h' } });
@@ -306,11 +305,11 @@ describe('planForRegion — Pass 1 only', () => {
         // Wheat is not in stock → purchase intents for wheat
         expect(result.purchaseIntents.length).toBeGreaterThan(0);
         // No surplus (no supply slots)
-        expect(result.surplus).toHaveLength(0);
+        expect(result.planStore.intentsForTag(PLAN_TAGS.SURPLUS)).toHaveLength(0);
         // No unmet demand (we have a recipe)
         expect(result.unmetDemand).toHaveLength(0);
         // No metabolic debt (no replenishment-required specs consumed)
-        expect(result.metabolicDebt).toHaveLength(0);
+        expect(result.planStore.intentsForTag(PLAN_TAGS.METABOLIC_DEBT)).toHaveLength(0);
     });
 });
 
@@ -337,7 +336,7 @@ describe('planForRegion — two-pass integration (Mode C)', () => {
 
         // Register specs — soil-nutrients is replenishment-required
         rs.addResourceSpec({ id: 'spec:wheat', name: 'Wheat', resourceClassifiedAs: [] });
-        rs.addResourceSpec({ id: 'spec:soil-nutrients', name: 'Soil Nutrients', resourceClassifiedAs: ['tag:plan:replenishment-required'] });
+        rs.addResourceSpec({ id: 'spec:soil-nutrients', name: 'Soil Nutrients', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
         rs.addResourceSpec({ id: 'spec:compost-material', name: 'Compost Material', resourceClassifiedAs: [] });
 
         const obs = makeObserver();
@@ -412,7 +411,7 @@ describe('planForRegion — metabolicDebt when replenishment recipe missing', ()
 
         rs.addResourceSpec({ id: 'spec:wheat-rare', name: 'Rare Wheat', resourceClassifiedAs: ['tag:plan:Consumption'] });
         // rare-nutrients is replenishment-required but has NO recipe
-        rs.addResourceSpec({ id: 'spec:rare-nutrients', name: 'Rare Nutrients', resourceClassifiedAs: ['tag:plan:replenishment-required'] });
+        rs.addResourceSpec({ id: 'spec:rare-nutrients', name: 'Rare Nutrients', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
 
         const obs = makeObserver();
         // Put some rare-nutrients in stock so Pass 1 can consume them
@@ -454,7 +453,7 @@ describe('planForRegion — metabolicDebt when replenishment recipe missing', ()
         );
 
         // Should have metabolicDebt for rare-nutrients since no recipe exists
-        expect(result.metabolicDebt.some(d => d.specId === 'spec:rare-nutrients')).toBe(true);
+        expect(result.planStore.intentsForTag(PLAN_TAGS.METABOLIC_DEBT).some(i => i.resourceConformsTo === 'spec:rare-nutrients')).toBe(true);
     });
 });
 
@@ -502,7 +501,7 @@ describe('planForRegion — Phase B surplus supply', () => {
         );
 
         // No recipes for wool, all supply becomes surplus
-        expect(result.surplus.some(s => s.specId === 'spec:wool')).toBe(true);
+        expect(result.planStore.intentsForTag(PLAN_TAGS.SURPLUS).some(i => i.resourceConformsTo === 'spec:wool')).toBe(true);
     });
 });
 
@@ -535,7 +534,7 @@ describe('planForRegion — backtracking', () => {
 
         rs.addResourceSpec({ id: 'spec:primary-output', name: 'Primary Output', resourceClassifiedAs: [] });
         rs.addResourceSpec({ id: 'spec:support-output', name: 'Support Output', resourceClassifiedAs: [] });
-        rs.addResourceSpec({ id: 'spec:critical-resource', name: 'Critical Resource', resourceClassifiedAs: ['tag:plan:replenishment-required'] });
+        rs.addResourceSpec({ id: 'spec:critical-resource', name: 'Critical Resource', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
         rs.addResourceSpec({ id: 'spec:raw-material', name: 'Raw Material', resourceClassifiedAs: [] });
 
         const obs = makeObserver();
@@ -762,10 +761,11 @@ describe('planForRegion — Group A: surplus.plannedWithin', () => {
             ctx,
         );
 
-        expect(result.surplus.length).toBeGreaterThan(0);
-        for (const s of result.surplus) {
+        const surplusIntents = result.planStore.intentsForTag(PLAN_TAGS.SURPLUS);
+        expect(surplusIntents.length).toBeGreaterThan(0);
+        for (const s of surplusIntents) {
             expect(s.plannedWithin).toBeDefined();
-            expect(result.planStore.getPlan(s.plannedWithin)).toBeDefined();
+            expect(result.planStore.getPlan(s.plannedWithin!)).toBeDefined();
         }
     });
 });
@@ -785,7 +785,7 @@ describe('planForRegion — Group B: MetabolicDebt.plannedWithin', () => {
         rs.addRecipeFlow({ action: 'produce', resourceConformsTo: 'spec:wheat-b', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeOutputOf: growRP.id });
 
         rs.addResourceSpec({ id: 'spec:wheat-b', name: 'Wheat B', resourceClassifiedAs: [] });
-        rs.addResourceSpec({ id: 'spec:rare-b', name: 'Rare B', resourceClassifiedAs: ['tag:plan:replenishment-required'] });
+        rs.addResourceSpec({ id: 'spec:rare-b', name: 'Rare B', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
         // No recipe for spec:rare-b → metabolicDebt
 
         const obs = makeObserver();
@@ -826,10 +826,11 @@ describe('planForRegion — Group B: MetabolicDebt.plannedWithin', () => {
             ctx,
         );
 
-        expect(result.metabolicDebt.some(d => d.specId === 'spec:rare-b')).toBe(true);
-        for (const d of result.metabolicDebt) {
-            expect(d.plannedWithin).toBeDefined();
-            expect(result.planStore.getPlan(d.plannedWithin)).toBeDefined();
+        const metDebtIntents = result.planStore.intentsForTag(PLAN_TAGS.METABOLIC_DEBT);
+        expect(metDebtIntents.some(i => i.resourceConformsTo === 'spec:rare-b')).toBe(true);
+        for (const i of metDebtIntents) {
+            expect(i.plannedWithin).toBeDefined();
+            expect(result.planStore.getPlan(i.plannedWithin!)).toBeDefined();
         }
     });
 });
@@ -863,7 +864,7 @@ describe('planForRegion — Group C: deficits from backtracking', () => {
 
         rs.addResourceSpec({ id: 'spec:primary-c-out', name: 'Primary C', resourceClassifiedAs: [] });
         rs.addResourceSpec({ id: 'spec:support-c-out', name: 'Support C', resourceClassifiedAs: [] });
-        rs.addResourceSpec({ id: 'spec:limited-c', name: 'Limited C', resourceClassifiedAs: ['tag:plan:replenishment-required'] });
+        rs.addResourceSpec({ id: 'spec:limited-c', name: 'Limited C', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
         rs.addResourceSpec({ id: 'spec:raw-c', name: 'Raw C', resourceClassifiedAs: [] });
 
         const obs = makeObserver();
@@ -913,14 +914,14 @@ describe('planForRegion — Group C: deficits from backtracking', () => {
 
         // Coherence checks
         expect(result).toBeDefined();
-        expect(result.deficits).toBeDefined();
+        const deficitIntents = result.planStore.intentsForTag(PLAN_TAGS.DEFICIT);
 
         // If backtracking fired, we should have deficit entries with source='unmet_demand'
-        // and valid plannedWithin references
-        for (const d of result.deficits) {
-            if (d.source === 'unmet_demand') {
+        // (not metabolic-debt tagged) and valid plannedWithin references
+        for (const d of deficitIntents) {
+            if (!d.resourceClassifiedAs?.includes(PLAN_TAGS.METABOLIC_DEBT)) {
                 expect(d.plannedWithin).toBeDefined();
-                expect(result.planStore.getPlan(d.plannedWithin)).toBeDefined();
+                expect(result.planStore.getPlan(d.plannedWithin!)).toBeDefined();
             }
         }
     });
@@ -941,7 +942,7 @@ describe('planForRegion — Group D: deficits from metabolicDebt', () => {
         rs.addRecipeFlow({ action: 'produce', resourceConformsTo: 'spec:wheat-d', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeOutputOf: growRP.id });
 
         rs.addResourceSpec({ id: 'spec:wheat-d', name: 'Wheat D', resourceClassifiedAs: [] });
-        rs.addResourceSpec({ id: 'spec:rare-d', name: 'Rare D', resourceClassifiedAs: ['tag:plan:replenishment-required'] });
+        rs.addResourceSpec({ id: 'spec:rare-d', name: 'Rare D', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
         // No recipe for spec:rare-d → metabolicDebt
 
         const obs = makeObserver();
@@ -982,13 +983,12 @@ describe('planForRegion — Group D: deficits from metabolicDebt', () => {
             ctx,
         );
 
-        const metDebt = result.deficits.filter(d =>
-            d.source === 'metabolic_debt' && d.specId === 'spec:rare-d',
-        );
+        const metDebt = result.planStore.intentsForTag(PLAN_TAGS.METABOLIC_DEBT)
+            .filter(i => i.resourceConformsTo === 'spec:rare-d');
         expect(metDebt.length).toBeGreaterThan(0);
         for (const d of metDebt) {
             expect(d.plannedWithin).toBeDefined();
-            expect(result.planStore.getPlan(d.plannedWithin)).toBeDefined();
+            expect(result.planStore.getPlan(d.plannedWithin!)).toBeDefined();
         }
     });
 });
@@ -1038,8 +1038,7 @@ describe('planForRegion — Group E: child deficit resolved at parent', () => {
         );
 
         // Child has a deficit for spec:X
-        expect(childResult.deficits.some(d => d.specId === 'spec:X')).toBe(true);
-        const childSignals = buildPlanSignals(childResult);
+        expect(childResult.planStore.intentsForTag(PLAN_TAGS.DEFICIT).some(i => i.resourceConformsTo === 'spec:X')).toBe(true);
 
         // Parent: wider observer has inventory of spec:X
         const parentObs = makeObserver();
@@ -1067,11 +1066,10 @@ describe('planForRegion — Group E: child deficit resolved at parent', () => {
             { from: new Date('2026-01-01'), to: new Date('2026-12-31') },
             parentCtx,
             [childResult.planStore],
-            [childSignals],
         );
 
         // Deficit for spec:X should NOT appear in parent result (resolved by inventory)
-        const stillDeficit = parentResult.deficits.some(d => d.specId === 'spec:X');
+        const stillDeficit = parentResult.planStore.intentsForTag(PLAN_TAGS.DEFICIT).some(i => i.resourceConformsTo === 'spec:X');
         expect(stillDeficit).toBe(false);
 
         // No purchaseIntent for spec:X at parent level
@@ -1127,8 +1125,7 @@ describe('planForRegion — Group F: child deficit propagates when parent cannot
         );
 
         // Child has a deficit for spec:Y
-        expect(childResult.deficits.some(d => d.specId === 'spec:Y')).toBe(true);
-        const childSignals = buildPlanSignals(childResult);
+        expect(childResult.planStore.intentsForTag(PLAN_TAGS.DEFICIT).some(i => i.resourceConformsTo === 'spec:Y')).toBe(true);
 
         // Parent: also no recipe/inventory for spec:Y
         const parentObs = makeObserver();
@@ -1149,15 +1146,14 @@ describe('planForRegion — Group F: child deficit propagates when parent cannot
             { from: new Date('2026-01-01'), to: new Date('2026-12-31') },
             parentCtx,
             [childResult.planStore],
-            [childSignals],
         );
 
         // Deficit for spec:Y must propagate to parent result
-        expect(parentResult.deficits.some(d => d.specId === 'spec:Y')).toBe(true);
-        // Parent's plannedWithin should reference a plan in the parent's planStore
-        const yDeficit = parentResult.deficits.find(d => d.specId === 'spec:Y');
+        const yDeficitIntents = parentResult.planStore.intentsForTag(PLAN_TAGS.DEFICIT).filter(i => i.resourceConformsTo === 'spec:Y');
+        expect(yDeficitIntents.length).toBeGreaterThan(0);
+        const yDeficit = yDeficitIntents[0];
         expect(yDeficit).toBeDefined();
-        expect(parentResult.planStore.getPlan(yDeficit!.plannedWithin)).toBeDefined();
+        expect(parentResult.planStore.getPlan(yDeficit!.plannedWithin!)).toBeDefined();
     });
 });
 
@@ -1235,14 +1231,16 @@ describe('planForRegion — Group G: merge planner retractions in deficits', () 
         );
 
         // Invariant: every unmetDemand entry must have a corresponding deficits entry
+        const deficitIntents = result.planStore.intentsForTag(PLAN_TAGS.DEFICIT);
         for (const slot of result.unmetDemand) {
-            const matching = result.deficits.find(
-                d => d.specId === (slot.spec_id ?? '') && d.source === 'unmet_demand',
+            const matching = deficitIntents.find(
+                i => i.resourceConformsTo === (slot.spec_id ?? '') &&
+                    !i.resourceClassifiedAs?.includes(PLAN_TAGS.METABOLIC_DEBT),
             );
             expect(matching).toBeDefined();
         }
 
         // deficits is a superset of unmetDemand (by specId + source)
-        expect(result.deficits.length).toBeGreaterThanOrEqual(result.unmetDemand.length);
+        expect(deficitIntents.length).toBeGreaterThanOrEqual(result.unmetDemand.length);
     });
 });

@@ -7,15 +7,21 @@
   import ScopeRecipesPanel from "$lib/components/federation/ScopeRecipesPanel.svelte";
   import EventRecorderPanel from "$lib/components/observation/EventRecorderPanel.svelte";
   import type { FlowSelectCtx } from "$lib/components/vf/observe-types";
-  import type { TradeProposal, FederationEvent } from "$lib/planning/plan-federation";
+  import type { FederationEvent } from "$lib/planning/plan-federation";
   import { Observer } from "$lib/observation/observer";
   import type { EconomicResource, Intent, ResourceSpecification } from "$lib/schemas";
+  import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
+  import {
+    PLAN_TAGS, parseDeficitNote, deficitShortfall, isDeficitResolved,
+    tradeFrom, tradeTo, tradeSpec, tradeQty,
+  } from "$lib/planning/planning";
   import ResourceDemandCard from "$lib/components/commune/ResourceDemandCard.svelte";
   import { buildIndependentDemandIndex } from "$lib/indexes/independent-demand";
   import { buildIndependentSupplyIndex, querySupplyByScope } from "$lib/indexes/independent-supply";
   import { buildAgentIndex } from "$lib/indexes/agents";
   import { planFederation } from "$lib/planning/plan-federation";
   import { RecipeStore } from "$lib/knowledge/recipes";
+  import { BufferZoneStore } from "$lib/knowledge/buffer-zones";
 
   // ---------------------------------------------------------------------------
   // specNames
@@ -743,6 +749,33 @@
     ["commune-fisher", [{ specId: "fish", tor: 20, toy: 50, tog: 120 }]],
   ]);
 
+  // Buffer health per scope — onhand vs. zone boundaries, used for graph node overlays.
+  // Computed from mockResources inventory + mockBufferZones thresholds.
+  const scopeBufferHealth = new Map(
+    [...mockBufferZones.entries()].map(([scopeId, zones]) => [
+      scopeId,
+      zones.map(z => {
+        const onhand = (mockResources.get(scopeId) ?? [])
+          .filter(r => r.conformsTo === z.specId && !r.containedIn)
+          .reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+        const zone = onhand <= z.tor ? 'red' : onhand <= z.toy ? 'yellow' : onhand <= z.tog ? 'green' : 'excess';
+        return { specId: z.specId, zone: zone as 'red' | 'yellow' | 'green' | 'excess', onhand, tor: z.tor, toy: z.toy, tog: z.tog };
+      }),
+    ])
+  );
+
+  const bufferZoneStore = new BufferZoneStore();
+  for (const [, zones] of mockBufferZones) {
+    for (const z of zones) {
+      bufferZoneStore.addBufferZone({
+        specId: z.specId, tor: z.tor, toy: z.toy, tog: z.tog,
+        profileId: 'default', bufferClassification: 'replenished_override',
+        adu: 0, aduUnit: 'unit', dltDays: 1, moq: 1, moqUnit: 'unit',
+        lastComputedAt: new Date(0).toISOString(),
+      });
+    }
+  }
+
   const parentMap: Record<string, string> = {
     "agri-federation": "universal-commune",
     "manufacturing-federation": "universal-commune",
@@ -945,6 +978,7 @@
       parentOf: parentOfMap,
       memberCounts,
       sacrificeDepth: 5,
+      bufferZoneStore,
     },
   ));
 
@@ -969,14 +1003,30 @@
   function isHub(id: string): boolean { return hubIds.has(id); }
   function getLeaves(hubId: string): string[] { return federationLeaves[hubId] ?? []; }
 
+  // Helper: get deficits/surplus from a scope's planStore
+  function scopeDeficits(r: ScopePlanResult): Intent[] {
+    return r.planStore.intentsForTag(PLAN_TAGS.DEFICIT);
+  }
+  function scopeSurplus(r: ScopePlanResult): Intent[] {
+    return r.planStore.intentsForTag(PLAN_TAGS.SURPLUS);
+  }
+  function deficitOrigShortfall(d: Intent): number {
+    return parseDeficitNote(d).originalShortfall;
+  }
+  function deficitResolvedAt(d: Intent): string[] {
+    return parseDeficitNote(d).resolvedAt;
+  }
+
   // % of leaf deficits fully resolved
   function computeCoherence(hubId: string): number {
     const leaves = getLeaves(hubId);
     let total = 0, resolved = 0;
     for (const id of leaves) {
-      for (const d of federationResult.byScope.get(id)?.deficits ?? []) {
+      const r = federationResult.byScope.get(id);
+      if (!r) continue;
+      for (const d of scopeDeficits(r)) {
         total++;
-        if (d.shortfall === 0) resolved++;
+        if (deficitShortfall(d) === 0) resolved++;
       }
     }
     return total === 0 ? 1 : resolved / total;
@@ -988,9 +1038,11 @@
     const leafSet = new Set(getLeaves(hubId));
     let total = 0, internal = 0;
     for (const id of leafSet) {
-      for (const d of federationResult.byScope.get(id)?.deficits ?? []) {
+      const r = federationResult.byScope.get(id);
+      if (!r) continue;
+      for (const d of scopeDeficits(r)) {
         total++;
-        const resolvers = d.resolvedAt ?? [];
+        const resolvers = deficitResolvedAt(d);
         if (resolvers.length > 0 && resolvers.every((s) => leafSet.has(s))) internal++;
       }
     }
@@ -1001,8 +1053,12 @@
   function computeSurplusPool(hubId: string): { specId: string; quantity: number }[] {
     const map = new Map<string, number>();
     for (const id of getLeaves(hubId)) {
-      for (const s of federationResult.byScope.get(id)?.surplus ?? [])
-        map.set(s.specId, (map.get(s.specId) ?? 0) + s.quantity);
+      const r = federationResult.byScope.get(id);
+      if (!r) continue;
+      for (const s of scopeSurplus(r)) {
+        const specId = s.resourceConformsTo ?? '';
+        map.set(specId, (map.get(specId) ?? 0) + (s.resourceQuantity?.hasNumericalValue ?? 0));
+      }
     }
     return [...map.entries()].map(([specId, quantity]) => ({ specId, quantity }));
   }
@@ -1012,11 +1068,15 @@
     const leafSet = new Set(getLeaves(hubId));
     const exMap = new Map<string, number>();
     const imMap = new Map<string, number>();
-    for (const t of federationResult.tradeProposals) {
-      const fromIn = leafSet.has(t.fromScopeId);
-      const toIn = leafSet.has(t.toScopeId);
-      if (fromIn && !toIn) exMap.set(t.specId, (exMap.get(t.specId) ?? 0) + t.quantity);
-      else if (!fromIn && toIn) imMap.set(t.specId, (imMap.get(t.specId) ?? 0) + t.quantity);
+    for (const t of federationResult.federationStore.intentsForTag(PLAN_TAGS.LATERAL_TRANSFER)) {
+      const fromId = t.provider ?? '';
+      const toId = t.inScopeOf?.[0] ?? '';
+      const specId = t.resourceConformsTo ?? '';
+      const qty = t.resourceQuantity?.hasNumericalValue ?? 0;
+      const fromIn = leafSet.has(fromId);
+      const toIn = leafSet.has(toId);
+      if (fromIn && !toIn) exMap.set(specId, (exMap.get(specId) ?? 0) + qty);
+      else if (!fromIn && toIn) imMap.set(specId, (imMap.get(specId) ?? 0) + qty);
     }
     return {
       exports: [...exMap.entries()].map(([specId, qty]) => ({ specId, qty })),
@@ -1028,11 +1088,13 @@
   function computeMemberHealth(hubId: string) {
     return getLeaves(hubId).map((id) => {
       const r = federationResult.byScope.get(id);
-      const unresolved = r?.deficits.filter((d) => d.shortfall > 0).length ?? 0;
-      const resolved   = r?.deficits.filter((d) => d.shortfall === 0).length ?? 0;
-      const surplus    = r?.surplus.length ?? 0;
+      const defs = r ? scopeDeficits(r) : [];
+      const sups = r ? scopeSurplus(r) : [];
+      const unresolved = defs.filter((d) => deficitShortfall(d) > 0).length;
+      const resolved   = defs.filter((d) => deficitShortfall(d) === 0).length;
+      const surplusCount = sups.length;
       const status: "red" | "yellow" | "green" | "dim" =
-        unresolved > 0 ? "red" : resolved > 0 ? "yellow" : surplus > 0 ? "green" : "dim";
+        unresolved > 0 ? "red" : resolved > 0 ? "yellow" : surplusCount > 0 ? "green" : "dim";
       return { id, status };
     });
   }
@@ -1062,7 +1124,8 @@
   function restoreTrade(id: string) { rejectedTradeIds = new Set([...rejectedTradeIds].filter(x => x !== id)); }
 
   const activeProposals = $derived(
-    federationResult.tradeProposals.filter((t) => !rejectedTradeIds.has(t.id)),
+    federationResult.federationStore.intentsForTag(PLAN_TAGS.LATERAL_TRANSFER)
+      .filter((t) => !rejectedTradeIds.has(t.id)),
   );
 
   // ---------------------------------------------------------------------------
@@ -1087,40 +1150,37 @@
   const hubFedHealth = $derived(selectedScope === "universal-commune" ? computeFederationHealth() : []);
 
   const outgoingTrades = $derived(
-    activeProposals.filter((t) => t.fromScopeId === selectedScope),
+    activeProposals.filter((t) => (t.provider ?? '') === selectedScope),
   );
   const incomingTrades = $derived(
-    activeProposals.filter((t) => t.toScopeId === selectedScope),
+    activeProposals.filter((t) => (t.inScopeOf?.[0] ?? '') === selectedScope),
   );
   const hasTrades = $derived(outgoingTrades.length > 0 || incomingTrades.length > 0);
-
-  function tradeStatusColor(status: TradeProposal["status"]): string {
-    if (status === "settled") return "#7ee8a2";
-    return "#76c3f5";
-  }
 
   const totalScopes = $derived(federationResult.planOrder.length);
   const totalUnresolved = $derived(
     Array.from(federationResult.byScope.values()).reduce(
-      (sum, r) => sum + r.deficits.filter((d) => d.shortfall > 0).length, 0,
+      (sum, r) => sum + scopeDeficits(r).filter((d) => deficitShortfall(d) > 0).length, 0,
     ),
   );
   const totalSurplusUnits = $derived(
     Array.from(federationResult.byScope.values()).reduce(
-      (sum, r) => sum + r.surplus.reduce((s, x) => s + x.quantity, 0), 0,
+      (sum, r) => sum + scopeSurplus(r).reduce((s, x) => s + (x.resourceQuantity?.hasNumericalValue ?? 0), 0), 0,
     ),
   );
-  const totalTrades = $derived(federationResult.tradeProposals.length);
+  const totalTrades = $derived(
+    federationResult.federationStore.intentsForTag(PLAN_TAGS.LATERAL_TRANSFER).length,
+  );
   const fullyResolvedDeficits = $derived(
     Array.from(federationResult.byScope.values()).reduce((sum, r) => {
-      return sum + r.deficits.filter(
-        (d) => d.shortfall === 0 && (d.originalShortfall ?? d.shortfall) > 0,
+      return sum + scopeDeficits(r).filter(
+        (d) => deficitShortfall(d) === 0 && deficitOrigShortfall(d) > 0,
       ).length;
     }, 0),
   );
   const allDeficits = $derived(
     Array.from(federationResult.byScope.values()).reduce(
-      (sum, r) => sum + r.deficits.length, 0,
+      (sum, r) => sum + scopeDeficits(r).length, 0,
     ),
   );
   const resolvedPct = $derived(
@@ -1130,8 +1190,8 @@
   // Scope proposals for selected scope (for proposals-band)
   const scopeProposals = $derived(
     selectedScope && !selectedIsHub
-      ? federationResult.tradeProposals.filter(
-          (t) => t.fromScopeId === selectedScope || t.toScopeId === selectedScope,
+      ? federationResult.federationStore.intentsForTag(PLAN_TAGS.LATERAL_TRANSFER).filter(
+          (t) => (t.provider ?? '') === selectedScope || (t.inScopeOf?.[0] ?? '') === selectedScope,
         )
       : [],
   );
@@ -1298,16 +1358,20 @@
       <div class="proposals-scroll">
         {#each scopeProposals as t (t.id)}
           {@const rejected = rejectedTradeIds.has(t.id)}
+          {@const tFrom = t.provider ?? ''}
+          {@const tTo = t.inScopeOf?.[0] ?? ''}
+          {@const tSpec = t.resourceConformsTo ?? ''}
+          {@const tQty = t.resourceQuantity?.hasNumericalValue ?? 0}
           <button
             class="proposal-chip"
             class:rejected
             onclick={() => (rejected ? restoreTrade(t.id) : rejectTrade(t.id))}
             title={rejected ? "Restore proposal" : "Reject proposal"}
           >
-            <span class="proposal-spec">{specNames[t.specId] ?? t.specId}</span>
-            <span class="proposal-qty">×{t.quantity}</span>
-            <span class="proposal-arrow">{t.fromScopeId === selectedScope ? "→" : "←"}</span>
-            <span class="proposal-peer">{t.fromScopeId === selectedScope ? t.toScopeId : t.fromScopeId}</span>
+            <span class="proposal-spec">{specNames[tSpec] ?? tSpec}</span>
+            <span class="proposal-qty">×{tQty}</span>
+            <span class="proposal-arrow">{tFrom === selectedScope ? "→" : "←"}</span>
+            <span class="proposal-peer">{tFrom === selectedScope ? tTo : tFrom}</span>
             <span class="proposal-x">{rejected ? "↺" : "✕"}</span>
           </button>
         {/each}
@@ -1325,6 +1389,7 @@
         parentOf={mockParentOf}
         tradeProposals={activeProposals}
         resourcesByScope={mockResources}
+        buffersByScope={scopeBufferHealth}
         selected={selectedScope}
         onselect={(id) => {
           selectedScope = selectedScope === id ? "" : id;
@@ -1482,21 +1547,24 @@
           {#if scopeSupply.size === 0}
             <span class="supply-empty">—</span>
           {/if}
-          {#if selectedResult.deficits.length > 0}
+          {#if selectedResult && scopeDeficits(selectedResult).length > 0}
             <span class="supply-col-lbl" style="margin-top:6px">DEFICITS</span>
-            {#each selectedResult.deficits as d (d.intentId)}
-              {@const orig = d.originalShortfall ?? d.shortfall}
-              {@const pctRes = orig > 0 ? Math.round(((orig - d.shortfall) / orig) * 100) : 100}
-              {@const spec = demandSpecMap.get(d.specId)}
+            {#each scopeDeficits(selectedResult) as d (d.id)}
+              {@const shortfall = deficitShortfall(d)}
+              {@const orig = deficitOrigShortfall(d)}
+              {@const resolvedAt = deficitResolvedAt(d)}
+              {@const pctRes = orig > 0 ? Math.round(((orig - shortfall) / orig) * 100) : 100}
+              {@const specId = d.resourceConformsTo ?? ''}
+              {@const spec = demandSpecMap.get(specId)}
               <div class="supply-row">
                 <span class="supply-emoji">{spec?.image ?? '⚠️'}</span>
-                <span class="supply-name">{spec?.name ?? d.specId}</span>
-                <span class="supply-qty" style="color:{pctRes === 100 ? '#68d391' : '#fc5858'}">{d.shortfall === 0 ? '✓' : d.shortfall}</span>
-                {#if d.shortfall > 0}
+                <span class="supply-name">{spec?.name ?? specId}</span>
+                <span class="supply-qty" style="color:{pctRes === 100 ? '#68d391' : '#fc5858'}">{shortfall === 0 ? '✓' : shortfall}</span>
+                {#if shortfall > 0}
                   <span class="supply-unit">{spec?.defaultUnitOfResource ?? ''}</span>
                 {/if}
-                {#if d.resolvedAt?.length && d.shortfall === 0}
-                  <span class="supply-unit" style="color:rgba(118,195,245,0.6)">{d.resolvedAt[0]}</span>
+                {#if resolvedAt.length > 0 && shortfall === 0}
+                  <span class="supply-unit" style="color:rgba(118,195,245,0.6)">{resolvedAt[0]}</span>
                 {/if}
               </div>
             {/each}
