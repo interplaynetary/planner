@@ -7,7 +7,7 @@
   import ScopeRecipesPanel from "$lib/components/federation/ScopeRecipesPanel.svelte";
   import EventRecorderPanel from "$lib/components/observation/EventRecorderPanel.svelte";
   import type { FlowSelectCtx } from "$lib/components/vf/observe-types";
-  import type { FederationEvent } from "$lib/planning/plan-federation";
+  import type { FederationEvent, FederationPlanCache } from "$lib/planning/plan-federation";
   import { Observer } from "$lib/observation/observer";
   import type { EconomicResource, Intent, ResourceSpecification } from "$lib/schemas";
   import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
@@ -1001,11 +1001,8 @@
   // Phase B sees produce intents as forward-scheduled outputs → SurplusSignal generation.
   const supplyIndex = buildIndependentSupplyIndex(allInventory, produceIntents, [], emptyAgentIndex, new Map());
 
-  // Reactive demand index — re-derives whenever demandIntents changes
-  const demandIndex = $derived(buildIndependentDemandIndex(demandIntents, [], [], new Map()));
-
   // ---------------------------------------------------------------------------
-  // planFederation — reactive, re-runs when demandIndex changes
+  // planFederation — imperative replan with dirty-scope tracking
   // ---------------------------------------------------------------------------
 
   // Derive member counts from personToScope
@@ -1016,13 +1013,16 @@
     return counts;
   })();
 
-  const federationResult = $derived.by(() => planFederation(
+  const federationHorizon = { from: new Date("2026-03-15"), to: new Date("2026-06-30") };
+  let federationCache: FederationPlanCache | undefined;
+
+  let federationResult = $state(planFederation(
     allScopeIds,
-    { from: new Date("2026-03-15"), to: new Date("2026-06-30") },
+    federationHorizon,
     {
       recipeStore,
       observer: combinedObserver,
-      demandIndex,
+      demandIndex: buildIndependentDemandIndex(demandIntents, [], [], new Map()),
       supplyIndex,
       parentOf: parentOfMap,
       memberCounts,
@@ -1030,6 +1030,27 @@
       bufferZoneStore,
     },
   ));
+  federationCache = federationResult.cache;
+
+  function replan(dirty?: Set<string>) {
+    federationResult = planFederation(
+      allScopeIds,
+      federationHorizon,
+      {
+        recipeStore,
+        observer: combinedObserver,
+        demandIndex: buildIndependentDemandIndex(demandIntents, [], [], new Map()),
+        supplyIndex,
+        parentOf: parentOfMap,
+        memberCounts,
+        sacrificeDepth: 5,
+        bufferZoneStore,
+        cache: dirty ? federationCache : undefined,
+        dirtyScopes: dirty,
+      },
+    );
+    federationCache = federationResult.cache;
+  }
 
   // ---------------------------------------------------------------------------
   // Hub analytics — coherence, self-sufficiency, net flows
@@ -1331,14 +1352,20 @@
       inScopeOf: [selectedScope],
       due: '2026-04-01',
     }];
+    replan(new Set([selectedScope]));
   }
 
   function updateDemand(intent: Intent) {
+    const oldScope = demandIntents.find(i => i.id === intent.id)?.inScopeOf?.[0];
+    const newScope = intent.inScopeOf?.[0];
     demandIntents = demandIntents.map(i => i.id === intent.id ? intent : i);
+    replan(new Set([oldScope, newScope].filter(Boolean) as string[]));
   }
 
   function deleteDemand(id: string) {
+    const scope = demandIntents.find(i => i.id === id)?.inScopeOf?.[0];
     demandIntents = demandIntents.filter(i => i.id !== id);
+    replan(new Set([scope].filter(Boolean) as string[]));
   }
 
   let newSpecId = $state('');

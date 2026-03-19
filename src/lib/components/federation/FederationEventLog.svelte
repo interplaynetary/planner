@@ -26,6 +26,7 @@
   function eventIcon(kind: FederationEventKind): string {
     switch (kind) {
       case 'scope-planned':         return '◆';
+      case 'scope-cached':          return '○';
       case 'deficit-announced':     return '▽';
       case 'surplus-offered':       return '△';
       case 'lateral-match':         return '⇄';
@@ -39,6 +40,7 @@
   function eventColor(kind: FederationEventKind): string {
     switch (kind) {
       case 'scope-planned':         return 'rgba(255,255,255,0.45)';
+      case 'scope-cached':          return 'rgba(255,255,255,0.2)';
       case 'deficit-announced':     return '#e53e3e';
       case 'surplus-offered':       return '#68d391';
       case 'lateral-match':         return '#63b3ed';

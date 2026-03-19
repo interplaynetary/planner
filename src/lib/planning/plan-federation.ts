@@ -142,6 +142,14 @@ export interface FederationPlanContext {
      * When absent, DefaultLateralMatchingPolicy is used (replicates current behavior).
      */
     lateralMatchingPolicy?: LateralMatchingPolicy;
+    /** Cache from a previous planFederation call. */
+    cache?: FederationPlanCache;
+    /** Scope IDs whose inputs changed. Ancestors auto-included. Absent = full replan. */
+    dirtyScopes?: Set<string>;
+}
+
+export interface FederationPlanCache {
+    byScope: ReadonlyMap<string, ScopePlanResult>;
 }
 
 export interface FederationPlanResult {
@@ -183,6 +191,8 @@ export interface FederationPlanResult {
      * Signals with tippingPointBreached: true require immediate escalation.
      */
     allConservationSignals: ConservationSignal[];
+    /** Cache for incremental replanning — pass back as ctx.cache on next call. */
+    cache: FederationPlanCache;
 }
 
 // =============================================================================
@@ -191,6 +201,7 @@ export interface FederationPlanResult {
 
 export type FederationEventKind =
     | 'scope-planned'
+    | 'scope-cached'
     | 'deficit-announced'
     | 'surplus-offered'
     | 'lateral-match'
@@ -239,6 +250,36 @@ function topoSort(
 
     for (const id of scopeIds) visit(id);
     return order;
+}
+
+// =============================================================================
+// DIRTY EXPANSION
+// =============================================================================
+
+function computeEffectiveDirty(
+    scopeIds: string[],
+    parentOf: Map<string, string>,
+    cache?: FederationPlanCache,
+    dirtyScopes?: Set<string>,
+): Set<string> {
+    if (!cache || !dirtyScopes) return new Set(scopeIds);
+    const dirty = new Set<string>();
+    // Scopes not in cache are always dirty
+    for (const id of scopeIds) {
+        if (!cache.byScope.has(id)) dirty.add(id);
+    }
+    // Add explicitly dirty scopes
+    for (const id of dirtyScopes) dirty.add(id);
+    // Expand upward: ancestors of dirty scopes must replan
+    for (const id of [...dirty]) {
+        let cur = parentOf.get(id);
+        while (cur) {
+            if (dirty.has(cur)) break;
+            dirty.add(cur);
+            cur = parentOf.get(cur);
+        }
+    }
+    return dirty;
 }
 
 // =============================================================================
@@ -299,8 +340,20 @@ export function planFederation(
         sacrificeDepth:  ctx.sacrificeDepth,
     };
 
+    const effectiveDirty = computeEffectiveDirty(
+        scopeIds, ctx.parentOf, ctx.cache, ctx.dirtyScopes,
+    );
+
     for (const scopeId of planOrder) {
         const children = childrenOf.get(scopeId) ?? [];
+
+        if (!effectiveDirty.has(scopeId) && ctx.cache?.byScope.has(scopeId)) {
+            const cached = ctx.cache.byScope.get(scopeId)!;
+            byScope.set(scopeId, cached);
+            registry.register(scopeId, cached.planStore);
+            registry.notify(scopeId);
+            continue;
+        }
 
         const subStores: PlanStore[] = children.map(c =>
             byScope.get(c)!.planStore,
@@ -314,8 +367,8 @@ export function planFederation(
         );
 
         byScope.set(scopeId, result);
-        registry.register(scopeId, result.planStore);  // builds O(1) index for this scope
-        registry.notify(scopeId);                       // fires any listeners already subscribed
+        registry.register(scopeId, result.planStore);
+        registry.notify(scopeId);
     }
 
     // -------------------------------------------------------------------------
@@ -341,7 +394,8 @@ export function planFederation(
     // Step 4 — Event log: round 0 (bottom-up pass complete)
     // -------------------------------------------------------------------------
     const events: FederationEvent[] = planOrder.map(scopeId => ({
-        kind: 'scope-planned' as FederationEventKind,
+        kind: (effectiveDirty.has(scopeId) || !ctx.cache?.byScope.has(scopeId)
+            ? 'scope-planned' : 'scope-cached') as FederationEventKind,
         round: 0,
         scopeId,
     }));
@@ -598,5 +652,6 @@ export function planFederation(
         lateralAgreements,
         events,
         allConservationSignals,
+        cache: { byScope: new Map(byScope) },
     };
 }
