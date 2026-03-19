@@ -7,7 +7,7 @@
 
 ---
 
-## 1. Planner Objectives and Constraints `◐`
+## 1. Planner Objectives and Constraints `✓`
 
 **Buffer-First Objectives (design target):**
 
@@ -24,15 +24,15 @@
 
 > _Buffers are the fundamental planning primitive. Every resource that matters—soil nutrients, aquifer levels, strategic inventory, tool libraries, community skills—is managed as a buffer with three zones: Red (minimum viable), Yellow (replenishment trigger), Green (target range). Independent demands are satisfied only to the extent that doing so does not deplete buffers below their replenishment triggers. The planner's primary job is buffer maintenance; demand satisfaction is secondary, derived from buffer health._
 
-**Implementation note:** The code currently works **demand-first**: Pass 1 satisfies independent demands sorted by class order then due date, Pass 2 handles buffer replenishment for resources tagged `tag:plan:replenishment-required`, and backtracking resolves MetabolicDebt via ProportionalSacrifice. The buffer-first inversion—where buffers are checked *before* demands are allocated—is not yet implemented. The primitives exist (BufferZone, NFP computation, ReplenishmentSignal, ConservationSignal, MetabolicDebt), but the ordering inversion does not.
+**Implementation note:** The buffer-first inversion is implemented and opt-in: when both `bufferZoneStore` and `bufferProfiles` are provided in context, Pass 0 pre-evaluates buffer health and reserves capacity for red/yellow buffers on the main netter before Pass 1. Buffer guards in Pass 1 defer demands that would push a stressed buffer below TOY; deferred demands are retried after Pass 2 replenishment. Derived demands use composite tier×zone priority (ecological-yellow outranks metabolic-red). Without both flags, the planner falls back to the demand-first path.
 
 ---
 
-## 2. Local/Global Inversion `◐`
+## 2. Local/Global Inversion `✓`
 
 > Planners try to satisfy all demands within their scope, then maintain buffers via derived replenishment. When a buffer enters Yellow, the scope generates a ReplenishmentSignal—a derived demand with priority over new independent demands within Pass 2. When a buffer enters Red, MetabolicDebt triggers backtracking into Pass 1 allocations via ProportionalSacrifice. Planner composition converts deficit and surplus signals into constraints at the next level, routing them upward until resolved or declared genuinely infeasible. Infeasibility results in a controlled local contraction: independent demands are pruned back via proportional sacrifice, distributing the load by sacrifice-per-member score across scopes.
 
-**Implementation note:** The signal routing (DeficitSignal upward, SurplusSignal for lateral matching, ConservationSignal for ecological buffers) is fully implemented. However, the aspirational framing—"Planners try to maintain all buffers within their target zones" as the *primary* activity—is not what the code does. The code satisfies demands first, then maintains buffers second. The aspiration is that buffer health eventually becomes the primary objective with demand satisfaction derived from it.
+**Implementation note:** The signal routing (DeficitSignal upward, SurplusSignal for lateral matching, ConservationSignal for ecological buffers) is fully implemented. With buffer-first active (`bufferZoneStore` + `bufferProfiles`), buffer health is now the primary constraint: Pass 0 reserves capacity before demand allocation, and buffer guards prevent demands from depleting stressed buffers below TOY. Demand satisfaction is secondary, derived from remaining capacity after buffer reservations.
 
 ---
 

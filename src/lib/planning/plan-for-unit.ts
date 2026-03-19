@@ -11,10 +11,16 @@
  *   Phase 1: Extract demand/supply slots (mode.spatial.extractSlots)
  *   Phase 2: Classify each demand slot (mode.spatial.classifySlot)
  *   Phase 3: Formulate
- *     Pass 1: Explode primary independent demands (class order → due date)
+ *     Pass 0: Buffer pre-evaluation (opt-in: bufferZoneStore + bufferProfiles).
+ *             Reserves capacity for red/yellow buffers on the main netter before Pass 1.
+ *     Pass 1: Explode primary independent demands (class order → due date).
+ *             Buffer guards defer demands that would push a stressed buffer below TOY.
  *     Derived: Compute replenishment demands from Pass 1 allocations
- *     Pass 2: Explode derived replenishment demands; collect metabolicDebt
- *     Backtrack: Retract demands to free capacity (mode.sacrifice.selectRetractCandidate)
+ *     Pass 2: Explode derived replenishment demands (composite tier×zone priority);
+ *             collect metabolicDebt
+ *     Pass 1b: Retry deferred demands after replenishment
+ *     Backtrack: Retract demands to free capacity (mode.sacrifice.selectRetractCandidate);
+ *               includes Pass 0 debts merged with Pass 2 debts
  *   Phase B: Forward-schedule unabsorbed supply (mode.spatial.observerForSupply)
  *   Phase 4: Collect result
  */
@@ -29,6 +35,7 @@ import { PlanNetter } from './netting';
 import { dependentDemand, type DependentDemandResult } from '../algorithms/dependent-demand';
 import { dependentSupply } from '../algorithms/dependent-supply';
 import { bufferStatus, computeNFP, generateReplenishmentSignal, type NFPResult } from '../algorithms/ddmrp';
+import { bufferTypeFromTags, compositeBufferPriority } from '../utils/buffer-type';
 import type { BufferZoneStore } from '../knowledge/buffer-zones';
 import type { DemandSlot } from '../indexes/independent-demand';
 import type { IndependentDemandIndex } from '../indexes/independent-demand';
@@ -294,6 +301,80 @@ export function classifyPhase(
     }));
 }
 
+type AlertMap = Map<string, {
+    onhand: number; tor: number; toy: number; tog: number;
+    zone: 'red' | 'yellow' | 'green' | 'excess';
+    tippingPointBreached?: boolean;
+}>;
+
+function computeEffectiveAlerts(
+    bufferZoneStore: BufferZoneStore,
+    bufferProfiles: Map<string, BufferProfile> | undefined,
+    recipeStore: RecipeStore,
+    planStore: PlanStore,
+    observer: Observer,
+    generateId: () => string,
+    agents?: { provider?: string; receiver?: string },
+): AlertMap {
+    const alerts: AlertMap = new Map();
+    const today = new Date();
+    for (const bz of bufferZoneStore.allBufferZones()) {
+        const profile = bufferProfiles?.get(bz.profileId);
+        let onhand: number;
+        let zoneStatus: 'red' | 'yellow' | 'green' | 'excess';
+        let nfpResult: NFPResult | undefined;
+        if (profile) {
+            nfpResult = computeNFP(bz.specId, bz, profile, planStore, observer, today);
+            zoneStatus = nfpResult.zone;
+            onhand = nfpResult.onhand;
+        } else {
+            onhand = observer.conformingResources(bz.specId)
+                .reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+            const status = bufferStatus(onhand, bz);
+            zoneStatus = status.zone;
+        }
+        const tippingPointBreached = bz.tippingPoint !== undefined ? onhand < bz.tippingPoint : undefined;
+        alerts.set(bz.specId, {
+            onhand, tor: bz.tor, toy: bz.toy, tog: bz.tog,
+            zone: zoneStatus,
+            tippingPointBreached,
+        });
+        if (zoneStatus === 'red' || zoneStatus === 'yellow') {
+            const spec = recipeStore.getResourceSpec(bz.specId);
+            if (!spec?.resourceClassifiedAs?.includes('tag:buffer:ecological')) {
+                const noOpenSignal = !planStore.intentsForTag(PLAN_TAGS.REPLENISHMENT)
+                    .some(i => i.resourceConformsTo === bz.specId && !i.finished);
+                if (noOpenSignal) {
+                    const nfpForSignal: NFPResult = nfpResult ?? {
+                        onhand, onorder: 0, qualifiedDemand: 0, nfp: onhand,
+                        zone: zoneStatus, priority: bz.tog > 0 ? onhand / bz.tog : 0,
+                    };
+                    const sig = generateReplenishmentSignal(bz.specId, bz.atLocation, bz, nfpForSignal, today, generateId);
+                    const replenMeta = {
+                        onhand: sig.onhand, onorder: sig.onorder,
+                        qualifiedDemand: sig.qualifiedDemand, nfp: sig.nfp,
+                        priority: sig.priority, zone: sig.zone,
+                        recommendedQty: sig.recommendedQty, dueDate: sig.dueDate,
+                        bufferZoneId: sig.bufferZoneId, createdAt: sig.createdAt,
+                        status: 'open' as const,
+                    };
+                    planStore.addIntent({
+                        id: sig.id, action: 'produce', receiver: agents?.receiver,
+                        resourceConformsTo: sig.specId,
+                        resourceQuantity: { hasNumericalValue: sig.recommendedQty, hasUnit: bz.aduUnit },
+                        due: `${sig.dueDate}T00:00:00.000Z`,
+                        ...(sig.atLocation ? { atLocation: sig.atLocation } : {}),
+                        resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT],
+                        finished: false,
+                    });
+                    planStore.setMeta(sig.id, { kind: 'replenishment', ...replenMeta });
+                }
+            }
+        }
+    }
+    return alerts;
+}
+
 /** Phase 3: Formulate — Pass 1, derived demands, Pass 2, backtracking. */
 export function formulatePhase(
     session: PlanningSession,
@@ -329,9 +410,73 @@ export function formulatePhase(
         return dueA - dueB;
     });
 
+    // --- Pass 0: Buffer pre-evaluation (opt-in) ---
+    const bufferFirstActive = !!(ctx.bufferZoneStore && ctx.bufferProfiles);
+    let precomputedAlerts: AlertMap | undefined;
+    const pass0Debts: MetabolicDebt[] = [];
+    const pass0HandledSpecs = new Set<string>();
+    const deferredDemands: Array<{ slot: DemandSlot; slotClass: DemandSlotClass }> = [];
+
+    if (bufferFirstActive) {
+        precomputedAlerts = computeEffectiveAlerts(
+            ctx.bufferZoneStore!, ctx.bufferProfiles, ctx.recipeStore, planStore, ctx.observer, generateId, ctx.agents,
+        );
+
+        // Build Pass 0 replenishment demands for red/yellow non-ecological buffers
+        const pass0Demands: Array<{ specId: string; qty: number; priority: number }> = [];
+        for (const [specId, alert] of precomputedAlerts) {
+            if (alert.zone !== 'red' && alert.zone !== 'yellow') continue;
+            const spec = ctx.recipeStore.getResourceSpec(specId);
+            if (spec?.resourceClassifiedAs?.includes('tag:buffer:ecological')) continue;
+            const qty = Math.max(0, alert.tog - alert.onhand);
+            if (qty <= 1e-9) continue;
+            const bType = bufferTypeFromTags(spec?.resourceClassifiedAs ?? []);
+            const priority = compositeBufferPriority(bType, alert.zone);
+            pass0Demands.push({ specId, qty, priority });
+        }
+        pass0Demands.sort((a, b) => a.priority - b.priority);
+
+        // Explode Pass 0 demands on main netter (reserves capacity before Pass 1)
+        for (const { specId, qty } of pass0Demands) {
+            const pass0PlanId = `pass0-replenish-${generateId()}`;
+            planStore.addPlan({ id: pass0PlanId, name: `Buffer-first replenishment for ${specId}` });
+            const result = dependentDemand({
+                ...econ, observer: undefined,
+                planId: pass0PlanId, demandSpecId: specId, demandQuantity: qty,
+                dueDate: horizon.to, netter, agents: ctx.agents, generateId,
+            });
+            allPurchaseIntents.push(...result.purchaseIntents);
+            const purchasedQty = result.purchaseIntents
+                .filter(i => i.resourceConformsTo === specId)
+                .reduce((s, i) => s + (i.resourceQuantity?.hasNumericalValue ?? 0), 0);
+            if (purchasedQty > 1e-9) {
+                pass0Debts.push({ specId, shortfall: purchasedQty, plannedWithin: pass0PlanId });
+            }
+            pass0HandledSpecs.add(specId);
+        }
+    }
+
+    // Buffer guard helper — defers demands that would push a stressed buffer below TOY
+    function shouldDeferForBufferGuard(
+        specId: string,
+        quantity: number,
+        alerts: AlertMap | undefined,
+    ): boolean {
+        if (!alerts) return false;
+        const alert = alerts.get(specId);
+        if (!alert || (alert.zone !== 'red' && alert.zone !== 'yellow')) return false;
+        const available = netter.netAvailableQty(specId);
+        return (available - quantity) < alert.toy;
+    }
+
     // --- Pass 1: primary independent demands ---
     for (const { slot, slotClass } of sortedSlots) {
         if (!slot.spec_id) continue;
+
+        if (bufferFirstActive && shouldDeferForBufferGuard(slot.spec_id, slot.remaining_quantity, precomputedAlerts)) {
+            deferredDemands.push({ slot, slotClass });
+            continue;
+        }
 
         const planId = `plan-${generateId()}`;
         planStore.addPlan({ id: planId, name: `Demand plan for ${slot.spec_id}` });
@@ -414,71 +559,11 @@ export function formulatePhase(
     }
 
     // --- Derive effectiveAlerts ---
-    const effectiveAlerts = ctx.bufferZoneStore
-        ? (() => {
-            const alerts = new Map<string, {
-                onhand: number; tor: number; toy: number; tog: number;
-                zone: 'red' | 'yellow' | 'green' | 'excess';
-                tippingPointBreached?: boolean;
-            }>();
-            const today = new Date();
-            for (const bz of ctx.bufferZoneStore!.allBufferZones()) {
-                const profile = ctx.bufferProfiles?.get(bz.profileId);
-                let onhand: number;
-                let zoneStatus: 'red' | 'yellow' | 'green' | 'excess';
-                let nfpResult: NFPResult | undefined;
-                if (profile) {
-                    nfpResult = computeNFP(bz.specId, bz, profile, planStore, ctx.observer, today);
-                    zoneStatus = nfpResult.zone;
-                    onhand = nfpResult.onhand;
-                } else {
-                    onhand = ctx.observer.conformingResources(bz.specId)
-                        .reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
-                    const status = bufferStatus(onhand, bz);
-                    zoneStatus = status.zone;
-                }
-                const tippingPointBreached = bz.tippingPoint !== undefined ? onhand < bz.tippingPoint : undefined;
-                alerts.set(bz.specId, {
-                    onhand, tor: bz.tor, toy: bz.toy, tog: bz.tog,
-                    zone: zoneStatus,
-                    tippingPointBreached,
-                });
-                if ((zoneStatus === 'red' || zoneStatus === 'yellow') && ctx.bufferZoneStore) {
-                    const spec = ctx.recipeStore.getResourceSpec(bz.specId);
-                    if (!spec?.resourceClassifiedAs?.includes('tag:buffer:ecological')) {
-                        const noOpenSignal = !planStore.intentsForTag(PLAN_TAGS.REPLENISHMENT)
-                            .some(i => i.resourceConformsTo === bz.specId && !i.finished);
-                        if (noOpenSignal) {
-                            const nfpForSignal: NFPResult = nfpResult ?? {
-                                onhand, onorder: 0, qualifiedDemand: 0, nfp: onhand,
-                                zone: zoneStatus, priority: bz.tog > 0 ? onhand / bz.tog : 0,
-                            };
-                            const sig = generateReplenishmentSignal(bz.specId, bz.atLocation, bz, nfpForSignal, today, generateId);
-                            const replenMeta = {
-                                onhand: sig.onhand, onorder: sig.onorder,
-                                qualifiedDemand: sig.qualifiedDemand, nfp: sig.nfp,
-                                priority: sig.priority, zone: sig.zone,
-                                recommendedQty: sig.recommendedQty, dueDate: sig.dueDate,
-                                bufferZoneId: sig.bufferZoneId, createdAt: sig.createdAt,
-                                status: 'open' as const,
-                            };
-                            planStore.addIntent({
-                                id: sig.id, action: 'produce', receiver: ctx.agents?.receiver,
-                                resourceConformsTo: sig.specId,
-                                resourceQuantity: { hasNumericalValue: sig.recommendedQty, hasUnit: bz.aduUnit },
-                                due: `${sig.dueDate}T00:00:00.000Z`,
-                                ...(sig.atLocation ? { atLocation: sig.atLocation } : {}),
-                                resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT],
-                                finished: false,
-                            });
-                            planStore.setMeta(sig.id, { kind: 'replenishment', ...replenMeta });
-                        }
-                    }
-                }
-            }
-            return alerts;
-        })()
-        : ctx.bufferAlerts;
+    const effectiveAlerts = bufferFirstActive
+        ? precomputedAlerts
+        : (ctx.bufferZoneStore
+            ? computeEffectiveAlerts(ctx.bufferZoneStore, ctx.bufferProfiles, ctx.recipeStore, planStore, ctx.observer, generateId, ctx.agents)
+            : ctx.bufferAlerts);
 
     // --- Compute derived replenishment demands ---
     const consumedBySpec = new Map<string, number>();
@@ -494,6 +579,7 @@ export function formulatePhase(
     const derivedDemands: Array<{ specId: string; qty: number; zone?: 'red' | 'yellow' | 'green' | 'excess' }> = [];
     const allBufferSpecs = new Set([...consumedBySpec.keys(), ...boundaryBySpec.keys()]);
     for (const specId of allBufferSpecs) {
+        if (pass0HandledSpecs.has(specId)) continue;
         const qty = (consumedBySpec.get(specId) ?? 0) + (boundaryBySpec.get(specId) ?? 0);
         const spec = ctx.recipeStore.getResourceSpec(specId);
         if (!spec?.resourceClassifiedAs?.includes(PLAN_TAGS.REPLENISHMENT_REQUIRED)) continue;
@@ -513,6 +599,7 @@ export function formulatePhase(
 
     if (effectiveAlerts) {
         for (const [specId, alert] of effectiveAlerts) {
+            if (pass0HandledSpecs.has(specId)) continue;
             if (alert.zone === 'red' || alert.zone === 'yellow') {
                 const spec = ctx.recipeStore.getResourceSpec(specId);
                 if (spec?.resourceClassifiedAs?.includes('tag:buffer:ecological')) {
@@ -533,12 +620,14 @@ export function formulatePhase(
         }
     }
 
-    {
-        const ZONE_PRIORITY: Record<string, number> = { red: 0, yellow: 1, green: 2, excess: 3 };
-        derivedDemands.sort((a, b) =>
-            (ZONE_PRIORITY[a.zone ?? 'green'] ?? 2) - (ZONE_PRIORITY[b.zone ?? 'green'] ?? 2),
-        );
-    }
+    derivedDemands.sort((a, b) => {
+        const specA = ctx.recipeStore.getResourceSpec(a.specId);
+        const specB = ctx.recipeStore.getResourceSpec(b.specId);
+        const tierA = bufferTypeFromTags(specA?.resourceClassifiedAs ?? []);
+        const tierB = bufferTypeFromTags(specB?.resourceClassifiedAs ?? []);
+        return compositeBufferPriority(tierA, a.zone ?? 'green')
+             - compositeBufferPriority(tierB, b.zone ?? 'green');
+    });
 
     // --- Pass 2: derived replenishment demands ---
     const replenNetter = netter.fork({ observer: undefined });
@@ -558,6 +647,29 @@ export function formulatePhase(
             replenDebts.push({ specId, shortfall: purchasedQty, plannedWithin: replenPlanId });
         }
     }
+
+    // --- Pass 1b: retry deferred demands after replenishment ---
+    for (const { slot, slotClass } of deferredDemands) {
+        if (!slot.spec_id) continue;
+        const planId = `plan-deferred-${generateId()}`;
+        planStore.addPlan({ id: planId, name: `Deferred demand for ${slot.spec_id}` });
+        const result = dependentDemand({
+            ...econ, planId,
+            demandSpecId: slot.spec_id, demandQuantity: slot.remaining_quantity,
+            dueDate: slot.due ? new Date(slot.due) : horizon.to,
+            netter, atLocation: mode.spatial.locationOf(slot),
+            agents: ctx.agents, generateId, honorDecouplingPoints: true,
+        });
+        pass1Records.push({ slot, result, slotClass });
+        allPurchaseIntents.push(...result.purchaseIntents);
+        const childProv = childProvenanceByIntentId.get(slot.intent_id);
+        if (childProv?.originLocation) {
+            mode.scope.annotateChildCommitments(result.commitments, childProv.originLocation);
+        }
+    }
+
+    // Merge Pass 0 debts into backtracking
+    replenDebts.push(...pass0Debts);
 
     // --- Backtracking ---
     if (replenDebts.length > 0) {
