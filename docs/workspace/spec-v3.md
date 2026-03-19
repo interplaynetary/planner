@@ -1,22 +1,15 @@
 # Buffer-First Revisions to Free Association
 
-Here are surgical edits to reframe the entire architecture from a **buffer-first perspective**. The key insight: **buffers are not a derived demand category—they are the fundamental planning primitive from which all demands derive.**
+> **Living design document.** Implementation status is annotated per section:
+> `✓` = implemented, `◐` = partially implemented, `✗` = not yet implemented.
+>
+> Last updated: 2026-03-19
 
 ---
 
-## 1. Revise "Planner Objectives and Constraints" Section
+## 1. Planner Objectives and Constraints `◐`
 
-**Current:**
-
-```
-- Objective: Maximise independent demand satisfaction (ranked by criticality)
-  - Constraint: Satisfy derived demands (ranked by criticality)
-    - Constraint: Satisfy replenishment (metabolic) demands (ranked by criticality)
-    - Constraint: Satisfy reserve/buffer demands (ranked by criticality)
-    - Constraint: Satisfy control point demands (ranked by criticality)
-```
-
-**Buffer-First Revision:**
+**Buffer-First Objectives (design target):**
 
 ```
 - Objective: Maintain all buffers within their target zones (green preferred, yellow acceptable, red unacceptable)
@@ -29,147 +22,195 @@ Here are surgical edits to reframe the entire architecture from a **buffer-first
 - Unit of effort: <Time>
 ```
 
-**Add new explanatory paragraph:**
-
 > _Buffers are the fundamental planning primitive. Every resource that matters—soil nutrients, aquifer levels, strategic inventory, tool libraries, community skills—is managed as a buffer with three zones: Red (minimum viable), Yellow (replenishment trigger), Green (target range). Independent demands are satisfied only to the extent that doing so does not deplete buffers below their replenishment triggers. The planner's primary job is buffer maintenance; demand satisfaction is secondary, derived from buffer health._
 
----
-
-## 2. Revise "Local/Global Inversion" Section
-
-**Current:**
-
-> Planners try to satisfy all demands within their scope and emit surplus/deficit signals. Planner composition converts local failures into constraints at the next level by routing surplus/deficit signals upward until resolved or declared genuinely infeasible. Infeasibility results in a controlled local contraction: dependent demands are pruned back to the independent demands that are consuming the capacity needed to satisfy the constraint.
-
-**Buffer-First Revision:**
-
-> Planners try to maintain all buffers within their target zones. When a buffer enters Yellow, the scope generates a replenishment signal—a derived demand with priority over new independent demands. When a buffer enters Red, the scope emits a **buffer failure signal** upward. Planner composition converts these signals into constraints at the next level, routing them upward until resolved or declared genuinely infeasible. Infeasibility results in a controlled local contraction: independent demands are pruned back in reverse priority order until the buffer can be replenished. The load of net-sacrifice is distributed by independent demand priority, but buffer health is never sacrificed—demands are, if necessary.
+**Implementation note:** The code currently works **demand-first**: Pass 1 satisfies independent demands sorted by class order then due date, Pass 2 handles buffer replenishment for resources tagged `tag:plan:replenishment-required`, and backtracking resolves MetabolicDebt via ProportionalSacrifice. The buffer-first inversion—where buffers are checked *before* demands are allocated—is not yet implemented. The primitives exist (BufferZone, NFP computation, ReplenishmentSignal, ConservationSignal, MetabolicDebt), but the ordering inversion does not.
 
 ---
 
-## 3. Revise "General Process" Section - Derived Demands
+## 2. Local/Global Inversion `◐`
 
-**Current:**
+> Planners try to satisfy all demands within their scope, then maintain buffers via derived replenishment. When a buffer enters Yellow, the scope generates a ReplenishmentSignal—a derived demand with priority over new independent demands within Pass 2. When a buffer enters Red, MetabolicDebt triggers backtracking into Pass 1 allocations via ProportionalSacrifice. Planner composition converts deficit and surplus signals into constraints at the next level, routing them upward until resolved or declared genuinely infeasible. Infeasibility results in a controlled local contraction: independent demands are pruned back via proportional sacrifice, distributing the load by sacrifice-per-member score across scopes.
 
-```
-- Derived Dependent demands:
-  - Replenishment demands (classifiedAs) restore net-losses created by a Plan, up to - if specified - desired ranges (min/max) across space-time. This is metabolic sustainability.
-  - For example replenishing the nutrients taken from the soil during harvest, or repairing machines.
-  - Reserves/buffers demands (classifiedAs) are untouchable except in emergencies.
-```
-
-**Buffer-First Revision:**
-
-```
-- Buffer Zones: Every resource designated as strategic has three zones:
-  - Red Base (TOR): Absolute minimum. Never cross except in declared emergency.
-  - Yellow Base (TOY): Replenishment trigger. When on-hand ≤ TOY, generate signal.
-  - Green Base (TOG): Target maximum. Replenish up to TOG when signal fires.
-
-- Buffer Replenishment Demands: Generated automatically when:
-  - On-hand quantity ≤ TOY (standard replenishment)
-  - Projected on-hand (after planned consumption) ≤ TOY (forward-looking replenishment)
-  - Any consumption event occurs while buffer is already in Yellow (accelerated replenishment)
-
-- Metabolic Buffers: Ecological systems (soil nutrients, aquifers, forests) are buffers with:
-  - Natural replenishment rates (included in lead time calculation)
-  - Tipping points below which recovery impossible (TOR_min_viable_ecosystem)
-  - Intergenerational obligations encoded as minimum buffer targets
-
-- Strategic Buffers: Decoupling points in supply chains, managed via DDMRP logic
-- Reserve Buffers: Untouchable except in emergencies, with separate TOR_reserve
-```
+**Implementation note:** The signal routing (DeficitSignal upward, SurplusSignal for lateral matching, ConservationSignal for ecological buffers) is fully implemented. However, the aspirational framing—"Planners try to maintain all buffers within their target zones" as the *primary* activity—is not what the code does. The code satisfies demands first, then maintains buffers second. The aspiration is that buffer health eventually becomes the primary objective with demand satisfaction derived from it.
 
 ---
 
-## 4. Revise "Two-Pass Planning" Description
+## 3. Buffer Zones and Derived Demands `✓`
 
-**Current:**
+Every resource designated as strategic has three zones:
 
-> Planning proceeds in two passes over the same PlanStore: (1) independent demands, (2) replenishment/buffer/admin demands derived from Pass 1 consumption. Failure in Pass 2 = metabolic debt, qualitatively worse than unmet independent demand satisfaction.
+```
+- Red Base (TOR): Absolute minimum. Never cross except in declared emergency.
+- Yellow Base (TOY): Replenishment trigger. When NFP ≤ TOY, generate signal.
+- Green Base (TOG): Target maximum. Replenish up to TOG when signal fires.
+```
 
-**Buffer-First Revision:**
+Buffer Replenishment Demands are generated automatically when:
 
-> Planning proceeds in three passes over the same PlanStore:
->
-> **Pass 0 - Buffer Health Check:** Evaluate all buffers within scope. Generate replenishment signals for any buffer already in Yellow or Red. These have highest priority—they represent existing metabolic debt.
->
-> **Pass 1 - Independent Demands:** Satisfy independent demands, but only to the extent that doing so does not:
->
-> - Deplete any buffer below TOY (if doing so would prevent timely replenishment)
-> - Exceed available capacity after Pass 0 replenishment is scheduled
-> - Violate ecological buffer constraints (soil, water, etc.)
->
-> **Pass 2 - Derived Buffer Replenishment:** After Pass 1 consumption is known, compute new buffer depletion and generate replenishment demands. These are satisfied against remaining capacity.
->
-> **Pass 3 - Metabolic Reconciliation:** If any buffer remains below TOR after Pass 2, this is **metabolic debt**—qualitatively worse than unmet independent demand. Trigger backtracking into Pass 1 allocations, retracting independent demands in reverse priority until buffers can be restored to at least TOR.
+- **NFP ≤ TOY** (standard replenishment) — `computeNFP()` computes `onhand + onorder − qualifiedDemand` where qualified demand is OST-filtered consuming demand within the `ostHorizonDays` horizon. This is forward-looking, not just on-hand.
+- Any consumption event occurs while buffer is already in Yellow (accelerated replenishment)
+
+**Ecological Buffers** (`tag:buffer:ecological`): Ecological systems (soil nutrients, aquifers, forests) are buffers with:
+
+- Natural replenishment rates (included in lead time calculation)
+- Tipping points (`bufferZone.tippingPoint`) below which recovery is impossible — when on-hand falls below this floor, a `ConservationSignal` is emitted instead of a ReplenishmentSignal, and the `PlanNetter` uses the tipping point as a conservation floor
+- Intergenerational obligations encoded as minimum buffer targets
+
+**Strategic Buffers** (`tag:buffer:strategic`): Decoupling points in supply chains, managed via DDMRP logic. Sized via Ptak & Smith Ch 8 formula: `redBase = ADU × DLT × leadTimeFactor`, `tor = (redBase + redSafety) × redZoneAdjFactor`, etc.
+
+**Reserve Buffers** (`tag:buffer:reserve`): Untouchable except in emergencies, with separate TOR.
 
 ---
 
-## 5. Revise "Technical Planner - planForScope" Section
+## 4. Planning Passes `◐`
 
-**Current Phase 3:**
+### Current Implementation (2-pass + backtracking)
 
+Planning proceeds within Phase 3 (Formulate) of `planForUnit`:
+
+**Pass 1 — Independent Demands:** Satisfy all pre-existing demands sorted by `CLASS_ORDER` (locally-satisfiable → transport-candidate → producible-with-imports → external-dependency) then due date. Each demand is exploded via `dependentDemand()` with netting against available inventory. Deficit signals are emitted for unresolved purchase intents.
+
+**Derived — Effective Alerts + Replenishment Demands:**
+After Pass 1 consumption is known:
+- Compute `effectiveAlerts` from `BufferZoneStore`: for each buffer zone, call `computeNFP()` (if `bufferProfiles` provided) or fall back to `bufferStatus()` from raw on-hand
+- For red/yellow non-ecological buffers with no open signal: generate `ReplenishmentSignal` (quantity = `TOG − NFP`, rounded up to MOQ)
+- For ecological buffers in red/yellow: emit `ConservationSignal` instead
+- Collect derived replenishment demands from consumed specs tagged `tag:plan:replenishment-required` and from alerts
+- **Sort derived demands red-first** (`ZONE_PRIORITY`: red < yellow < green < excess)
+
+**Pass 2 — Derived Replenishment:** Explode derived demands via `dependentDemand()` on a **forked netter** with no safety-stock observer. Unmet replenishment becomes MetabolicDebt.
+
+**Backtracking — ProportionalSacrifice:**
+While `replenDebts` remain and `sacrificeSteps < maxSacrificeSteps` (configurable via `ctx.sacrificeDepth`):
+1. Select retraction candidates scored by `sacrificeScore = scopeSacrificeQty / memberCount` (proportional fairness)
+2. Trial-retract top 3 candidates on forked netters, score each trial by `coverage − effort × 0.1`
+3. Permanently retract the best candidate, re-explode on real netter
+4. If re-explosion fails: record sacrifice, emit unmet deficit signal
+5. If depth limit hit: remaining debts reported as residual MetabolicDebt
+
+Failure in Pass 2 / backtracking = metabolic debt, qualitatively worse than unmet independent demand.
+
+### Future: Buffer-First Inversion `✗`
+
+The aspirational target adds two mechanisms not yet implemented:
+
+**Pass 0 — Buffer Health First:** Before any independent demands, evaluate all buffers within scope. Generate ReplenishmentSignals for any buffer already in Yellow or Red. Allocate capacity to these signals *before* independent demands. Sort by (zone: Red > Yellow) then (NFP/TOY ratio ascending).
+
+**Pass 1 — Buffer Guards:** For each independent demand, check projected buffer impact before allocation:
 ```
-- Phase 3 — Formulate:
-  - Pass 1 (primary): all pre-existing demands sorted by D-category then due date.
-  - Compute: endogenous replenishment demands from Pass 1's consumption records
-  - Pass 2 (derived): replenishment + buffer demands against remaining capacity
-  - Backtrack (if metabolicDebt after Pass 2): walk Pass 1 allocations in reverse priority
+projectedBufferAfter = currentNFP − (demandQuantity × depletionRate)
 ```
+If `projectedBufferAfter ≤ TOY` for any critical buffer:
+- Reject if buffer is ecological/strategic (cannot deplete further)
+- Partially satisfy if buffer can be replenished before next consumption
 
-**Buffer-First Revision:**
-
-```
-- Phase 3 — Formulate with Buffer Priority:
-
-  - Pass 0 — Buffer Replenishment First:
-    - Load all BufferZone configurations for resources in scope
-    - For each buffer, compute current NFP = onhand + onorder − qualifiedDemand
-    - If NFP ≤ TOY, generate immediate ReplenishmentSignal with quantity = TOG − NFP
-    - Sort signals by (zone: Red > Yellow) then (NFP/TOY ratio ascending)
-    - Allocate capacity to signals in this order BEFORE any independent demands
-
-  - Pass 1 — Independent Demands with Buffer Guards:
-    - Sort independent demands by criticality
-    - For each demand, check projected buffer impact:
-        projectedBufferAfter = currentNFP − (demandQuantity × depletionRate)
-    - If projectedBufferAfter ≤ TOY for any critical buffer, demand is:
-        a) Rejected if buffer is ecological/strategic (cannot deplete further)
-        b) Partially satisfied if buffer can be replenished before next consumption
-    - Allocate demands that pass buffer guards
-
-  - Pass 2 — Replenishment from Consumption:
-    - Track actual consumption from Pass 1
-    - Update buffer levels based on consumption events
-    - Generate replenishment demands for all buffers now in Yellow/Red
-    - Allocate against remaining capacity
-
-  - Pass 3 — Metabolic Debt Resolution:
-    - If any buffer < TOR after Pass 2:
-        Identify which independent demands consumed from that buffer
-        Retract lowest-priority demands until buffer can be restored to ≥ TOR
-        Mark retracted demands as "deferred due to metabolic debt"
-        Emit buffer failure signal to parent scope
-
-  - Phase B — Supply Forward:
-    - Unabsorbed supply forward-scheduled via dependentSupply
-    - Any supply that could replenish Yellow/Red buffers gets priority routing
-```
+This inversion makes buffer health the *primary* constraint rather than a *secondary* reconciliation step.
 
 ---
 
-## 6. Add New Section: "Buffer Types and Hierarchies"
+## 5. Technical Planner — planForScope / planForRegion `◐`
 
-Insert after "Scope Boundaries as Data" section:
+Both `planForScope` and `planForRegion` delegate to `planForUnit`, which implements the following phases:
+
+```
+Phase 0 — Normalize:
+  planForScope: normalizeScopes(scopeIds, parentOf)
+    — deduplicate, remove child if parent present
+  planForRegion: normalizeCells(cells)
+    — deduplicate H3 cells, filter dominated parents
+
+Phase 1 — Extract:
+  planForScope: queryDemandByScope() + querySupplyByScope()
+  planForRegion: extractSlots() via H3 location keys
+  Both: filter by horizon, check remaining_quantity > 0
+  Child DEFICIT/SURPLUS signals injected as synthetic slots
+
+Phase 2 — Classify: for each demand slot →
+  'locally-satisfiable' | 'transport-candidate' |
+  'producible-with-imports' | 'external-dependency'
+  Sort by CLASS_ORDER (0–3) then due date
+
+Phase 3 — Formulate:
+  Pass 1 (primary): dependentDemand() with netting per sorted slot
+    Transport candidates handled via FederationScopePolicy
+  Derived: effectiveAlerts from BufferZoneStore + computeNFP()
+    ReplenishmentSignals for non-ecological red/yellow buffers
+    ConservationSignals for ecological red/yellow buffers
+    Derived replenishment demands sorted red-first
+  Pass 2 (derived): dependentDemand() on forked netter (no inventory)
+    Unmet = MetabolicDebt
+  Backtrack: ProportionalSacrifice retraction loop
+    Scored trial-retraction of Pass 1 allocations
+    sacrificeDepth limit; unmet → deficit signals
+
+Phase B — Supply:
+  dependentSupply() forward-scheduling of unabsorbed supply
+  SurplusSignals emitted for remaining supply
+
+Phase 4 — Collect:
+  Merge conflict detection (if subStores from child scopes)
+  Aggregate purchaseIntents, unmetDemand, conservationSignals
+  Emit VF signal Intents (deficit/surplus tagged)
+```
+
+### Future additions `✗`
+
+- Pass 0 (buffer-health-first pre-evaluation) before Phase 3
+- `projectedBufferAfter` guard logic on Pass 1 demand allocation
+- Priority routing of Phase B supply to Yellow/Red buffers
 
 ---
 
-## Buffer Types and Hierarchies
+## 6. Incremental Re-Planning `✓`
 
-Not all buffers are equal. The architecture recognizes a hierarchy of buffer criticality:
+The federation planner supports incremental replanning to avoid recomputing unchanged scopes.
 
-### Tier 1: Ecological Buffers (Non-Negotiable)
+**FederationPlanCache** — returned by each `planFederation()` call:
+```typescript
+interface FederationPlanCache {
+  byScope: ReadonlyMap<string, ScopePlanResult>;
+}
+```
+
+**Dirty scope computation** — `computeEffectiveDirty(scopeIds, parentOf, cache?, dirtyScopes?)`:
+- Scopes not in cache are automatically dirty
+- Explicitly dirty scopes (inputs changed) added from caller-provided `dirtyScopes: Set<string>`
+- Dirty set expanded **upward** through ancestors via `parentOf` — if a child is dirty, its parent must replan
+- If no cache or no dirtyScopes provided, all scopes are dirty (full replan)
+
+**Bottom-up pass** (Round 0):
+- Scopes processed in topological order (leaves first)
+- Clean scopes: reuse cached `ScopePlanResult` by reference, emit `scope-cached` event
+- Dirty scopes: call `planForScope()` with children's planStores, emit `scope-planned` event
+
+**Lateral matching** (Round 1) always re-runs regardless of cache state, since it depends on all scopes collectively. Offers (surplus) and requests (deficits) are scored and greedily assigned.
+
+**Event log** distinguishes scope lifecycle:
+```typescript
+type FederationEventKind =
+  | 'scope-planned'    // freshly computed
+  | 'scope-cached'     // reused from cache
+  | 'deficit-announced' | 'surplus-offered'
+  | 'lateral-match' | 'deficit-propagated'
+  | 'residual-unresolved' | 'sacrifice-rebalanced';
+```
+
+The returned `FederationPlanResult.cache` is passed to the next `planFederation()` call along with the new `dirtyScopes` set.
+
+---
+
+## 7. Buffer Types and Hierarchies `◐`
+
+Not all buffers are equal. The code defines six buffer types via `tag:buffer:*` on ResourceSpecification (`src/lib/utils/buffer-type.ts`):
+
+```typescript
+type BufferType = 'ecological' | 'strategic' | 'reserve' | 'social' | 'consumption' | 'metabolic';
+```
+
+Untagged resources default to `'metabolic'`. Each type has an associated response time: ecological = SEASONS, strategic = MONTHS, reserve = EMERGENCY, social = ONGOING, consumption = DAYS, metabolic = DAYS.
+
+### Tier 1: Ecological Buffers (Non-Negotiable) `✓ special treatment`
 
 - **Examples:** Soil nutrients, aquifer levels, biodiversity indices, forest cover, carbon sinks
 - **Properties:**
@@ -177,19 +218,16 @@ Not all buffers are equal. The architecture recognizes a hierarchy of buffer cri
   - Natural replenishment rates are part of lead time calculation
   - Cannot be "expedited" — ecological processes have minimum duration
   - Intergenerational justice requires maintaining at least historical baseline
-- **TOR_ecological** is set by federation assembly with supermajority, cannot be overridden by local scope
-- **Buffer failure** at this tier triggers automatic federation-level intervention
+- **Implemented:** `tag:buffer:ecological` triggers ConservationSignal (not ReplenishmentSignal) when in red/yellow. PlanNetter uses `tippingPoint` as conservation floor. `tippingPointBreached` flag triggers federation-level escalation.
 
 ### Tier 2: Strategic Supply Buffers (DDMRP Core)
 
 - **Examples:** Critical medicine stockpiles, seed banks, tool libraries, fuel reserves
 - **Properties:**
   - Positioned at decoupling points in the supply network
-  - Sized based on ADU × DLT × variability factors
+  - Sized based on ADU × DLT × variability factors (Ptak & Smith Ch 8)
   - Protect against supply disruptions and demand spikes
-  - Can be expedited with additional effort (air freight, overtime)
-- **Buffer parameters** set by scope assembly based on risk tolerance
-- **Buffer failure** triggers merge planner resolution
+  - Can be expedited with additional effort
 
 ### Tier 3: Metabolic Replenishment Buffers
 
@@ -198,7 +236,7 @@ Not all buffers are equal. The architecture recognizes a hierarchy of buffer cri
   - Directly tied to production processes
   - Replenishment rate matches consumption rate
   - Failure means production stops but no ecological damage
-- **Buffer parameters** derived from recipe requirements
+- Default type for untagged resources
 
 ### Tier 4: Reserve Buffers (Emergency Only)
 
@@ -206,97 +244,99 @@ Not all buffers are equal. The architecture recognizes a hierarchy of buffer cri
 - **Properties:**
   - Untouchable except in declared emergencies
   - Emergency declaration requires assembly vote
-  - Unauthorized consumption is custody violation
-- **TOR_reserve** is absolute — violation triggers automatic custody penalty
 
-### Tier 5: Social Buffers
+### Tier 5: Consumption Buffers
+
+- **Examples:** Finished goods for direct use, daily consumables
+- **Properties:**
+  - Short response time (DAYS)
+  - Standard replenishment cycle
+
+### Tier 6: Social Buffers
 
 - **Examples:** Community skill inventories, mutual aid capacity, childcare availability
 - **Properties:**
   - Not physical resources but social capacities
   - Depleted by use, replenished by training/relationship-building
   - Measured via validated hours and social recognition
-- **Buffer parameters** set democratically based on community resilience goals
+
+### Buffer Priority Hierarchy `◐`
+
+**Implemented:** Zone-color priority (red > yellow > green > excess). Derived demands are sorted by `ZONE_PRIORITY` so red-zone buffers are replenished before yellow-zone buffers, regardless of buffer type.
+
+**Not yet implemented:** Tier-based type priority ordering (ecological > strategic > metabolic > ...) in the formulation phase. The two hierarchies are orthogonal:
+- **Zone-color** = urgency within a single buffer (how depleted is it?)
+- **Type-tier** = importance across buffer types (which buffer matters more?)
+
+Currently only zone-color ordering exists. The aspirational combined priority would be:
+
+1. Ecological buffers below TOR (existential threat)
+2. Strategic buffers below TOR (supply chain collapse risk)
+3. Ecological buffers in Yellow (preventative maintenance)
+4. Reserve buffers below TOR (emergency capacity depleted)
+5. Strategic buffers in Yellow (standard replenishment)
+6. Metabolic buffers below TOR (production at risk)
+7. Social buffers below target (community resilience)
+8. Independent demands (consumption)
 
 ---
 
-## Buffer Priority Hierarchy
+## 8. Buffer Custody `✗`
 
-When allocating scarce capacity, buffers are served in this order:
+> _This section is aspirational. No buffer custody model exists in code. The Observer tracks `onhandQuantity` (custody-based) vs `accountingQuantity` per resource, but there is no collective-custody or scope-assembly-responsibility layer._
 
-1. **Ecological buffers below TOR** (existential threat)
-2. **Strategic buffers below TOR** (supply chain collapse risk)
-3. **Ecological buffers in Yellow** (preventative maintenance)
-4. **Reserve buffers below TOR** (emergency capacity depleted)
-5. **Strategic buffers in Yellow** (standard replenishment)
-6. **Metabolic buffers below TOR** (production at risk)
-7. **Social buffers below target** (community resilience)
-8. **Independent demands** (consumption)
+**Buffer Custody is Collective:** While individual resources have individual custodians, **buffers as aggregates** have collective custody. The scope assembly is collectively responsible for maintaining the buffer within its target zones. This means:
 
-This hierarchy ensures that **ecological health precedes supply chain health precedes production capacity precedes consumption**.
+- No single individual can deplete a buffer below TOY without assembly approval
+- Buffer status is a public dashboard, visible to all scope members
+- Buffer failure triggers collective review, not just individual penalties
+- The assembly sets buffer policy; individuals execute custody of specific items within the buffer
+
+This creates a **nested custody model**:
+
+```
+Buffer (scope collective responsibility)
+  ├── Item A (individual custodian Maria)
+  ├── Item B (individual custodian Javier)
+  └── Item C (individual custodian collective k-of-n)
+```
 
 ---
 
-## 7. Revise "Custody Protocol" to Include Buffer Custody
-
-**Add after "Custodians are always individuals":**
-
-> **Buffer Custody is Collective:** While individual resources have individual custodians, **buffers as aggregates** have collective custody. The scope assembly is collectively responsible for maintaining the buffer within its target zones. This means:
->
-> - No single individual can deplete a buffer below TOY without assembly approval
-> - Buffer status is a public dashboard, visible to all scope members
-> - Buffer failure triggers collective review, not just individual penalties
-> - The assembly sets buffer policy; individuals execute custody of specific items within the buffer
->
-> This creates a **nested custody model**:
->
-> ```
-> Buffer (scope collective responsibility)
->   ├── Item A (individual custodian Maria)
->   ├── Item B (individual custodian Javier)
->   └── Item C (individual custodian collective k-of-n)
-> ```
->
-> The collective is liable for buffer health; individuals are liable for the specific items they hold. A depleted buffer triggers collective investigation—did individuals fail to safeguard? Was policy wrong? Was demand miscalculated?
-
----
-
-## 8. Revise "Planner Objectives/Constraints" Summary Table
-
-**Current:**
+## 9. Planner Objectives/Constraints Summary `◐`
 
 ```
-- Objective: Maximize Independent Demand satisfaction
-- Constraint: Satisfy derived demands
-- Satisfy Replenishment demands
-- Satisfy Reserve/Buffers demands
-```
+PRIMARY OBJECTIVE (Constrained):                                    ◐
+- Maintain all buffers within target zones
+  (Green preferred, Yellow tolerable, Red forbidden)
+  Status: Pass 2 replenishment + backtracking maintain buffers
+          reactively. Proactive buffer-first (Pass 0) not yet built.
 
-**Buffer-First Revision:**
-
-```
-PRIMARY OBJECTIVE (Constrained):
-- Maintain all buffers within target zones (Green preferred, Yellow tolerable, Red forbidden)
-
-SECONDARY OBJECTIVE (Optimize subject to primary):
+SECONDARY OBJECTIVE (Optimize subject to primary):                  ✓
 - Maximize Independent Demand satisfaction (ranked by criticality)
+  Status: Pass 1 sorts by CLASS_ORDER then due date.
 
-THIRDARY OBJECTIVE (Minimize effort subject to above):
+TERTIARY OBJECTIVE (Minimize effort subject to above):              ✗
 - Minimize total Socially Necessary Effort (SNE)
+  Status: Not yet implemented as an optimization target.
 
 CONSTRAINTS (in priority order):
-1. Never let any ecological buffer fall below TOR_ecological
-2. Never let any strategic buffer fall below TOR_strategic
-3. Satisfy all buffer replenishment signals (in priority order: Red > Yellow)
-4. Respect max_individual_effort_time per day
-5. Satisfy independent demands to extent possible after 1-4
+1. Never let any ecological buffer fall below TOR_ecological        ◐
+   (ConservationSignal + tipping point floor implemented;
+    hard rejection of demands that would breach TOR not yet built)
+2. Never let any strategic buffer fall below TOR_strategic          ◐
+   (backtracking restores TOR reactively, not proactively guarded)
+3. Satisfy all buffer replenishment signals (Red > Yellow)          ✓
+   (red-first sorting of derived demands in Pass 2)
+4. Respect max_individual_effort_time per day                       ✗
+5. Satisfy independent demands to extent possible after 1-4        ✓
 ```
 
 ---
 
-## 9. Add Buffer Visualization to Observer Metrics
+## 10. BufferHealthReport `✗`
 
-**Add to Observer output:**
+> _This section is aspirational. No `BufferHealthReport` interface exists in code. `ConservationSignal` and `ReplenishmentSignal` cover some of these fields but are per-signal, not per-scope aggregated reports._
 
 ```typescript
 interface BufferHealthReport {
@@ -304,14 +344,14 @@ interface BufferHealthReport {
   timestamp: Date;
   buffers: {
     [bufferId: string]: {
-      type: "ecological" | "strategic" | "metabolic" | "reserve" | "social";
+      type: "ecological" | "strategic" | "metabolic" | "reserve" | "social" | "consumption";
       currentLevel: number;
-      tor: number; // Red base (minimum)
-      toy: number; // Yellow base (replenish trigger)
-      tog: number; // Green base (target)
+      tor: number;
+      toy: number;
+      tog: number;
       zone: "RED" | "YELLOW" | "GREEN" | "EXCESS";
       trend: "improving" | "stable" | "declining" | "critical";
-      daysUntilTOR: number; // At current depletion rate
+      daysUntilTOR: number;
       replenishmentSignals: ReplenishmentSignal[];
       custody: {
         responsibleScope: string;
@@ -324,8 +364,8 @@ interface BufferHealthReport {
     percentBuffersInGreen: number;
     percentBuffersInYellow: number;
     percentBuffersInRed: number;
-    ecologicalHealthIndex: number; // Weighted average of ecological buffers
-    strategicHealthIndex: number; // Weighted average of strategic buffers
+    ecologicalHealthIndex: number;
+    strategicHealthIndex: number;
   };
   metabolicDebt: {
     hasDebt: boolean;
@@ -335,40 +375,37 @@ interface BufferHealthReport {
 }
 ```
 
-This becomes the **primary dashboard** for scope assemblies. Before discussing new projects or consumption, they check buffer health. Red buffers mean **emergency session**. Yellow buffers mean **replenishment planning** before new initiatives.
+This would become the **primary dashboard** for scope assemblies. Before discussing new projects or consumption, they check buffer health. Red buffers mean **emergency session**. Yellow buffers mean **replenishment planning** before new initiatives.
 
 ---
 
-## 10. Revise "The Goal" Section to Emphasize Buffer Health
-
-**Current ending:**
+## 11. The Goal
 
 > The orientation toward local satisfaction is essential to dissolving the division between town and country, and with it the division between mental and physical labor. A scope that produces what it consumes and consumes what it produces is a community governing its own material life — not a node in a supply chain it does not control.
 
-**Buffer-First Addition:**
-
 > But local satisfaction is not enough. A community that consumes its ecological inheritance—depleting soil, drawing down aquifers, cutting forests without regeneration—is governing only for the present, stealing from its children. The buffer-first orientation makes this visible and actionable. When soil nitrogen enters Yellow, the assembly sees it. When the aquifer drops toward Red, the federation intervenes. When a forest buffer is drawn down for timber, a replenishment signal appears automatically, requiring replanting before new timber can be planned.
->
+
 > **Buffer health is intergenerational justice made computable.** The planner cannot optimize away the needs of future people because their claims are encoded in buffer targets set by previous generations. Each assembly, in setting buffer policies, negotiates with the unborn. The architecture ensures that negotiation is explicit, transparent, and binding.
 
 ---
 
 ## Summary of Buffer-First Reorientation
 
-| Aspect            | Original Framing                           | Buffer-First Framing                          |
-| ----------------- | ------------------------------------------ | --------------------------------------------- |
-| Primary objective | Satisfy independent demands                | Maintain buffer health                        |
-| Demands           | Independent (primary), Derived (secondary) | All demands are derived from buffer status    |
-| Replenishment     | One of several derived demand types        | The fundamental planning activity             |
-| Failure mode      | Unmet demand                               | Metabolic debt (buffer below TOR)             |
-| Priority          | Independent demand criticality             | Buffer zone (Red > Yellow > Green)            |
-| Ecology           | External constraint                        | Just another buffer type                      |
-| Intergenerational | Implicit in sustainability                 | Explicit in buffer targets                    |
-| Planning passes   | Two (independent, derived)                 | Three (buffer-first, demands, reconciliation) |
+| Aspect            | Original Framing                           | Buffer-First Framing                          | Status |
+| ----------------- | ------------------------------------------ | --------------------------------------------- | ------ |
+| Primary objective | Satisfy independent demands                | Maintain buffer health                        | `◐`    |
+| Demands           | Independent (primary), Derived (secondary) | All demands are derived from buffer status    | `✗`    |
+| Replenishment     | One of several derived demand types        | The fundamental planning activity             | `◐`    |
+| Failure mode      | Unmet demand                               | Metabolic debt (buffer below TOR)             | `✓`    |
+| Priority          | Independent demand criticality             | Buffer zone (Red > Yellow > Green)            | `✓`    |
+| Ecology           | External constraint                        | Just another buffer type (with special rules) | `✓`    |
+| Intergenerational | Implicit in sustainability                 | Explicit in buffer targets                    | `◐`    |
+| Planning passes   | Two (independent, derived)                 | Two implemented (demands, derived replenishment + backtracking); four planned (buffer-first, guarded demands, replenishment, reconciliation) | `◐` |
+| Incremental replan | Not described                             | FederationPlanCache + dirty scope expansion   | `✓`    |
 
 The buffer-first perspective transforms the planner from a **demand satisfaction engine** into a **buffer maintenance system that satisfies demands when possible**. This is the difference between:
 
 - **Extractive planning:** "What do people want? How do we get it?"
 - **Regenerative planning:** "What buffers must we maintain? What demands can we satisfy given that constraint?"
 
-Your architecture already has all the pieces. These edits simply make the buffer-first logic **explicit, prioritized, and inescapable**.
+The architecture has the *primitives*: BufferZone with TOR/TOY/TOG, `computeNFP()` for forward-looking buffer status, ReplenishmentSignal generation and lifecycle, ConservationSignal for ecological buffers, MetabolicDebt detection, ProportionalSacrifice backtracking, and incremental federation replanning. What remains is the buffer-first *inversion*: Pass 0 pre-evaluation of buffer health before demand allocation, buffer guards on Pass 1 that reject demands threatening critical buffers, and tier-based type priority ordering across buffer types.
