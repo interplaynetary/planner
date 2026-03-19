@@ -474,6 +474,191 @@ export function recipeLeadTime(recipeId: string, recipeStore: RecipeStore): numb
 }
 
 // =============================================================================
+// 5b. computeDecoupledLeadTime — automatic DLT segmentation at buffer boundaries
+// =============================================================================
+
+/**
+ * Compute the Decoupled Lead Time (DLT) for a given spec by walking its recipe
+ * graph backwards and stopping at any input that is itself a buffered spec
+ * (a decoupling point).
+ *
+ * Per Ptak & Smith Ch 7: DLT is the longest cumulative lead time from the
+ * nearest upstream decoupling point(s) to the target spec. Buffered inputs
+ * are treated as "instantly available" (lead time = 0 from the buffer's
+ * perspective), so their upstream chain is excluded.
+ *
+ * Algorithm:
+ *   1. Find any recipe containing a process that produces targetSpecId
+ *      (searches all recipes, not just primaryOutput matches)
+ *   2. Build a decoupled predecessor graph: links through buffered specs are
+ *      broken (the buffer decouples producer from consumer)
+ *   3. Walk backwards from the producing process to find the relevant sub-chain
+ *   4. Forward-pass EF on the sub-chain; add recursive DLT for non-buffered
+ *      external inputs (those with no in-recipe producer)
+ *   5. Return the EF of the producing process
+ *
+ * Returns 0 when no recipe produces the spec (raw material).
+ * Falls back to `recipeLeadTime()` when `bufferedSpecs` is empty.
+ *
+ * @param targetSpecId   The spec whose DLT we want
+ * @param bufferedSpecs  Set of spec IDs that are buffered (decoupling points)
+ * @param recipeStore    Knowledge layer
+ * @param computing      Cycle-detection set (internal — pass `new Set()` at top level)
+ */
+export function computeDecoupledLeadTime(
+    targetSpecId: string,
+    bufferedSpecs: Set<string>,
+    recipeStore: RecipeStore,
+    computing: Set<string> = new Set(),
+): number {
+    if (computing.has(targetSpecId)) return 0; // cycle guard
+
+    // Find recipes that produce this spec (check all recipes, not just primaryOutput)
+    const candidates: Array<{ recipe: ReturnType<RecipeStore['getRecipe']>; endProcIds: string[] }> = [];
+    // First try primaryOutput (fast path)
+    for (const recipe of recipeStore.recipesForOutput(targetSpecId)) {
+        const chain = recipeStore.getProcessChain(recipe.id);
+        // End processes = those with an output flow producing targetSpecId
+        const endProcIds: string[] = [];
+        for (const rp of chain) {
+            const { outputs } = recipeStore.flowsForProcess(rp.id);
+            if (outputs.some(f => f.resourceConformsTo === targetSpecId)) endProcIds.push(rp.id);
+        }
+        if (endProcIds.length > 0) candidates.push({ recipe, endProcIds });
+    }
+    // Fallback: search all recipes for intermediate outputs
+    if (candidates.length === 0) {
+        for (const recipe of recipeStore.allRecipes()) {
+            const chain = recipeStore.getProcessChain(recipe.id);
+            const endProcIds: string[] = [];
+            for (const rp of chain) {
+                const { outputs } = recipeStore.flowsForProcess(rp.id);
+                if (outputs.some(f => f.resourceConformsTo === targetSpecId)) endProcIds.push(rp.id);
+            }
+            if (endProcIds.length > 0) candidates.push({ recipe, endProcIds });
+        }
+    }
+
+    if (candidates.length === 0) return 0; // raw material — no lead time
+
+    if (bufferedSpecs.size === 0) {
+        // No decoupling points — full CLT
+        return recipeLeadTime(candidates[0].recipe!.id, recipeStore);
+    }
+
+    computing.add(targetSpecId);
+    let bestDLT = Infinity;
+
+    for (const { recipe, endProcIds } of candidates) {
+        const chain = recipeStore.getProcessChain(recipe!.id);
+        if (chain.length === 0) { bestDLT = Math.min(bestDLT, 0); continue; }
+
+        const processIds = new Set(chain.map(rp => rp.id));
+
+        // Build decoupled predecessor map: break links through buffered specs
+        const predecessors = new Map<string, string[]>();
+        for (const rp of chain) predecessors.set(rp.id, []);
+
+        const outputsBySpec = new Map<string, string[]>();
+
+        for (const rp of chain) {
+            const { outputs } = recipeStore.flowsForProcess(rp.id);
+            for (const f of outputs) {
+                if (!f.resourceConformsTo) continue;
+                const k = f.stage ? `${f.resourceConformsTo}::${f.stage}` : f.resourceConformsTo;
+                const list = outputsBySpec.get(k) ?? [];
+                if (!list.includes(rp.id)) list.push(rp.id);
+                outputsBySpec.set(k, list);
+            }
+        }
+
+        for (const rp of chain) {
+            const { inputs } = recipeStore.flowsForProcess(rp.id);
+            for (const f of inputs) {
+                if (!f.resourceConformsTo) continue;
+                if (f.action === 'work' || f.action === 'cite') continue;
+                // Buffered input → decoupled, do NOT create predecessor link
+                if (bufferedSpecs.has(f.resourceConformsTo)) continue;
+                const k = f.stage ? `${f.resourceConformsTo}::${f.stage}` : f.resourceConformsTo;
+                const prods = outputsBySpec.get(k) ?? [];
+                for (const producer of prods) {
+                    if (producer === rp.id) continue;
+                    if (!processIds.has(producer)) continue;
+                    const preds = predecessors.get(rp.id)!;
+                    if (!preds.includes(producer)) preds.push(producer);
+                }
+            }
+        }
+
+        // Backward reachability from end processes (only count relevant sub-chain)
+        const endSet = new Set(endProcIds);
+        const reachable = new Set<string>();
+        for (let i = chain.length - 1; i >= 0; i--) {
+            const rp = chain[i];
+            if (endSet.has(rp.id) || (predecessors.get(rp.id) ?? []).some(p => false) /* check successors */) {
+                // Need successors to walk backward properly
+            }
+        }
+        // Build successors from predecessors
+        const successors = new Map<string, string[]>();
+        for (const rp of chain) successors.set(rp.id, []);
+        for (const [id, preds] of predecessors) {
+            for (const pred of preds) {
+                const list = successors.get(pred);
+                if (list && !list.includes(id)) list.push(id);
+            }
+        }
+        // Backward walk from end processes
+        for (let i = chain.length - 1; i >= 0; i--) {
+            const rp = chain[i];
+            if (endSet.has(rp.id) || (successors.get(rp.id) ?? []).some(s => reachable.has(s))) {
+                reachable.add(rp.id);
+            }
+        }
+
+        // For external non-buffered inputs (no in-recipe producer), add recursive DLT
+        const processExtraDays = new Map<string, number>();
+        for (const rp of chain) {
+            if (!reachable.has(rp.id)) continue;
+            let maxInputDLT = 0;
+            const { inputs } = recipeStore.flowsForProcess(rp.id);
+            for (const f of inputs) {
+                if (!f.resourceConformsTo) continue;
+                if (f.action === 'work' || f.action === 'cite' || f.action === 'use') continue;
+                if (bufferedSpecs.has(f.resourceConformsTo)) continue;
+                const k = f.stage ? `${f.resourceConformsTo}::${f.stage}` : f.resourceConformsTo;
+                const hasInRecipeProducer = (outputsBySpec.get(k) ?? []).some(p => reachable.has(p));
+                if (!hasInRecipeProducer) {
+                    const inputDLT = computeDecoupledLeadTime(
+                        f.resourceConformsTo, bufferedSpecs, recipeStore, computing,
+                    );
+                    maxInputDLT = Math.max(maxInputDLT, inputDLT);
+                }
+            }
+            processExtraDays.set(rp.id, maxInputDLT);
+        }
+
+        // Forward pass on reachable sub-chain only
+        const subChain = chain.filter(rp => reachable.has(rp.id));
+        const EF = new Map<string, number>();
+        for (const rp of subChain) {
+            const preds = (predecessors.get(rp.id) ?? []).filter(p => reachable.has(p));
+            const latestPredEF = preds.length === 0 ? 0 : Math.max(...preds.map(p => EF.get(p) ?? 0));
+            const processDur = rp.hasDuration ? durationToDays(rp.hasDuration) : 0;
+            const inputDLT = processExtraDays.get(rp.id) ?? 0;
+            EF.set(rp.id, latestPredEF + processDur + inputDLT);
+        }
+
+        // DLT = max EF of the end processes
+        const recipeDLT = Math.max(0, ...endProcIds.map(id => EF.get(id) ?? 0));
+        bestDLT = Math.min(bestDLT, recipeDLT);
+    }
+
+    computing.delete(targetSpecId);
+    return bestDLT === Infinity ? 0 : bestDLT;
+}
+
+// =============================================================================
 // 6. aggregateAdjustmentFactors
 // =============================================================================
 
@@ -2487,13 +2672,25 @@ export function orchestrateBufferRecalibration(
     opts?: { windowDays?: number },
 ): void {
     const windowDays = opts?.windowDays ?? 84;
+
+    // Collect all buffered spec IDs for DLT segmentation
+    const bufferedSpecs = new Set<string>();
+    for (const zone of bufferZoneStore.allBufferZones()) {
+        bufferedSpecs.add(zone.specId);
+    }
+
     for (const zone of bufferZoneStore.allBufferZones()) {
         const profile = profileMap.get(zone.profileId);
         if (!profile) continue;
         const { adu } = computeADU(events, zone.specId, windowDays, asOf);
         let dlt = zone.dltDays;
         if (zone.replenishmentRecipeId) {
+            // Explicit recipe + stage markers → leg-level DLT
             const computed = legLeadTime(zone.replenishmentRecipeId, zone.upstreamStageId, zone.downstreamStageId, recipeStore);
+            if (computed > 0) dlt = computed;
+        } else {
+            // No explicit recipe → auto-segment at buffer boundaries
+            const computed = computeDecoupledLeadTime(zone.specId, bufferedSpecs, recipeStore);
             if (computed > 0) dlt = computed;
         }
         const updated = recalibrateBufferZone(zone, adu, dlt, profile, adjustments, asOf);
@@ -2762,4 +2959,82 @@ export function classifyFlowSpeed(
     threshold: number = 0.10,
 ): 'fast' | 'slow' {
     return flowIndex(adu, tog) >= threshold ? 'fast' : 'slow';
+}
+
+// =============================================================================
+// 27. BufferHealthReport — aggregated buffer health for scope dashboards
+// =============================================================================
+
+export interface BufferHealthReport {
+    asOf: Date;
+    buffers: Array<{
+        specId: string;
+        zone: 'red' | 'yellow' | 'green' | 'excess';
+        onhand: number;
+        tor: number;
+        toy: number;
+        tog: number;
+        tippingPointBreached?: boolean;
+    }>;
+    summary: {
+        redCount: number;
+        yellowCount: number;
+        greenCount: number;
+        excessCount: number;
+    };
+}
+
+/**
+ * Build an aggregated BufferHealthReport from all buffer zones in the store.
+ *
+ * For each zone, uses `computeNFP` when a matching BufferProfile is available
+ * (forward-looking NFP-based zone), otherwise falls back to `bufferStatus`
+ * (raw on-hand based zone).
+ *
+ * Pure read-only function — no side effects.
+ */
+export function buildBufferHealthReport(
+    bufferZoneStore: BufferZoneStore,
+    bufferProfiles: Map<string, BufferProfile> | undefined,
+    planStore: PlanStore,
+    observer: Observer,
+    asOf?: Date,
+): BufferHealthReport {
+    const now = asOf ?? new Date();
+    const buffers: BufferHealthReport['buffers'] = [];
+    const summary = { redCount: 0, yellowCount: 0, greenCount: 0, excessCount: 0 };
+
+    for (const bz of bufferZoneStore.allBufferZones()) {
+        const profile = bufferProfiles?.get(bz.profileId);
+        let onhand: number;
+        let zone: 'red' | 'yellow' | 'green' | 'excess';
+
+        if (profile) {
+            const nfp = computeNFP(bz.specId, bz, profile, planStore, observer, now);
+            zone = nfp.zone;
+            onhand = nfp.onhand;
+        } else {
+            onhand = observer.conformingResources(bz.specId)
+                .reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+            const status = bufferStatus(onhand, bz);
+            zone = status.zone;
+        }
+
+        const tippingPointBreached = bz.tippingPoint !== undefined ? onhand < bz.tippingPoint : undefined;
+
+        buffers.push({
+            specId: bz.specId, zone, onhand,
+            tor: bz.tor, toy: bz.toy, tog: bz.tog,
+            tippingPointBreached,
+        });
+
+        switch (zone) {
+            case 'red':    summary.redCount++;    break;
+            case 'yellow': summary.yellowCount++; break;
+            case 'green':  summary.greenCount++;  break;
+            case 'excess': summary.excessCount++; break;
+        }
+    }
+
+    return { asOf: now, buffers, summary };
 }

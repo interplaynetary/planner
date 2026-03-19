@@ -36,6 +36,8 @@ import { dependentDemand, type DependentDemandResult } from '../algorithms/depen
 import { dependentSupply } from '../algorithms/dependent-supply';
 import { bufferStatus, computeNFP, generateReplenishmentSignal, type NFPResult } from '../algorithms/ddmrp';
 import { bufferTypeFromTags, compositeBufferPriority } from '../utils/buffer-type';
+import { buildSNEIndex, type SNEIndex } from '../algorithms/SNE';
+import type { AgentIndex } from '../indexes/agents';
 import type { BufferZoneStore } from '../knowledge/buffer-zones';
 import type { DemandSlot } from '../indexes/independent-demand';
 import type { IndependentDemandIndex } from '../indexes/independent-demand';
@@ -69,6 +71,8 @@ export interface UnitPlanContext {
     }>;
     bufferZoneStore?: BufferZoneStore;
     bufferProfiles?: Map<string, BufferProfile>;
+    sneIndex?: SNEIndex;
+    agentIndex?: AgentIndex;
 }
 
 export interface UnitPlanResult {
@@ -90,6 +94,7 @@ export interface PlanningSession {
     planStore: PlanStore;
     netter: PlanNetter;
     generateId: () => string;
+    sneIndex: SNEIndex;
 }
 
 // =============================================================================
@@ -131,6 +136,7 @@ export interface FormulateResult {
         specId: string; onhand: number; tor: number; toy: number; tog: number;
         zone: 'red' | 'yellow'; tippingPointBreached?: boolean;
     }>;
+    effectiveAlerts?: AlertMap;
 }
 
 export interface SupplyResult {
@@ -152,7 +158,7 @@ export function mergePlanStores(subStores: PlanStore[], generateId?: () => strin
     return merged;
 }
 
-export function detectConflicts(planStore: PlanStore, observer: Observer): Conflict[] {
+export function detectConflicts(planStore: PlanStore, observer: Observer, agentIndex?: AgentIndex): Conflict[] {
     const conflicts: Conflict[] = [];
 
     const committedByResource = new Map<string, { total: number; candidates: string[] }>();
@@ -200,8 +206,21 @@ export function detectConflicts(planStore: PlanStore, observer: Observer): Confl
         entry.candidates.push(i.inputOf ?? i.id);
         workByAgent.set(agentId, entry);
     }
-    // Capacity contention requires AgentIndex — deferred.
-    void workByAgent;
+    if (agentIndex) {
+        for (const [agentId, { total, candidates }] of workByAgent) {
+            const capacityNodes = [...agentIndex.agent_capacities.values()]
+                .filter(c => c.agent_id === agentId);
+            const totalCapacity = capacityNodes.reduce((s, c) => s + c.total_hours, 0);
+            if (totalCapacity > 0 && total > totalCapacity) {
+                conflicts.push({
+                    type: 'capacity-contention',
+                    resourceOrAgentId: agentId,
+                    overclaimed: total,
+                    candidates,
+                });
+            }
+        }
+    }
 
     return conflicts;
 }
@@ -383,7 +402,7 @@ export function formulatePhase(
     subStores?: PlanStore[],
     childProvenance?: Map<string, { originalShortfall: number; resolvedAt: string[]; originLocation: string }>,
 ): FormulateResult {
-    const { mode, canonical, horizon, ctx, planStore, netter, generateId } = session;
+    const { mode, canonical, horizon, ctx, planStore, netter, generateId, sneIndex } = session;
     const childProvenanceByIntentId = childProvenance ?? new Map();
     const processes = planStore.processes;
     const econ: import('./planning').EconomicContext = {
@@ -441,7 +460,7 @@ export function formulatePhase(
             const pass0PlanId = `pass0-replenish-${generateId()}`;
             planStore.addPlan({ id: pass0PlanId, name: `Buffer-first replenishment for ${specId}` });
             const result = dependentDemand({
-                ...econ, observer: undefined,
+                ...econ, observer: undefined, sneIndex,
                 planId: pass0PlanId, demandSpecId: specId, demandQuantity: qty,
                 dueDate: horizon.to, netter, agents: ctx.agents, generateId,
             });
@@ -491,7 +510,7 @@ export function formulatePhase(
         }
 
         const result = dependentDemand({
-            ...econ,
+            ...econ, sneIndex,
             planId,
             demandSpecId: slot.spec_id,
             demandQuantity: slot.remaining_quantity,
@@ -635,7 +654,7 @@ export function formulatePhase(
         const replenPlanId = `replenish-${generateId()}`;
         planStore.addPlan({ id: replenPlanId, name: `Replenishment for ${specId}` });
         const result = dependentDemand({
-            ...econ, observer: undefined,
+            ...econ, observer: undefined, sneIndex,
             planId: replenPlanId, demandSpecId: specId, demandQuantity: qty,
             dueDate: horizon.to, netter: replenNetter, agents: ctx.agents, generateId,
         });
@@ -654,7 +673,7 @@ export function formulatePhase(
         const planId = `plan-deferred-${generateId()}`;
         planStore.addPlan({ id: planId, name: `Deferred demand for ${slot.spec_id}` });
         const result = dependentDemand({
-            ...econ, planId,
+            ...econ, sneIndex, planId,
             demandSpecId: slot.spec_id, demandQuantity: slot.remaining_quantity,
             dueDate: slot.due ? new Date(slot.due) : horizon.to,
             netter, atLocation: mode.spatial.locationOf(slot),
@@ -688,7 +707,7 @@ export function formulatePhase(
                     const trialPlanId = `trial-${generateId()}`;
                     planStore.addPlan({ id: trialPlanId, name: `Trial for ${c.slot.spec_id}` });
                     const trialResult = c.slot.spec_id ? dependentDemand({
-                        ...econ, planId: trialPlanId,
+                        ...econ, sneIndex, planId: trialPlanId,
                         demandSpecId: c.slot.spec_id, demandQuantity: c.slot.remaining_quantity,
                         dueDate: c.slot.due ? new Date(c.slot.due) : horizon.to,
                         netter: trialNetter, atLocation: mode.spatial.locationOf(c.slot),
@@ -708,7 +727,7 @@ export function formulatePhase(
                     const reExplodePlanId = `reexplode-${generateId()}`;
                     planStore.addPlan({ id: reExplodePlanId, name: `Re-explode for ${best.candidate.slot.spec_id}` });
                     const reResult = best.candidate.slot.spec_id ? dependentDemand({
-                        ...econ, planId: reExplodePlanId,
+                        ...econ, sneIndex, planId: reExplodePlanId,
                         demandSpecId: best.candidate.slot.spec_id, demandQuantity: best.candidate.slot.remaining_quantity,
                         dueDate: best.candidate.slot.due ? new Date(best.candidate.slot.due) : horizon.to,
                         netter, atLocation: mode.spatial.locationOf(best.candidate.slot),
@@ -754,7 +773,7 @@ export function formulatePhase(
                 const retryPlanId = `replenish-retry-${generateId()}`;
                 planStore.addPlan({ id: retryPlanId, name: `Retry replenishment for ${debt.specId}` });
                 const reResult = dependentDemand({
-                    ...econ, observer: undefined,
+                    ...econ, observer: undefined, sneIndex,
                     planId: retryPlanId, demandSpecId: debt.specId, demandQuantity: debt.shortfall,
                     dueDate: horizon.to, netter: retryReplenNetter, agents: ctx.agents, generateId,
                 });
@@ -770,7 +789,7 @@ export function formulatePhase(
             const reExplodePlanId = `reexplode-${generateId()}`;
             planStore.addPlan({ id: reExplodePlanId, name: `Re-explode for ${candidate.slot.spec_id}` });
             const reResult = candidate.slot.spec_id ? dependentDemand({
-                ...econ, planId: reExplodePlanId,
+                ...econ, sneIndex, planId: reExplodePlanId,
                 demandSpecId: candidate.slot.spec_id, demandQuantity: candidate.slot.remaining_quantity,
                 dueDate: candidate.slot.due ? new Date(candidate.slot.due) : horizon.to,
                 netter, atLocation: mode.spatial.locationOf(candidate.slot),
@@ -827,13 +846,14 @@ export function formulatePhase(
         netter.pruneStale();
     }
 
-    return { pass1Records, allPurchaseIntents, unmetDemand, allDeficits, allConservationData };
+    return { pass1Records, allPurchaseIntents, unmetDemand, allDeficits, allConservationData, effectiveAlerts };
 }
 
 /** Phase B: Forward-schedule unabsorbed supply. */
 export function supplyPhase(
     session: PlanningSession,
     extractedSupply: SupplySlot[],
+    effectiveAlerts?: AlertMap,
 ): SupplyResult {
     const { mode, horizon, ctx, planStore, netter, generateId } = session;
     const processes = planStore.processes;
@@ -874,13 +894,36 @@ export function supplyPhase(
         });
 
         for (const s of result.surplus) {
-            allSurplus.push({
-                specId: s.specId,
-                quantity: s.quantity,
-                plannedWithin: supplyPlanId,
-                availableFrom: supplySlot.available_from,
-                atLocation: supplySlot.h3_cell,
-            });
+            let remaining = s.quantity;
+
+            // Phase B routing: route surplus to stressed buffers before emitting SurplusSignal
+            const alert = effectiveAlerts?.get(s.specId);
+            if (alert && (alert.zone === 'red' || alert.zone === 'yellow')) {
+                const bufferNeed = Math.max(0, alert.tog - alert.onhand);
+                const routeQty = Math.min(remaining, bufferNeed);
+                if (routeQty > 1e-9) {
+                    const routePlanId = `buffer-route-${generateId()}`;
+                    planStore.addPlan({ id: routePlanId, name: `Route surplus to buffer ${s.specId}` });
+                    planStore.addIntent({
+                        id: generateId(), action: 'transfer',
+                        resourceConformsTo: s.specId,
+                        resourceQuantity: { hasNumericalValue: routeQty, hasUnit: 'unit' },
+                        resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT],
+                        plannedWithin: routePlanId, finished: false,
+                    });
+                    remaining -= routeQty;
+                }
+            }
+
+            if (remaining > 1e-9) {
+                allSurplus.push({
+                    specId: s.specId,
+                    quantity: remaining,
+                    plannedWithin: supplyPlanId,
+                    availableFrom: supplySlot.available_from,
+                    atLocation: supplySlot.h3_cell,
+                });
+            }
         }
         supplyPurchaseIntents.push(...result.purchaseIntents);
     }
@@ -923,7 +966,7 @@ export function collectPhase(
 
     // Merge planner: conflict detection and surgical resolution
     if (subStores && subStores.length > 0) {
-        let conflicts = detectConflicts(planStore, ctx.observer);
+        let conflicts = detectConflicts(planStore, ctx.observer, ctx.agentIndex);
         let iterations = 0;
         const MAX_ITERATIONS = 10;
         while (conflicts.length > 0 && iterations < MAX_ITERATIONS) {
@@ -966,7 +1009,7 @@ export function collectPhase(
                         const mergeReplanId = `merge-replan-${generateId()}`;
                         planStore.addPlan({ id: mergeReplanId, name: `Merge replan for ${slot.spec_id}` });
                         const reResult = dependentDemand({
-                            ...econ, planId: mergeReplanId,
+                            ...econ, sneIndex: session.sneIndex, planId: mergeReplanId,
                             demandSpecId: slot.spec_id, demandQuantity: slot.remaining_quantity,
                             dueDate: slot.due ? new Date(slot.due) : horizon.to,
                             netter, agents: ctx.agents, generateId, honorDecouplingPoints: true,
@@ -977,12 +1020,12 @@ export function collectPhase(
                             mode.scope.annotateChildCommitments(reResult.commitments, mergeChildProv.originLocation);
                         }
                     }
-                    const newConflicts = detectConflicts(planStore, ctx.observer);
+                    const newConflicts = detectConflicts(planStore, ctx.observer, ctx.agentIndex);
                     const stillConflicted = newConflicts.some(nc => nc.resourceOrAgentId === conflict.resourceOrAgentId);
                     if (!stillConflicted) break;
                 }
             }
-            conflicts = detectConflicts(planStore, ctx.observer);
+            conflicts = detectConflicts(planStore, ctx.observer, ctx.agentIndex);
         }
     }
 
@@ -1151,11 +1194,12 @@ export function planForUnit(
 
     const netter = new PlanNetter(planStore, ctx.observer, undefined, conservationFloors);
 
-    const session: PlanningSession = { mode, canonical, horizon, ctx, planStore, netter, generateId };
+    const sneIndex = ctx.sneIndex ?? buildSNEIndex(ctx.recipeStore);
+    const session: PlanningSession = { mode, canonical, horizon, ctx, planStore, netter, generateId, sneIndex };
 
     const extracted = extractPhase(session, subStores);
     const classified = classifyPhase(session, extracted.rawDemands);
     const formulated = formulatePhase(session, classified, extracted.extractedSupply, subStores, extracted.childProvenance);
-    const supply = supplyPhase(session, extracted.extractedSupply);
+    const supply = supplyPhase(session, extracted.extractedSupply, formulated.effectiveAlerts);
     return collectPhase(session, formulated, supply, subStores);
 }

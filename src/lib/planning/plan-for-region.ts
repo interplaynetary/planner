@@ -55,6 +55,8 @@ export interface RegionPlanContext {
     bufferAlerts?: Map<string, { onhand: number; tor: number; toy: number; tog: number; zone: 'red' | 'yellow' | 'green' | 'excess'; tippingPointBreached?: boolean }>;
     bufferZoneStore?: BufferZoneStore;
     bufferProfiles?: Map<string, BufferProfile>;
+    sneIndex?: import('../algorithms/SNE').SNEIndex;
+    agentIndex?: import('../indexes/agents').AgentIndex;
 }
 
 export interface ConservationSignal {
@@ -255,6 +257,8 @@ export function planForRegion(
         bufferAlerts: ctx.bufferAlerts,
         bufferZoneStore: ctx.bufferZoneStore,
         bufferProfiles: ctx.bufferProfiles,
+        sneIndex: ctx.sneIndex,
+        agentIndex: ctx.agentIndex,
     };
     return planForUnit(mode, cells, horizon, unitCtx, subStores);
 }

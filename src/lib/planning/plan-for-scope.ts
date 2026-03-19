@@ -56,6 +56,8 @@ export interface ScopePlanContext {
     bufferProfiles?: Map<string, BufferProfile>;
     memberCounts?: Map<string, number>;
     sacrificeDepth?: number;
+    sneIndex?: import('../algorithms/SNE').SNEIndex;
+    agentIndex?: import('../indexes/agents').AgentIndex;
 }
 
 export interface ScopePlanResult {
@@ -392,6 +394,8 @@ export function planForScope(
         bufferAlerts: ctx.bufferAlerts,
         bufferZoneStore: ctx.bufferZoneStore,
         bufferProfiles: ctx.bufferProfiles,
+        sneIndex: ctx.sneIndex,
+        agentIndex: ctx.agentIndex,
     };
     return planForUnit(mode, scopeIds, horizon, unitCtx, subStores);
 }

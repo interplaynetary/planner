@@ -138,6 +138,16 @@ export interface FederationPlanContext {
      */
     bufferZoneStore?: BufferZoneStore;
     /**
+     * Buffer profiles keyed by profile ID. Enables buffer-first inversion
+     * (Pass 0 pre-evaluation, buffer guards, deferred demand retry) within
+     * each scope when combined with bufferZoneStore.
+     */
+    bufferProfiles?: Map<string, import('../schemas').BufferProfile>;
+    /** SNE index for recipe ranking by embodied labor. Passed through to every planForScope call. */
+    sneIndex?: import('../algorithms/SNE').SNEIndex;
+    /** Agent capacity index for labor ceiling checks. Passed through to every planForScope call. */
+    agentIndex?: import('../indexes/agents').AgentIndex;
+    /**
      * Optional policy controlling lateral matching behavior.
      * When absent, DefaultLateralMatchingPolicy is used (replicates current behavior).
      */
@@ -336,6 +346,9 @@ export function planFederation(
         config:         ctx.config,
         bufferAlerts:    ctx.bufferAlerts,
         bufferZoneStore: ctx.bufferZoneStore,
+        bufferProfiles:  ctx.bufferProfiles,
+        sneIndex:        ctx.sneIndex,
+        agentIndex:      ctx.agentIndex,
         memberCounts:    ctx.memberCounts,
         sacrificeDepth:  ctx.sacrificeDepth,
     };

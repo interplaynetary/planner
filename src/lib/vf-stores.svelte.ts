@@ -117,24 +117,26 @@ export const membershipIndex = $state<MembershipIndex>({
 // ── Derived federation inputs ─────────────────────────────────────────────
 
 /** All scopes reachable via membership relationships. */
-export const federationScopeIds = $derived.by(() => {
+export function getFederationScopeIds(): string[] {
     const idx = membershipIndex;
     const ids = new Set<string>();
     for (const scope of idx.personToScope.values()) ids.add(scope);
     for (const [child, parent] of idx.scopeParent) { ids.add(child); ids.add(parent); }
     return [...ids];
-});
+}
 
 /** scopeParent as a Map (ready for planFederation ctx.parentOf). */
-export const federationParentOf = $derived.by(() => new Map(membershipIndex.scopeParent));
+export function getFederationParentOf(): Map<string, string> {
+    return new Map(membershipIndex.scopeParent);
+}
 
 /** Leaf member counts: persons directly assigned to each scope. */
-export const federationMemberCounts = $derived.by(() => {
+export function getFederationMemberCounts(): Map<string, number> {
     const counts = new Map<string, number>();
     for (const scope of membershipIndex.personToScope.values())
         counts.set(scope, (counts.get(scope) ?? 0) + 1);
     return counts;
-});
+}
 
 // ── refresh() — sync all $state arrays from the current store instances ──
 function syncArr<T>(target: T[], items: T[]): void {
