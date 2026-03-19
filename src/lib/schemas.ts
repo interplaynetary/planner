@@ -952,6 +952,9 @@ export const IntentSchema = z.object({
     // Plan
     plannedWithin: z.string().optional(),
 
+    // Links
+    satisfies: z.string().optional(),                      // Intent ID (VF: soft-allocation provenance)
+
     // Scope
     inScopeOf: z.array(z.string()).optional(),             // Agent IDs
 
@@ -1270,6 +1273,10 @@ export const BufferZoneSchema = z.object({
     upstreamLocationId: z.string().optional(),
     /** Recipe ID (transport leg) to execute when issuing a replenishment order. */
     replenishmentRecipeId: z.string().optional(),
+    /** Upstream stage marker for DLT segmentation via legLeadTime(). */
+    upstreamStageId: z.string().optional(),
+    /** Downstream stage marker for DLT segmentation via legLeadTime(). */
+    downstreamStageId: z.string().optional(),
 
     // --- ADU inputs ---
     /** Average Daily Usage quantity (result of the rolling-window calculation) */

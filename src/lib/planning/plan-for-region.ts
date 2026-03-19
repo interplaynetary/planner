@@ -11,7 +11,7 @@ import * as h3 from 'h3-js';
 import type { Intent, BufferProfile, Commitment } from '../schemas';
 import type { RecipeStore } from '../knowledge/recipes';
 import type { Observer } from '../observation/observer';
-import { PlanStore, PLAN_TAGS, parseDeficitNote, parseConservationNote } from './planning';
+import { PlanStore } from './planning';
 import type { ProcessRegistry } from '../process-registry';
 import type { DependentDemandResult } from '../algorithms/dependent-demand';
 import type { BufferZoneStore } from '../knowledge/buffer-zones';
@@ -27,11 +27,14 @@ import {
     querySupplyBySpec,
 } from '../indexes/independent-supply';
 import { planForUnit, detectConflicts as _detectConflicts, type UnitPlanContext, type UnitPlanResult } from './plan-for-unit';
-import type {
-    LocationStrategy,
-    DemandSlotClass,
-    SlotRecord,
-    SurplusSignal,
+import {
+    NULL_SCOPE_POLICY,
+    type DemandSlotClass,
+    type SlotRecord,
+    type SurplusSignal,
+    type SpatialModel,
+    type SacrificePolicy,
+    type PlanningMode,
 } from './location-strategy';
 
 // Re-export shared types for backward compatibility
@@ -54,19 +57,6 @@ export interface RegionPlanContext {
     bufferProfiles?: Map<string, BufferProfile>;
 }
 
-export interface DeficitSignal {
-    plannedWithin: string;
-    intentId: string;
-    specId: string;
-    action: string;
-    shortfall: number;
-    due?: string;
-    h3_cell?: string;
-    source: 'unmet_demand' | 'metabolic_debt';
-    originalShortfall?: number;
-    resolvedAt?: string[];
-}
-
 export interface ConservationSignal {
     plannedWithin: string;
     specId: string;
@@ -77,13 +67,6 @@ export interface ConservationSignal {
     zone: 'red' | 'yellow';
     tippingPointBreached?: boolean;
     atLocation?: string;
-}
-
-/** @deprecated Use child PlanStore.intentsForTag() directly instead of ferry types. */
-export interface PlanSignals {
-    deficits: DeficitSignal[];
-    surplus: SurplusSignal[];
-    conservationSignals: ConservationSignal[];
 }
 
 export interface RegionPlanResult {
@@ -179,7 +162,7 @@ export function classifySlot(
 export const detectConflicts = _detectConflicts;
 
 // =============================================================================
-// REGION STRATEGY
+// REGION STRATEGY (decomposed)
 // =============================================================================
 
 const CLASS_ORDER: Record<string, number> = {
@@ -189,7 +172,8 @@ const CLASS_ORDER: Record<string, number> = {
     'external-dependency':     3,
 };
 
-class RegionStrategy implements LocationStrategy {
+// --- SpatialModel: H3-based location handling ---
+class RegionSpatial implements SpatialModel {
     normalize(ids: string[]): string[] {
         return normalizeCells(ids);
     }
@@ -216,16 +200,18 @@ class RegionStrategy implements LocationStrategy {
         return slot.h3_cell;
     }
 
-    handleTransportCandidate(): null {
-        return null; // Region planner sends all slots through dependentDemand
+    deficitLocationFields(location: string | undefined) {
+        return { atLocation: location };
     }
 
-    injectFederationSeeds(): string[] {
-        return []; // No federation seeding for region planner
+    observerForSupply(observer: Observer): Observer {
+        return observer;
     }
+}
 
+// --- SacrificePolicy: simple class-order + due-date ---
+class SimpleSacrifice implements SacrificePolicy {
     selectRetractCandidate(remaining: Set<SlotRecord>): SlotRecord | undefined {
-        // Simple class-order + due-date: sort and take the first
         const sorted = [...remaining].sort((a, b) => {
             const classDiff = (CLASS_ORDER[b.slotClass] ?? 3) - (CLASS_ORDER[a.slotClass] ?? 3);
             if (classDiff !== 0) return classDiff;
@@ -235,27 +221,11 @@ class RegionStrategy implements LocationStrategy {
     }
 
     recordSacrifice(): boolean {
-        return false; // No depth limit for region planner
+        return false;
     }
 
     isReExplodeSuccess(result: DependentDemandResult): boolean {
         return result.allocated.length > 0;
-    }
-
-    observerForSupply(observer: Observer): Observer {
-        return observer; // Full observer for region planner
-    }
-
-    handleScheduledReceipt(): null {
-        return null; // Region planner sends all supply through dependentSupply
-    }
-
-    deficitLocationFields(location: string | undefined) {
-        return { atLocation: location };
-    }
-
-    annotateChildCommitments(): void {
-        // No-op for region planner
     }
 }
 
@@ -269,7 +239,11 @@ export function planForRegion(
     ctx: RegionPlanContext,
     subStores?: PlanStore[],
 ): RegionPlanResult {
-    const strategy = new RegionStrategy();
+    const mode: PlanningMode = {
+        spatial: new RegionSpatial(),
+        scope: NULL_SCOPE_POLICY,
+        sacrifice: new SimpleSacrifice(),
+    };
     const unitCtx: UnitPlanContext = {
         recipeStore: ctx.recipeStore,
         observer: ctx.observer,
@@ -282,51 +256,6 @@ export function planForRegion(
         bufferZoneStore: ctx.bufferZoneStore,
         bufferProfiles: ctx.bufferProfiles,
     };
-    return planForUnit(strategy, cells, horizon, unitCtx, subStores);
+    return planForUnit(mode, cells, horizon, unitCtx, subStores);
 }
 
-// =============================================================================
-// SIGNAL HELPERS (deprecated — kept for backward compatibility)
-// =============================================================================
-
-/** @deprecated Read child PlanStore.intentsForTag() directly. */
-export function buildPlanSignals(result: RegionPlanResult): PlanSignals {
-    const deficits: DeficitSignal[] = result.planStore.intentsForTag(PLAN_TAGS.DEFICIT).map(i => {
-        const { originalShortfall, resolvedAt } = parseDeficitNote(i);
-        return {
-            plannedWithin: i.plannedWithin ?? '',
-            intentId: i.id,
-            specId: i.resourceConformsTo ?? '',
-            action: i.action,
-            shortfall: i.resourceQuantity?.hasNumericalValue ?? 0,
-            due: i.due,
-            h3_cell: i.atLocation,
-            source: i.resourceClassifiedAs?.includes(PLAN_TAGS.METABOLIC_DEBT)
-                ? 'metabolic_debt' as const
-                : 'unmet_demand' as const,
-            originalShortfall,
-            resolvedAt,
-        };
-    });
-    const surplus: SurplusSignal[] = result.planStore.intentsForTag(PLAN_TAGS.SURPLUS).map(i => ({
-        plannedWithin: i.plannedWithin ?? '',
-        specId: i.resourceConformsTo ?? '',
-        quantity: i.resourceQuantity?.hasNumericalValue ?? 0,
-        availableFrom: i.hasPointInTime,
-        atLocation: i.atLocation,
-    }));
-    const conservationSignals = result.planStore.intentsForTag(PLAN_TAGS.CONSERVATION).map(i => {
-        const cn = parseConservationNote(i);
-        return {
-            plannedWithin: i.plannedWithin ?? `conservation:${i.resourceConformsTo}`,
-            specId: i.resourceConformsTo ?? '',
-            onhand: cn.onhand,
-            tor: cn.tor,
-            toy: cn.toy,
-            tog: cn.tog,
-            zone: cn.zone,
-            tippingPointBreached: cn.tippingPointBreached,
-        };
-    });
-    return { deficits, surplus, conservationSignals };
-}

@@ -1,12 +1,10 @@
 /**
- * LocationStrategy — abstraction over the two planning models (scope vs region).
+ * PlanningMode — decomposed into SpatialModel + ScopePolicy + SacrificePolicy.
  *
- * planForUnit delegates to a LocationStrategy for the 5 axes of difference:
- *   1. Location normalization (scope hierarchy vs H3 spatial tree)
- *   2. Slot extraction (scope queries vs location queries)
- *   3. Demand classification (individual-claimable bypass vs pure geospatial)
- *   4. Backtracking (proportional sacrifice vs simple class-order + due-date)
- *   5. Phase B observer (scoped vs full)
+ * planForUnit delegates to a PlanningMode (composed from these three policies):
+ *   SpatialModel  — normalization, extraction, classification, location mapping, observer
+ *   ScopePolicy   — federation-specific: transport candidates, seed injection, scheduled receipts
+ *   SacrificePolicy — backtracking: candidate selection, sacrifice recording, success check
  */
 
 import type { Commitment } from '../schemas';
@@ -56,10 +54,10 @@ export interface Conflict {
 }
 
 // =============================================================================
-// LOCATION STRATEGY INTERFACE
+// SPATIAL MODEL — normalization, extraction, classification, location
 // =============================================================================
 
-export interface LocationStrategy {
+export interface SpatialModel {
     /** Phase 0: Normalize location identifiers (deduplicate, drop dominated). */
     normalize(ids: string[]): string[];
 
@@ -79,22 +77,25 @@ export interface LocationStrategy {
         recipeStore: RecipeStore,
     ): DemandSlotClass;
 
-    /** Read the location identifier from a demand slot (scope → inScopeOf, region → h3_cell). */
+    /** Read the location identifier from a demand slot. */
     locationOf(slot: DemandSlot): string | undefined;
 
-    /** Backtracking: select next candidate to retract from the remaining set. */
-    selectRetractCandidate(remaining: Set<SlotRecord>, canonical: string[]): SlotRecord | undefined;
+    /** Deficit Intent fields: atLocation + inScopeOf from a location string. */
+    deficitLocationFields(
+        location: string | undefined,
+        canonical: string[],
+    ): { atLocation?: string; inScopeOf?: string[] };
 
-    /** After permanent sacrifice, update state. Returns true if backtrack depth limit reached. */
-    recordSacrifice(slot: DemandSlot, canonical: string[]): boolean;
-
-    /** Whether a re-explode result counts as successful (scope checks more conditions). */
-    isReExplodeSuccess(result: DependentDemandResult): boolean;
-
-    /** Phase B: observer for supply processing (scoped or full). */
+    /** Phase B: observer for supply processing (scoped vs full). */
     observerForSupply(observer: Observer, canonical: string[]): Observer;
+}
 
-    /** Pass 1: handle transport-candidate slots by skipping dependentDemand. Returns null to use default. */
+// =============================================================================
+// SCOPE POLICY — federation-specific behaviour (no-ops for region)
+// =============================================================================
+
+export interface ScopePolicy {
+    /** Pass 1: handle transport-candidate slots. Returns null to use default. */
     handleTransportCandidate(
         slot: DemandSlot,
         planStore: PlanStore,
@@ -103,7 +104,7 @@ export interface LocationStrategy {
         agents?: { provider?: string; receiver?: string },
     ): DependentDemandResult | null;
 
-    /** Inject federation boundary seeds before Pass 1. Returns seed intent IDs to clean up. */
+    /** Inject federation boundary seeds before Pass 1. Returns seed intent IDs. */
     injectFederationSeeds(
         planStore: PlanStore,
         supplyIndex: IndependentSupplyIndex,
@@ -119,15 +120,52 @@ export interface LocationStrategy {
         supplyPlanId: string,
     ): SurplusSignal | null;
 
-    /** Deficit Intent fields: atLocation + inScopeOf from a location string. */
-    deficitLocationFields(
-        location: string | undefined,
-        canonical: string[],
-    ): { atLocation?: string; inScopeOf?: string[] };
-
-    /** Annotate commitments with child origin (scope: adds inScopeOf; region: no-op). */
+    /** Annotate commitments with child origin. */
     annotateChildCommitments(
         commitments: Commitment[],
         originLocation: string,
     ): void;
 }
+
+// =============================================================================
+// SACRIFICE POLICY — backtracking behaviour
+// =============================================================================
+
+export interface SacrificePolicy {
+    /** Select next candidate to retract from the remaining set. */
+    selectRetractCandidate(remaining: Set<SlotRecord>, canonical: string[]): SlotRecord | undefined;
+
+    /** Optional: return top N candidates for scored multi-candidate evaluation. */
+    selectRetractCandidates?(remaining: Set<SlotRecord>, canonical: string[], limit: number): SlotRecord[];
+
+    /** Optional: score a candidate's re-explode result (higher = better). */
+    scoreCandidate?(result: DependentDemandResult, slot: import('../indexes/independent-demand').DemandSlot): number;
+
+    /** After permanent sacrifice, update state. Returns true if depth limit reached. */
+    recordSacrifice(slot: DemandSlot, canonical: string[]): boolean;
+
+    /** Whether a re-explode result counts as successful. */
+    isReExplodeSuccess(result: DependentDemandResult): boolean;
+}
+
+// =============================================================================
+// PLANNING MODE — composed from the three policies
+// =============================================================================
+
+export interface PlanningMode {
+    spatial: SpatialModel;
+    scope: ScopePolicy;
+    sacrifice: SacrificePolicy;
+}
+
+// =============================================================================
+// NULL SCOPE POLICY — no-op for region planner
+// =============================================================================
+
+export const NULL_SCOPE_POLICY: ScopePolicy = {
+    handleTransportCandidate: () => null,
+    injectFederationSeeds: () => [],
+    handleScheduledReceipt: () => null,
+    annotateChildCommitments: () => {},
+};
+

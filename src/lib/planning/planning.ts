@@ -42,7 +42,6 @@ import type {
     RecipeExchange,
     Scenario,
     ScenarioDefinition,
-    ReplenishmentSignal,
     VfAction,
 } from '../schemas';
 import { ACTION_DEFINITIONS } from '../schemas';
@@ -56,6 +55,9 @@ import { Observer } from '../observation/observer';
 // =============================================================================
 
 /** Canonical tag strings used on planning Intents and ResourceSpecs. */
+/** ProcessSpecification ID for planning processes (VF traceability). */
+export const PLANNING_PROCESS_SPEC = 'spec:planning';
+
 export const PLAN_TAGS = {
     DEFICIT: 'tag:plan:deficit',
     SURPLUS: 'tag:plan:surplus',
@@ -64,6 +66,7 @@ export const PLAN_TAGS = {
     REPLENISHMENT_REQUIRED: 'tag:plan:replenishment-required',
     CONSERVATION: 'tag:plan:conservation',
     REPLENISHMENT: 'tag:plan:replenishment',
+    SOFT_ALLOCATION: 'tag:plan:soft-allocation',
 } as const;
 
 /** VF actions that do not consume inventory (no quantity decrement). */
@@ -73,77 +76,74 @@ export const NON_CONSUMING_ACTIONS = new Set(['use', 'work', 'cite', 'deliverSer
 // SIGNAL INTENT HELPERS
 // =============================================================================
 
-/** Parse the structured note stored on a `tag:plan:deficit` Intent. */
-export function parseDeficitNote(i: Intent): { originalShortfall: number; resolvedAt: string[] } {
-    const note = i.note ? JSON.parse(i.note) as { originalShortfall?: number; resolvedAt?: string[] } : {};
-    return {
-        originalShortfall: note.originalShortfall ?? i.resourceQuantity?.hasNumericalValue ?? 0,
-        resolvedAt: note.resolvedAt ?? [],
-    };
-}
-
 /** Current remaining shortfall on a deficit Intent. */
 export function deficitShortfall(i: Intent): number {
     return i.resourceQuantity?.hasNumericalValue ?? 0;
 }
 
 /** True when the deficit was fully resolved (shortfall reduced to 0 from a positive original). */
-export function isDeficitResolved(i: Intent): boolean {
-    return deficitShortfall(i) === 0 && parseDeficitNote(i).originalShortfall > 0;
+export function isDeficitResolved(i: Intent, planStore: PlanStore): boolean {
+    const meta = planStore.getMeta(i.id) as DeficitMeta | undefined;
+    return deficitShortfall(i) === 0 && (meta?.originalShortfall ?? 0) > 0;
 }
 
-/** Read the provider scope from a lateral-transfer Intent. */
-export function tradeFrom(t: Intent): string { return t.provider ?? ''; }
+/** Read the provider scope from a lateral-transfer Intent or Commitment. */
+export function tradeFrom(t: { provider?: string }): string { return t.provider ?? ''; }
 
-/** Read the receiver scope from a lateral-transfer Intent. */
-export function tradeTo(t: Intent): string { return t.inScopeOf?.[0] ?? ''; }
+/** Read the receiver scope from a lateral-transfer Intent or Commitment. */
+export function tradeTo(t: { receiver?: string; inScopeOf?: string[] }): string { return t.receiver ?? t.inScopeOf?.[0] ?? ''; }
 
-/** Read the resource spec from a lateral-transfer Intent. */
-export function tradeSpec(t: Intent): string { return t.resourceConformsTo ?? ''; }
+/** Read the resource spec from a lateral-transfer Intent or Commitment. */
+export function tradeSpec(t: { resourceConformsTo?: string }): string { return t.resourceConformsTo ?? ''; }
 
-/** Read the quantity from a lateral-transfer Intent. */
-export function tradeQty(t: Intent): number { return t.resourceQuantity?.hasNumericalValue ?? 0; }
+/** Read the quantity from a lateral-transfer Intent or Commitment. */
+export function tradeQty(t: { resourceQuantity?: { hasNumericalValue: number } }): number { return t.resourceQuantity?.hasNumericalValue ?? 0; }
 
-/** Parse the structured note stored on a `tag:plan:replenishment` Intent. */
-export function parseReplenishmentNote(i: Intent): {
+// =============================================================================
+// TYPED SIGNAL METADATA
+// =============================================================================
+
+export interface DeficitMeta {
+    kind: 'deficit';
+    originalShortfall: number;
+    resolvedAt: string[];
+}
+
+export interface ConservationMeta {
+    kind: 'conservation';
+    onhand: number; tor: number; toy: number; tog: number;
+    zone: 'red' | 'yellow';
+    tippingPointBreached?: boolean;
+}
+
+export interface ReplenishmentMeta {
+    kind: 'replenishment';
     onhand: number; onorder: number; qualifiedDemand: number; nfp: number;
     priority: number; zone: 'red' | 'yellow' | 'green' | 'excess';
     recommendedQty: number; dueDate: string;
     bufferZoneId: string; createdAt: string;
     status: 'open' | 'approved' | 'rejected';
     approvedCommitmentId?: string;
-} {
-    const note = i.note ? JSON.parse(i.note) as Record<string, unknown> : {};
-    return {
-        onhand: (note.onhand as number) ?? 0,
-        onorder: (note.onorder as number) ?? 0,
-        qualifiedDemand: (note.qualifiedDemand as number) ?? 0,
-        nfp: (note.nfp as number) ?? 0,
-        priority: (note.priority as number) ?? 0,
-        zone: (note.zone as 'red' | 'yellow' | 'green' | 'excess') ?? 'red',
-        recommendedQty: (note.recommendedQty as number) ?? 0,
-        dueDate: (note.dueDate as string) ?? '',
-        bufferZoneId: (note.bufferZoneId as string) ?? '',
-        createdAt: (note.createdAt as string) ?? '',
-        status: (note.status as 'open' | 'approved' | 'rejected') ?? 'open',
-        approvedCommitmentId: note.approvedCommitmentId as string | undefined,
-    };
 }
 
-/** Parse the structured note stored on a `tag:plan:conservation` Intent. */
-export function parseConservationNote(i: Intent): {
-    onhand: number; tor: number; toy: number; tog: number;
-    zone: 'red' | 'yellow'; tippingPointBreached?: boolean;
-} {
-    const note = i.note ? JSON.parse(i.note) as Record<string, unknown> : {};
-    return {
-        onhand: (note.onhand as number) ?? 0,
-        tor: (note.tor as number) ?? 0,
-        toy: (note.toy as number) ?? 0,
-        tog: (note.tog as number) ?? 0,
-        zone: (note.zone as 'red' | 'yellow') ?? 'red',
-        tippingPointBreached: note.tippingPointBreached as boolean | undefined,
-    };
+export interface PlanningMeta {
+    kind: 'planning';
+    processId: string;
+    demandInputIds: string[];   // demand Intent IDs consumed
+}
+
+export type SignalMeta = DeficitMeta | ConservationMeta | ReplenishmentMeta | PlanningMeta;
+
+// =============================================================================
+// ECONOMIC CONTEXT
+// =============================================================================
+
+/** Bundles the 4 stores passed to every algorithm function. */
+export interface EconomicContext {
+    recipeStore: RecipeStore;
+    planStore: PlanStore;
+    processes: ProcessRegistry;
+    observer?: Observer;
 }
 
 // =============================================================================
@@ -161,6 +161,12 @@ export class PlanStore {
     private proposalLists = new Map<string, ProposalList>();
     private scenarios = new Map<string, Scenario>();
     private scenarioDefinitions = new Map<string, ScenarioDefinition>();
+    private _meta = new Map<string, SignalMeta>();
+
+    // Secondary indexes — maintained on add/remove/merge for O(k) lookups
+    private _tagIndex = new Map<string, Set<string>>();
+    private _intentsBySpec = new Map<string, Set<string>>();
+    private _commitmentsBySpec = new Map<string, Set<string>>();
 
     constructor(
         readonly processes: ProcessRegistry,
@@ -187,6 +193,12 @@ export class PlanStore {
     addCommitment(commitment: Omit<Commitment, 'id'> & { id?: string }): Commitment {
         const c: Commitment = { id: commitment.id ?? this.generateId(), ...commitment };
         this.commitments.set(c.id, c);
+        // Maintain spec index
+        if (c.resourceConformsTo) {
+            let set = this._commitmentsBySpec.get(c.resourceConformsTo);
+            if (!set) { set = new Set(); this._commitmentsBySpec.set(c.resourceConformsTo, set); }
+            set.add(c.id);
+        }
         return c;
     }
 
@@ -229,6 +241,20 @@ export class PlanStore {
         }
         const i: Intent = { id: intent.id ?? this.generateId(), ...intent };
         this.intents.set(i.id, i);
+        // Maintain tag index
+        if (i.resourceClassifiedAs) {
+            for (const tag of i.resourceClassifiedAs) {
+                let set = this._tagIndex.get(tag);
+                if (!set) { set = new Set(); this._tagIndex.set(tag, set); }
+                set.add(i.id);
+            }
+        }
+        // Maintain spec index
+        if (i.resourceConformsTo) {
+            let set = this._intentsBySpec.get(i.resourceConformsTo);
+            if (!set) { set = new Set(); this._intentsBySpec.set(i.resourceConformsTo, set); }
+            set.add(i.id);
+        }
         return i;
     }
 
@@ -253,7 +279,46 @@ export class PlanStore {
      * Used to query signal artifacts (tag:plan:deficit, tag:plan:surplus, tag:plan:lateral-transfer, etc.)
      */
     intentsForTag(tag: string): Intent[] {
-        return Array.from(this.intents.values()).filter(i => i.resourceClassifiedAs?.includes(tag));
+        const ids = this._tagIndex.get(tag);
+        if (!ids) return [];
+        const result: Intent[] = [];
+        for (const id of ids) {
+            const intent = this.intents.get(id);
+            if (intent) result.push(intent);
+        }
+        return result;
+    }
+
+    /** Get all intents conforming to a given resource specification. O(k_spec). */
+    intentsForSpec(specId: string): Intent[] {
+        const ids = this._intentsBySpec.get(specId);
+        if (!ids) return [];
+        const result: Intent[] = [];
+        for (const id of ids) {
+            const intent = this.intents.get(id);
+            if (intent) result.push(intent);
+        }
+        return result;
+    }
+
+    /** Get all commitments conforming to a given resource specification. O(k_spec). */
+    commitmentsForSpec(specId: string): Commitment[] {
+        const ids = this._commitmentsBySpec.get(specId);
+        if (!ids) return [];
+        const result: Commitment[] = [];
+        for (const id of ids) {
+            const commitment = this.commitments.get(id);
+            if (commitment) result.push(commitment);
+        }
+        return result;
+    }
+
+    /** Return all signal Intents that are outputs of the given planning Process. */
+    signalOutputsOfProcess(processId: string): Intent[] {
+        return Array.from(this.intents.values()).filter(i =>
+            i.outputOf === processId &&
+            i.resourceClassifiedAs?.some(t => t.startsWith('tag:plan:'))
+        );
     }
 
     /**
@@ -273,6 +338,14 @@ export class PlanStore {
     }
 
     // =========================================================================
+    // SIGNAL METADATA
+    // =========================================================================
+
+    setMeta(intentId: string, meta: SignalMeta): void { this._meta.set(intentId, meta); }
+    getMeta(intentId: string): SignalMeta | undefined { return this._meta.get(intentId); }
+    allMeta(): ReadonlyMap<string, SignalMeta> { return this._meta; }
+
+    // =========================================================================
     // BULK OPERATIONS — merge / retract
     // =========================================================================
 
@@ -285,9 +358,31 @@ export class PlanStore {
      */
     merge(sub: PlanStore): void {
         for (const proc of sub.allProcesses()) this.processes.register(proc);
-        for (const c of sub.allCommitments()) this.commitments.set(c.id, c);
-        for (const i of sub.allIntents()) this.intents.set(i.id, i);
+        for (const c of sub.allCommitments()) {
+            this.commitments.set(c.id, c);
+            if (c.resourceConformsTo) {
+                let set = this._commitmentsBySpec.get(c.resourceConformsTo);
+                if (!set) { set = new Set(); this._commitmentsBySpec.set(c.resourceConformsTo, set); }
+                set.add(c.id);
+            }
+        }
+        for (const i of sub.allIntents()) {
+            this.intents.set(i.id, i);
+            if (i.resourceClassifiedAs) {
+                for (const tag of i.resourceClassifiedAs) {
+                    let set = this._tagIndex.get(tag);
+                    if (!set) { set = new Set(); this._tagIndex.set(tag, set); }
+                    set.add(i.id);
+                }
+            }
+            if (i.resourceConformsTo) {
+                let set = this._intentsBySpec.get(i.resourceConformsTo);
+                if (!set) { set = new Set(); this._intentsBySpec.set(i.resourceConformsTo, set); }
+                set.add(i.id);
+            }
+        }
         for (const p of sub.allPlans()) this.plans.set(p.id, p);
+        for (const [id, meta] of sub.allMeta()) this._meta.set(id, meta);
     }
 
     /**
@@ -300,14 +395,49 @@ export class PlanStore {
         intentIds?: string[];
     }): void {
         for (const id of ids.processIds ?? []) this.processes.unregister(id);
-        for (const id of ids.commitmentIds ?? []) this.commitments.delete(id);
-        for (const id of ids.intentIds ?? []) this.intents.delete(id);
+        for (const id of ids.commitmentIds ?? []) {
+            const c = this.commitments.get(id);
+            if (c?.resourceConformsTo) {
+                this._commitmentsBySpec.get(c.resourceConformsTo)?.delete(id);
+            }
+            this.commitments.delete(id);
+        }
+        for (const id of ids.intentIds ?? []) {
+            const i = this.intents.get(id);
+            if (i) {
+                if (i.resourceClassifiedAs) {
+                    for (const tag of i.resourceClassifiedAs) {
+                        this._tagIndex.get(tag)?.delete(id);
+                    }
+                }
+                if (i.resourceConformsTo) {
+                    this._intentsBySpec.get(i.resourceConformsTo)?.delete(id);
+                }
+            }
+            this.intents.delete(id);
+            this._meta.delete(id);
+        }
     }
 
     removeRecordsForPlan(planId: string): void {
         for (const p of this.processes.forPlan(planId)) this.processes.unregister(p.id);
-        for (const c of this.commitmentsForPlan(planId)) this.commitments.delete(c.id);
-        for (const i of this.intentsForPlan(planId)) this.intents.delete(i.id);
+        for (const c of this.commitmentsForPlan(planId)) {
+            if (c.resourceConformsTo) {
+                this._commitmentsBySpec.get(c.resourceConformsTo)?.delete(c.id);
+            }
+            this.commitments.delete(c.id);
+        }
+        for (const i of this.intentsForPlan(planId)) {
+            if (i.resourceClassifiedAs) {
+                for (const tag of i.resourceClassifiedAs) {
+                    this._tagIndex.get(tag)?.delete(i.id);
+                }
+            }
+            if (i.resourceConformsTo) {
+                this._intentsBySpec.get(i.resourceConformsTo)?.delete(i.id);
+            }
+            this.intents.delete(i.id);
+        }
     }
 
     // =========================================================================
@@ -421,50 +551,6 @@ export class PlanStore {
     }
 
     /**
-     * @deprecated Use approveReplenishment() for Intent-based replenishment signals.
-     *
-     * Promote a legacy ReplenishmentSignal struct to a Commitment.
-     */
-    promoteSignalToCommitment(
-        signal: ReplenishmentSignal,
-        aduUnit: string,
-        provider: string,
-        receiver: string,
-        opts?: {
-            action?: VfAction;
-            outputOf?: string;
-            plannedWithin?: string;
-        },
-    ): Commitment {
-        if (signal.status !== 'open') {
-            throw new Error(
-                `ReplenishmentSignal ${signal.id} cannot be promoted: status is '${signal.status}'`,
-            );
-        }
-
-        const commitment = this.addCommitment({
-            action: opts?.action ?? 'produce',
-            resourceConformsTo: signal.specId,
-            resourceQuantity: {
-                hasNumericalValue: signal.recommendedQty,
-                hasUnit: aduUnit,
-            },
-            due: `${signal.dueDate}T00:00:00.000Z`,
-            ...(signal.atLocation ? { atLocation: signal.atLocation } : {}),
-            provider,
-            receiver,
-            ...(opts?.outputOf ? { outputOf: opts.outputOf } : {}),
-            ...(opts?.plannedWithin ? { plannedWithin: opts.plannedWithin } : {}),
-            finished: false,
-        });
-
-        signal.status = 'approved';
-        signal.approvedCommitmentId = commitment.id;
-
-        return commitment;
-    }
-
-    /**
      * Approve a replenishment Intent (tag:plan:replenishment) → Commitment.
      *
      * This is the VF-native approval path. The replenishment Intent was emitted
@@ -515,11 +601,12 @@ export class PlanStore {
             finished: false,
         });
 
-        // Update the Intent note with approval status and mark finished
-        const note = intent.note ? JSON.parse(intent.note) : {};
-        note.status = 'approved';
-        note.approvedCommitmentId = commitment.id;
-        intent.note = JSON.stringify(note);
+        // Update meta with approval status, mark finished
+        const meta = this._meta.get(intentId) as ReplenishmentMeta | undefined;
+        if (meta) {
+            meta.status = 'approved';
+            meta.approvedCommitmentId = commitment.id;
+        }
         intent.finished = true;
 
         return commitment;
@@ -534,9 +621,10 @@ export class PlanStore {
         if (!intent.resourceClassifiedAs?.includes(PLAN_TAGS.REPLENISHMENT)) {
             throw new Error(`Intent ${intentId} is not a replenishment signal`);
         }
-        const note = intent.note ? JSON.parse(intent.note) : {};
-        note.status = 'rejected';
-        intent.note = JSON.stringify(note);
+        const meta = this._meta.get(intentId) as ReplenishmentMeta | undefined;
+        if (meta) {
+            meta.status = 'rejected';
+        }
         intent.finished = true;
     }
 

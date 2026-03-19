@@ -11,8 +11,8 @@
 
 import { z } from 'zod';
 
-import type { Plan, Commitment, Intent } from '../schemas';
-import type { PlanStore } from './planning';
+import type { Plan, Commitment, Intent, Process } from '../schemas';
+import type { PlanStore, SignalMeta } from './planning';
 import type { RemoteTransport } from './remote-transport';
 
 // =============================================================================
@@ -51,6 +51,8 @@ export interface ResolvedRecord {
     plan?: Plan;
     commitment?: Commitment;
     intent?: Intent;
+    process?: Process;
+    meta?: SignalMeta;
 }
 
 // =============================================================================
@@ -77,12 +79,6 @@ export class StoreRegistry {
     register(scopeId: string, store: PlanStore): void {
         this.stores.set(scopeId, store);
         this._storeToScope.set(store, scopeId);
-        for (const plan of store.allPlans())
-            this._index.set(qualify(scopeId, plan.id), { plan });
-        for (const commitment of store.allCommitments())
-            this._index.set(qualify(scopeId, commitment.id), { commitment });
-        for (const intent of store.allIntents())
-            this._index.set(qualify(scopeId, intent.id), { intent });
         if (this._transport?.announce) {
             void this._transport.announce(scopeId, store).catch(() => { /* swallow */ });
         }
@@ -122,7 +118,17 @@ export class StoreRegistry {
      * so callers can safely destructure without null-checking.
      */
     resolve(qualifiedRef: QualifiedRef): ResolvedRecord {
-        return this._index.get(qualifiedRef) ?? {};
+        const cached = this._index.get(qualifiedRef);
+        if (cached) return cached;
+        const parsed = parseRef(qualifiedRef);
+        if (!parsed) return {};
+        const store = this.stores.get(parsed.scopeId);
+        if (!store) return {};
+        const result = this._lookupInStore(store, parsed.recordId);
+        if (result.plan || result.commitment || result.intent || result.process || result.meta) {
+            this._index.set(qualifiedRef, result);
+        }
+        return result;
     }
 
     /**
@@ -130,9 +136,9 @@ export class StoreRegistry {
      * Returns {} if no transport is configured or the remote returns nothing.
      */
     async resolveAsync(qualifiedRef: QualifiedRef): Promise<ResolvedRecord> {
-        // 1. Fast local path
-        const local = this._index.get(qualifiedRef);
-        if (local) return local;
+        // 1. Fast local path (cached or on-demand)
+        const local = this.resolve(qualifiedRef);
+        if (local.plan || local.commitment || local.intent || local.process || local.meta) return local;
         // 2. Degrade gracefully if no transport
         if (!this._transport) return {};
         // 3. Parse and remote-fetch
@@ -156,7 +162,7 @@ export class StoreRegistry {
         parentOf?: Map<string, string>,
     ): ResolvedRecord {
         const local = this._lookup(store, recordId);
-        if (local.plan || local.commitment || local.intent) return local;
+        if (local.plan || local.commitment || local.intent || local.process) return local;
 
         if (!parentOf) return {};
 
@@ -168,7 +174,7 @@ export class StoreRegistry {
                 const parentStore = this.stores.get(current);
                 if (parentStore) {
                     const result = this._lookup(parentStore, recordId);
-                    if (result.plan || result.commitment || result.intent) return result;
+                    if (result.plan || result.commitment || result.intent || result.process) return result;
                 }
                 current = parentOf.get(current);
             }
@@ -218,6 +224,30 @@ export class StoreRegistry {
     private _lookup(store: PlanStore, recordId: string): ResolvedRecord {
         const scopeId = this._storeToScope.get(store);
         if (!scopeId) return {};
-        return this._index.get(qualify(scopeId, recordId)) ?? {};
+        // Check cache first, then on-demand
+        const cached = this._index.get(qualify(scopeId, recordId));
+        if (cached) return cached;
+        const result = this._lookupInStore(store, recordId);
+        if (result.plan || result.commitment || result.intent || result.process || result.meta) {
+            this._index.set(qualify(scopeId, recordId), result);
+        }
+        return result;
+    }
+
+    private _lookupInStore(store: PlanStore, recordId: string): ResolvedRecord {
+        const plan = store.getPlan(recordId);
+        if (plan) return { plan };
+        const commitment = store.getCommitment(recordId);
+        if (commitment) return { commitment };
+        const intent = store.getIntent(recordId);
+        if (intent) {
+            const meta = store.getMeta(recordId);
+            return meta ? { intent, meta } : { intent };
+        }
+        const process = store.allProcesses().find(p => p.id === recordId);
+        if (process) return { process };
+        const meta = store.getMeta(recordId);
+        if (meta) return { meta };
+        return {};
     }
 }

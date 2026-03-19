@@ -8,7 +8,7 @@ import { buildIndependentDemandIndex } from '../indexes/independent-demand';
 import { buildIndependentSupplyIndex } from '../indexes/independent-supply';
 import { buildAgentIndex } from '../indexes/agents';
 import { bufferStatus } from '../algorithms/ddmrp';
-import { PlanStore, PLAN_TAGS, parseConservationNote } from '../planning/planning';
+import { PlanStore, PLAN_TAGS, type ConservationMeta } from '../planning/planning';
 import { ProcessRegistry } from '../process-registry';
 
 const locations = new Map();
@@ -64,7 +64,7 @@ describe('ecological buffer — tippingPoint + ConservationSignal', () => {
 
         const conservationIntents = result.planStore.intentsForTag(PLAN_TAGS.CONSERVATION);
         expect(conservationIntents).toHaveLength(1);
-        const sig = parseConservationNote(conservationIntents[0]);
+        const sig = result.planStore.getMeta(conservationIntents[0].id) as ConservationMeta;
         expect(conservationIntents[0].resourceConformsTo).toBe('soil-n');
         expect(sig.zone).toBe('red');
         expect(sig.onhand).toBe(8);
@@ -93,7 +93,7 @@ describe('ecological buffer — tippingPoint + ConservationSignal', () => {
 
         const conservationIntents = result.planStore.intentsForTag(PLAN_TAGS.CONSERVATION);
         expect(conservationIntents).toHaveLength(1);
-        expect(parseConservationNote(conservationIntents[0]).tippingPointBreached).toBe(true);
+        expect((result.planStore.getMeta(conservationIntents[0].id) as ConservationMeta).tippingPointBreached).toBe(true);
     });
 
     it('ecological buffer does not trigger replenishment purchase intents (even with tag:plan:replenishment-required)', () => {
@@ -181,21 +181,21 @@ describe('ecological buffer — tippingPoint + ConservationSignal', () => {
         const leafResult = planForScope(['leaf'], horizon, ctx);
         const leafConservation = leafResult.planStore.intentsForTag(PLAN_TAGS.CONSERVATION);
         expect(leafConservation).toHaveLength(1);
-        expect(parseConservationNote(leafConservation[0]).tippingPointBreached).toBe(true); // 2 < tippingPoint=5
+        expect((leafResult.planStore.getMeta(leafConservation[0].id) as ConservationMeta).tippingPointBreached).toBe(true); // 2 < tippingPoint=5
 
         // Level 2: commune receives leaf's signal via child PlanStore
         const communeResult = planForScope(['commune'], horizon, ctx, [leafResult.planStore]);
         const communeConservation = communeResult.planStore.intentsForTag(PLAN_TAGS.CONSERVATION);
         expect(communeConservation).toHaveLength(1);
         expect(communeConservation[0].resourceConformsTo).toBe('soil-n');
-        expect(parseConservationNote(communeConservation[0]).tippingPointBreached).toBe(true); // escalated upward
+        expect((communeResult.planStore.getMeta(communeConservation[0].id) as ConservationMeta).tippingPointBreached).toBe(true); // escalated upward
 
         // Level 3: federation receives commune's signal via child PlanStore
         const fedResult = planForScope(['federation'], horizon, ctx, [communeResult.planStore]);
         const fedConservation = fedResult.planStore.intentsForTag(PLAN_TAGS.CONSERVATION);
         expect(fedConservation).toHaveLength(1);
         expect(fedConservation[0].resourceConformsTo).toBe('soil-n');
-        expect(parseConservationNote(fedConservation[0]).tippingPointBreached).toBe(true); // breach preserved
+        expect((fedResult.planStore.getMeta(fedConservation[0].id) as ConservationMeta).tippingPointBreached).toBe(true); // breach preserved
     });
 
     it('tippingPoint breach escalates upward: non-breached parent gets escalated by breached child', () => {
@@ -221,24 +221,27 @@ describe('ecological buffer — tippingPoint + ConservationSignal', () => {
 
         // Child A: onhand=6 → not breached (6 > tippingPoint=5)
         const childA = planForScope(['scope-a'], horizon, ctx);
-        expect(parseConservationNote(childA.planStore.intentsForTag(PLAN_TAGS.CONSERVATION)[0]).tippingPointBreached).toBe(false);
+        const childAConservation = childA.planStore.intentsForTag(PLAN_TAGS.CONSERVATION)[0];
+        expect((childA.planStore.getMeta(childAConservation.id) as ConservationMeta).tippingPointBreached).toBe(false);
 
         // Manually create a breached PlanStore for child B (simulating a different resource instance)
         const childBStore = new PlanStore(new ProcessRegistry(generateId), generateId);
-        childBStore.addIntent({
+        const childBIntent = childBStore.addIntent({
             action: 'cite',
             resourceConformsTo: 'water',
             resourceClassifiedAs: [PLAN_TAGS.CONSERVATION],
             plannedWithin: 'conservation:water',
-            note: JSON.stringify({ onhand: 3, tor: 10, toy: 20, tog: 30, zone: 'red', tippingPointBreached: true }),
             finished: false,
+        });
+        childBStore.setMeta(childBIntent.id, {
+            kind: 'conservation', onhand: 3, tor: 10, toy: 20, tog: 30, zone: 'red', tippingPointBreached: true,
         });
 
         // Parent receives both child PlanStores: first non-breached from A, then breached from B → should escalate
         const parentResult = planForScope(['parent'], horizon, ctx, [childA.planStore, childBStore]);
         const parentConservation = parentResult.planStore.intentsForTag(PLAN_TAGS.CONSERVATION);
         expect(parentConservation).toHaveLength(1);
-        expect(parseConservationNote(parentConservation[0]).tippingPointBreached).toBe(true);
+        expect((parentResult.planStore.getMeta(parentConservation[0].id) as ConservationMeta).tippingPointBreached).toBe(true);
     });
 
     it('planFederation tippingPointBreached merged as true if any scope sees breach', () => {

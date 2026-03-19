@@ -1,19 +1,20 @@
 <script lang="ts">
   import type { Intent } from "$lib/schemas";
-  import { PLAN_TAGS, parseReplenishmentNote } from "$lib/planning/planning";
+  import { type ReplenishmentMeta, type PlanStore } from "$lib/planning/planning";
   import ZoneBadge from "$lib/components/ui/ZoneBadge.svelte";
 
   interface Props {
     signals: Intent[];
+    planStore: PlanStore;
     onApprove?: (intentId: string) => void;
     onReject?: (intentId: string) => void;
     class?: string;
   }
 
-  let { signals, onApprove, onReject, class: cls = "" }: Props = $props();
+  let { signals, planStore, onApprove, onReject, class: cls = "" }: Props = $props();
 
   function parsed(s: Intent) {
-    return parseReplenishmentNote(s);
+    return planStore.getMeta(s.id) as ReplenishmentMeta;
   }
 </script>
 

@@ -23,7 +23,7 @@ import type { RecipeStore } from '../knowledge/recipes';
 import type { Observer } from '../observation/observer';
 import type { IndependentDemandIndex } from '../indexes/independent-demand';
 import type { IndependentSupplyIndex } from '../indexes/independent-supply';
-import { PlanStore, PLAN_TAGS, parseDeficitNote, parseConservationNote } from './planning';
+import { PlanStore, PLAN_TAGS, type DeficitMeta, type ConservationMeta } from './planning';
 import { ProcessRegistry } from '../process-registry';
 import {
     planForScope,
@@ -34,6 +34,57 @@ import type { ConservationSignal } from './plan-for-region';
 import { StoreRegistry } from './store-registry';
 import type { RemoteTransport } from './remote-transport';
 import type { BufferZoneStore } from '../knowledge/buffer-zones';
+
+// =============================================================================
+// TYPES
+// =============================================================================
+
+// =============================================================================
+// LATERAL MATCHING POLICY
+// =============================================================================
+
+export interface LateralMatchingPolicy {
+    /** Whether a surplus should be offered for lateral matching. */
+    shouldOffer(surplus: Intent, scopeId: string): boolean;
+    /** Whether a deficit should request lateral matching. */
+    shouldRequest(deficit: Intent, scopeId: string): boolean;
+    /** Score a potential (offer, request) match. Higher = better. */
+    scoreMatch(offer: Intent, request: Intent, ctx: FederationPlanContext): number;
+}
+
+/** Default policy: replicates current behavior — skip ancestor/descendant, score by min(offerQty, requestQty). */
+export class DefaultLateralMatchingPolicy implements LateralMatchingPolicy {
+    constructor(private parentOf: Map<string, string>) {}
+
+    shouldOffer(_surplus: Intent, _scopeId: string): boolean {
+        return (_surplus.resourceQuantity?.hasNumericalValue ?? 0) > 1e-9;
+    }
+
+    shouldRequest(_deficit: Intent, _scopeId: string): boolean {
+        return (_deficit.resourceQuantity?.hasNumericalValue ?? 0) > 1e-9;
+    }
+
+    scoreMatch(offer: Intent, request: Intent, _ctx: FederationPlanContext): number {
+        const offerScope = offer.provider ?? '';
+        const requestScope = request.receiver ?? request.inScopeOf?.[0] ?? '';
+        if (offerScope === requestScope) return -1;
+        if (this.isAncestorOf(offerScope, requestScope)) return -1;
+        if (this.isAncestorOf(requestScope, offerScope)) return -1;
+        if (offer.resourceConformsTo !== request.resourceConformsTo) return -1;
+        const offerQty = offer.resourceQuantity?.hasNumericalValue ?? 0;
+        const requestQty = request.resourceQuantity?.hasNumericalValue ?? 0;
+        return Math.min(offerQty, requestQty);
+    }
+
+    private isAncestorOf(a: string, b: string): boolean {
+        let cur = this.parentOf.get(b);
+        while (cur) {
+            if (cur === a) return true;
+            cur = this.parentOf.get(cur);
+        }
+        return false;
+    }
+}
 
 // =============================================================================
 // TYPES
@@ -86,6 +137,11 @@ export interface FederationPlanContext {
      * Takes precedence over explicit bufferAlerts.
      */
     bufferZoneStore?: BufferZoneStore;
+    /**
+     * Optional policy controlling lateral matching behavior.
+     * When absent, DefaultLateralMatchingPolicy is used (replicates current behavior).
+     */
+    lateralMatchingPolicy?: LateralMatchingPolicy;
 }
 
 export interface FederationPlanResult {
@@ -108,12 +164,13 @@ export interface FederationPlanResult {
      */
     registry: StoreRegistry;
     /**
-     * Lateral-transfer Intents (tag:plan:lateral-transfer) from the peer matching pass.
-     * Query: federationStore.intentsForTag(PLAN_TAGS.LATERAL_TRANSFER)
-     * Fields: provider = fromScopeId, inScopeOf[0] = toScopeId,
-     *         resourceConformsTo = specId, resourceQuantity.hasNumericalValue = quantity
+     * Federation-level PlanStore holding lateral-transfer Agreements + Commitments.
+     * Query lateral matches via federationStore.allAgreements() and
+     * federationStore.commitmentsForAgreement(id).
      */
     federationStore: PlanStore;
+    /** Agreements created for lateral matches (one per surplus→deficit transfer). */
+    lateralAgreements: import('../schemas').Agreement[];
     /**
      * Ordered federation event log across all planning rounds.
      * Round 0 = bottom-up hierarchy pass, Round 1 = lateral matching.
@@ -297,89 +354,145 @@ export function planFederation(
     // against surplus in unrelated scopes (not ancestor/descendant).
     // -------------------------------------------------------------------------
 
-    // federationStore holds lateral-transfer Intents (tag:plan:lateral-transfer)
+    // federationStore holds lateral-transfer Agreements + Commitments
     const federationStore = new PlanStore(new ProcessRegistry(generateId), generateId);
+    const lateralAgreements: import('../schemas').Agreement[] = [];
+    const policy = ctx.lateralMatchingPolicy ?? new DefaultLateralMatchingPolicy(ctx.parentOf);
 
-    // Build a mutable surplus pool from planStore intents (cross-scope query via registry)
-    const surplusPool = new Map<string, Array<{ scopeId: string; qty: number; intentId: string; unit: string }>>();
+    // --- Phase 1: Publication ---
+    // Collect offers (surplus) filtered by policy
+    const offers: Array<{ scopeId: string; intent: Intent; qty: number; unit: string }> = [];
     for (const { scopeId: sid, intent: i } of registry.intentsForTag(PLAN_TAGS.SURPLUS)) {
-        const specId = i.resourceConformsTo ?? '';
-        const bucket = surplusPool.get(specId) ?? [];
-        bucket.push({
-            scopeId: sid,
-            qty: i.resourceQuantity?.hasNumericalValue ?? 0,
-            intentId: i.id,
-            unit: i.resourceQuantity?.hasUnit ?? 'unit',
-        });
-        surplusPool.set(specId, bucket);
-    }
-
-    // Emit surplus-offered events
-    for (const [specId, entries] of surplusPool) {
-        for (const entry of entries) {
-            if (entry.qty > 1e-9) {
-                events.push({ kind: 'surplus-offered', round: 1, scopeId: entry.scopeId, specId, quantity: entry.qty });
+        if (policy.shouldOffer(i, sid)) {
+            offers.push({
+                scopeId: sid,
+                intent: i,
+                qty: i.resourceQuantity?.hasNumericalValue ?? 0,
+                unit: i.resourceQuantity?.hasUnit ?? 'unit',
+            });
+            if ((i.resourceQuantity?.hasNumericalValue ?? 0) > 1e-9) {
+                events.push({ kind: 'surplus-offered', round: 1, scopeId: sid, specId: i.resourceConformsTo ?? '', quantity: i.resourceQuantity?.hasNumericalValue ?? 0 });
             }
         }
     }
 
-    // Helper: is scope A an ancestor of scope B?
-    const isAncestorOf = (a: string, b: string): boolean => {
-        let cur = ctx.parentOf.get(b);
-        while (cur) {
-            if (cur === a) return true;
-            cur = ctx.parentOf.get(cur);
-        }
-        return false;
-    };
-
-    // Collect unresolved deficits (deduplicated by intentId, cross-scope query via registry)
+    // Collect requests (deficits) filtered by policy
     const seenDeficitIds = new Set<string>();
-    const deficitWork: Array<{
-        scopeId: string; specId: string; shortfall: number; intentId: string;
-        unit: string; isMetabolicDebt: boolean;
-    }> = [];
+    const requests: Array<{ scopeId: string; intent: Intent; shortfall: number; unit: string; intentId: string; specId: string; isMetabolicDebt: boolean }> = [];
     for (const { scopeId: sid, intent: i } of registry.intentsForTag(PLAN_TAGS.DEFICIT)) {
         const shortfall = i.resourceQuantity?.hasNumericalValue ?? 0;
         if (shortfall <= 1e-9) continue;
         if (seenDeficitIds.has(i.id)) continue;
         seenDeficitIds.add(i.id);
-        deficitWork.push({
-            scopeId: sid,
-            specId: i.resourceConformsTo ?? '',
-            shortfall,
-            intentId: i.id,
-            unit: i.resourceQuantity?.hasUnit ?? 'unit',
-            isMetabolicDebt: i.resourceClassifiedAs?.includes(PLAN_TAGS.METABOLIC_DEBT) ?? false,
-        });
-        events.push({ kind: 'deficit-announced', round: 1, scopeId: sid, specId: i.resourceConformsTo ?? '', quantity: shortfall });
+        if (policy.shouldRequest(i, sid)) {
+            requests.push({
+                scopeId: sid,
+                intent: i,
+                shortfall,
+                unit: i.resourceQuantity?.hasUnit ?? 'unit',
+                intentId: i.id,
+                specId: i.resourceConformsTo ?? '',
+                isMetabolicDebt: i.resourceClassifiedAs?.includes(PLAN_TAGS.METABOLIC_DEBT) ?? false,
+            });
+            events.push({ kind: 'deficit-announced', round: 1, scopeId: sid, specId: i.resourceConformsTo ?? '', quantity: shortfall });
+        }
     }
 
-    // Lateral matching: try to match each deficit against a non-hierarchical surplus
-    for (const deficit of deficitWork) {
-        if (deficit.shortfall <= 1e-9) continue;
-        const candidates = surplusPool.get(deficit.specId) ?? [];
-        for (const entry of candidates) {
-            if (entry.qty <= 1e-9) continue;
-            if (entry.scopeId === deficit.scopeId) continue;
-            // Skip ancestor/descendant pairs — the hierarchy already handles those
-            if (isAncestorOf(entry.scopeId, deficit.scopeId)) continue;
-            if (isAncestorOf(deficit.scopeId, entry.scopeId)) continue;
-            const qty = Math.min(deficit.shortfall, entry.qty);
-            entry.qty -= qty;
-            deficit.shortfall -= qty;
-            federationStore.addIntent({
-                action: 'transfer',
-                provider: entry.scopeId,
-                inScopeOf: [deficit.scopeId],
-                resourceConformsTo: deficit.specId,
-                resourceQuantity: { hasNumericalValue: qty, hasUnit: entry.unit },
-                resourceClassifiedAs: [PLAN_TAGS.LATERAL_TRANSFER],
-                finished: false,
-            });
-            events.push({ kind: 'lateral-match', round: 1, scopeId: entry.scopeId, targetScopeId: deficit.scopeId, specId: deficit.specId, quantity: qty });
-            if (deficit.shortfall <= 1e-9) break;
+    // --- Phase 2: Matching ---
+    // Score all (offer, request) pairs, sort descending, greedily accept.
+    // Group by spec to avoid O(offers × requests) cross-product.
+    const matchCandidates: Array<{ offer: typeof offers[0]; request: typeof requests[0]; score: number }> = [];
+
+    const isCustomPolicy = !(policy instanceof DefaultLateralMatchingPolicy);
+    if (isCustomPolicy) {
+        // Custom policies may match cross-spec — fall back to all-pairs
+        for (const offer of offers) {
+            for (const request of requests) {
+                const offerIntent: Intent = { ...offer.intent, provider: offer.scopeId } as Intent;
+                const requestIntent: Intent = { ...request.intent, receiver: request.scopeId } as Intent;
+                const score = policy.scoreMatch(offerIntent, requestIntent, ctx);
+                if (score > 0) {
+                    matchCandidates.push({ offer, request, score });
+                }
+            }
         }
+    } else {
+        // Default policy: spec mismatch always returns -1, so group by spec
+        const offersBySpec = new Map<string, typeof offers>();
+        for (const o of offers) {
+            const spec = o.intent.resourceConformsTo ?? '';
+            let b = offersBySpec.get(spec);
+            if (!b) { b = []; offersBySpec.set(spec, b); }
+            b.push(o);
+        }
+        const requestsBySpec = new Map<string, typeof requests>();
+        for (const r of requests) {
+            const spec = r.specId;
+            let b = requestsBySpec.get(spec);
+            if (!b) { b = []; requestsBySpec.set(spec, b); }
+            b.push(r);
+        }
+        for (const [spec, specOffers] of offersBySpec) {
+            const specRequests = requestsBySpec.get(spec);
+            if (!specRequests) continue;
+            for (const offer of specOffers) {
+                for (const request of specRequests) {
+                    const offerIntent: Intent = { ...offer.intent, provider: offer.scopeId } as Intent;
+                    const requestIntent: Intent = { ...request.intent, receiver: request.scopeId } as Intent;
+                    const score = policy.scoreMatch(offerIntent, requestIntent, ctx);
+                    if (score > 0) {
+                        matchCandidates.push({ offer, request, score });
+                    }
+                }
+            }
+        }
+    }
+    matchCandidates.sort((a, b) => b.score - a.score);
+
+    // Mutable qty trackers
+    const offerRemaining = new Map(offers.map(o => [o, o.qty]));
+    const requestRemaining = new Map(requests.map(r => [r, r.shortfall]));
+
+    for (const { offer, request } of matchCandidates) {
+        const offerQty = offerRemaining.get(offer) ?? 0;
+        const requestQty = requestRemaining.get(request) ?? 0;
+        if (offerQty <= 1e-9 || requestQty <= 1e-9) continue;
+
+        const qty = Math.min(offerQty, requestQty);
+        offerRemaining.set(offer, offerQty - qty);
+        requestRemaining.set(request, requestQty - qty);
+        request.shortfall -= qty;
+
+        const { proposal } = federationStore.publishOffer({
+            provider: offer.scopeId,
+            action: 'transfer',
+            resourceConformsTo: request.specId,
+            resourceQuantity: { hasNumericalValue: qty, hasUnit: request.unit },
+            resourceClassifiedAs: [PLAN_TAGS.LATERAL_TRANSFER],
+        });
+
+        const { agreement, commitments } = federationStore.acceptProposal(
+            proposal.id,
+            { receiver: request.scopeId },
+        );
+        lateralAgreements.push(agreement);
+
+        for (const c of commitments) {
+            if (!c.resourceClassifiedAs?.includes(PLAN_TAGS.LATERAL_TRANSFER)) {
+                c.resourceClassifiedAs = [...(c.resourceClassifiedAs ?? []), PLAN_TAGS.LATERAL_TRANSFER];
+            }
+        }
+
+        events.push({ kind: 'lateral-match', round: 1, scopeId: offer.scopeId, targetScopeId: request.scopeId, specId: request.specId, quantity: qty });
+    }
+
+    // Build deficitWork for subsequent write-back (compatible with downstream code)
+    const deficitWork = requests.map(r => ({
+        scopeId: r.scopeId, specId: r.specId, shortfall: r.shortfall,
+        intentId: r.intentId, unit: r.unit, isMetabolicDebt: r.isMetabolicDebt,
+    }));
+
+    for (const deficit of deficitWork) {
         if (deficit.shortfall > 1e-9) {
             events.push({ kind: 'deficit-propagated', round: 1, scopeId: deficit.scopeId, specId: deficit.specId, quantity: deficit.shortfall });
         }
@@ -393,13 +506,15 @@ export function planFederation(
             const newShortfall = finalShortfall.get(i.id);
             if (newShortfall === undefined) continue;
             if (Math.abs(newShortfall - (i.resourceQuantity?.hasNumericalValue ?? 0)) < 1e-9) continue;
-            const { originalShortfall, resolvedAt } = parseDeficitNote(i);
+            const meta = result.planStore.getMeta(i.id) as DeficitMeta | undefined;
+            const originalShortfall = meta?.originalShortfall ?? i.resourceQuantity?.hasNumericalValue ?? 0;
+            const resolvedAt = meta?.resolvedAt ?? [];
             result.planStore.removeRecords({ intentIds: [i.id] });
-            result.planStore.addIntent({
+            const reEmitted = result.planStore.addIntent({
                 ...i,
                 resourceQuantity: { hasNumericalValue: newShortfall, hasUnit: i.resourceQuantity?.hasUnit ?? 'unit' },
-                note: JSON.stringify({ originalShortfall, resolvedAt }),
             });
+            result.planStore.setMeta(reEmitted.id, { kind: 'deficit', originalShortfall, resolvedAt });
         }
     }
 
@@ -453,7 +568,7 @@ export function planFederation(
     for (const result of byScope.values()) {
         for (const i of result.planStore.intentsForTag(PLAN_TAGS.CONSERVATION)) {
             const specId = i.resourceConformsTo ?? '';
-            const cn = parseConservationNote(i);
+            const cn = result.planStore.getMeta(i.id) as ConservationMeta;
             if (!seenConservationSpecIds.has(specId)) {
                 seenConservationSpecIds.add(specId);
                 allConservationSignals.push({
@@ -480,6 +595,7 @@ export function planFederation(
         allPurchaseIntents,
         registry,
         federationStore,
+        lateralAgreements,
         events,
         allConservationSignals,
     };

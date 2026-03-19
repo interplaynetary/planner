@@ -108,6 +108,27 @@ export class AgentStore {
     // MANAGEMENT
     // =========================================================================
 
+    /** Remove a single relationship by ID. Returns true if found. */
+    removeRelationship(id: string): boolean {
+        return this.relationships.delete(id);
+    }
+
+    /**
+     * Remove an agent and cascade-delete all relationships where the agent
+     * is either subject or object.  Returns the IDs of removed relationships.
+     */
+    removeAgent(id: string): string[] {
+        this.agentsMap.delete(id);
+        const removed: string[] = [];
+        for (const [relId, rel] of this.relationships) {
+            if (rel.subject === id || rel.object === id) {
+                this.relationships.delete(relId);
+                removed.push(relId);
+            }
+        }
+        return removed;
+    }
+
     clear(): void {
         this.agentsMap.clear();
         this.roles.clear();

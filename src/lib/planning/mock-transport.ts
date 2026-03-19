@@ -19,6 +19,12 @@ export class MockTransport implements RemoteTransport {
         for (const plan of snapshot.plans)             bucket.set(plan.id, { plan });
         for (const commitment of snapshot.commitments) bucket.set(commitment.id, { commitment });
         for (const intent of snapshot.intents)         bucket.set(intent.id, { intent });
+        for (const process of snapshot.processes)       bucket.set(process.id, { process });
+        for (const [id, m] of Object.entries(snapshot.meta)) {
+            const existing = bucket.get(id);
+            if (existing) existing.meta = m;
+            else bucket.set(id, { meta: m });
+        }
         this.store.set(scopeId, bucket);
         this.announced.push(scopeId);
     }

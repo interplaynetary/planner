@@ -7,11 +7,11 @@
   } from "./ScopeNetworkDiagram.svelte";
   import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
   import {
-    PLAN_TAGS, parseDeficitNote, deficitShortfall,
+    PLAN_TAGS, deficitShortfall, type DeficitMeta,
     tradeFrom, tradeTo, tradeSpec, tradeQty,
   } from "$lib/planning/planning";
   import type { StoreRegistry } from "$lib/planning/store-registry";
-  import type { Intent } from "$lib/schemas";
+  import type { Intent, Commitment } from "$lib/schemas";
   import type { Observer } from "$lib/observation/observer";
   import type { FlowSelectCtx } from "$lib/components/vf/observe-types";
 
@@ -21,7 +21,7 @@
     observer: Observer;
     specNames: Record<string, string>;
     registry: StoreRegistry;
-    tradeProposals?: Intent[];
+    tradeProposals?: (Intent | Commitment)[];
     bufferZones?: SimpleBufferZone[];
     capacityBuffers?: SimpleCapacityBuffer[];
     onclose: () => void;
@@ -55,8 +55,8 @@
   const surplus = $derived(result.planStore.intentsForTag(PLAN_TAGS.SURPLUS));
   const metabolicDebt = $derived(result.planStore.intentsForTag(PLAN_TAGS.METABOLIC_DEBT));
 
-  function deficitOrigShortfall(i: Intent): number { return parseDeficitNote(i).originalShortfall; }
-  function deficitResolvedAt(i: Intent): string[] { return parseDeficitNote(i).resolvedAt; }
+  function deficitOrigShortfall(i: Intent): number { return (result.planStore.getMeta(i.id) as DeficitMeta)?.originalShortfall ?? 0; }
+  function deficitResolvedAt(i: Intent): string[] { return (result.planStore.getMeta(i.id) as DeficitMeta)?.resolvedAt ?? []; }
 
   let mode = $state<"plan" | "observe">("plan");
 

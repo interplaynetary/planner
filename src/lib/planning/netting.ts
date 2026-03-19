@@ -15,7 +15,7 @@
  * flow is never double-counted.
  */
 
-import type { PlanStore } from './planning';
+import { type PlanStore, PLAN_TAGS } from './planning';
 import type { Observer } from '../observation/observer';
 import type { ScheduleBook } from './schedule-book';
 import { isWithinTemporalExpression } from '../utils/time';
@@ -27,6 +27,12 @@ import { isWithinTemporalExpression } from '../utils/time';
  * labour records as inventory drawdowns.
  */
 const NON_CONSUMING_ACTIONS = new Set(['use', 'work', 'cite', 'deliverService']);
+
+/** Planning signals are NOT scheduled production — skip them when scanning for outputOf supply. */
+function isPlanningSignal(classified?: string[]): boolean {
+    if (!classified) return false;
+    return classified.some(t => t.startsWith('tag:plan:'));
+}
 
 // =============================================================================
 // TYPES
@@ -61,10 +67,14 @@ export class PlanNetter {
     /** Per-plan attribution: planId → set of flow IDs claimed by that plan's explosion. */
     private readonly claimedByPlan: Map<string, Set<string>> = new Map();
 
+    /** Soft-allocation Intent IDs emitted by this netter for VF provenance. */
+    private readonly allocationIntentIds = new Set<string>();
+
     constructor(
         private readonly planStore: PlanStore,
         private readonly observer?: Observer,
         private readonly scheduleBook?: ScheduleBook,
+        private readonly conservationFloors?: Map<string, number>,
     ) {}
 
     /**
@@ -100,7 +110,10 @@ export class PlanNetter {
             for (const r of available) {
                 if (remaining <= 0) break;
                 const avail = r.accountingQuantity?.hasNumericalValue ?? 0;
-                const take = Math.min(avail, remaining);
+                const floor = this.conservationFloors?.get(specId) ?? 0;
+                const allocatable = Math.max(0, avail - floor);
+                const take = Math.min(allocatable, remaining);
+                if (take <= 0) continue;
                 inventoryAllocated.push({ resourceId: r.id, quantity: take });
                 remaining -= take;
             }
@@ -108,13 +121,13 @@ export class PlanNetter {
 
         // --- Step 2: Scheduled output Intents (outputOf set) ---
         if (remaining > 0) {
-            for (const intent of this.planStore.allIntents()) {
+            for (const intent of this.planStore.intentsForSpec(specId)) {
                 if (remaining <= 0) break;
                 if (
-                    intent.resourceConformsTo === specId &&
                     intent.outputOf !== undefined &&
                     !intent.finished &&
                     !this.allocated.has(intent.id) &&
+                    !isPlanningSignal(intent.resourceClassifiedAs) &&
                     (intent.resourceQuantity?.hasNumericalValue ?? 0) > 0
                 ) {
                     // Temporal guard: output must be ready by neededBy
@@ -126,6 +139,17 @@ export class PlanNetter {
                     if (planId) {
                         if (!this.claimedByPlan.has(planId)) this.claimedByPlan.set(planId, new Set());
                         this.claimedByPlan.get(planId)!.add(intent.id);
+                        // VF provenance: emit a soft-allocation Intent linking to the claimed flow
+                        const allocIntent = this.planStore.addIntent({
+                            action: intent.action,
+                            resourceConformsTo: specId,
+                            resourceQuantity: { hasNumericalValue: take, hasUnit: intent.resourceQuantity!.hasUnit },
+                            resourceClassifiedAs: [PLAN_TAGS.SOFT_ALLOCATION],
+                            satisfies: intent.id,
+                            plannedWithin: planId,
+                            finished: false,
+                        });
+                        this.allocationIntentIds.add(allocIntent.id);
                     }
                     remaining -= take;
                 }
@@ -134,10 +158,9 @@ export class PlanNetter {
 
         // --- Step 3: Scheduled output Commitments (outputOf set) ---
         if (remaining > 0) {
-            for (const commitment of this.planStore.allCommitments()) {
+            for (const commitment of this.planStore.commitmentsForSpec(specId)) {
                 if (remaining <= 0) break;
                 if (
-                    commitment.resourceConformsTo === specId &&
                     commitment.outputOf !== undefined &&
                     !commitment.finished &&
                     !this.allocated.has(commitment.id) &&
@@ -152,6 +175,17 @@ export class PlanNetter {
                     if (planId) {
                         if (!this.claimedByPlan.has(planId)) this.claimedByPlan.set(planId, new Set());
                         this.claimedByPlan.get(planId)!.add(commitment.id);
+                        // VF provenance: emit a soft-allocation Intent linking to the claimed flow
+                        const allocIntent = this.planStore.addIntent({
+                            action: commitment.action,
+                            resourceConformsTo: specId,
+                            resourceQuantity: { hasNumericalValue: take, hasUnit: commitment.resourceQuantity!.hasUnit },
+                            resourceClassifiedAs: [PLAN_TAGS.SOFT_ALLOCATION],
+                            satisfies: commitment.id,
+                            plannedWithin: planId,
+                            finished: false,
+                        });
+                        this.allocationIntentIds.add(allocIntent.id);
                     }
                     remaining -= take;
                 }
@@ -172,10 +206,9 @@ export class PlanNetter {
         let remaining = qty;
 
         // --- Scheduled consumption Intents (inputOf set) ---
-        for (const intent of this.planStore.allIntents()) {
+        for (const intent of this.planStore.intentsForSpec(specId)) {
             if (remaining <= 0) break;
             if (
-                intent.resourceConformsTo === specId &&
                 intent.inputOf !== undefined &&
                 !NON_CONSUMING_ACTIONS.has(intent.action) &&
                 !intent.finished &&
@@ -193,10 +226,9 @@ export class PlanNetter {
         }
 
         // --- Scheduled consumption Commitments (inputOf set) ---
-        for (const commitment of this.planStore.allCommitments()) {
+        for (const commitment of this.planStore.commitmentsForSpec(specId)) {
             if (remaining <= 0) break;
             if (
-                commitment.resourceConformsTo === specId &&
                 commitment.inputOf !== undefined &&
                 !NON_CONSUMING_ACTIONS.has(commitment.action) &&
                 !commitment.finished &&
@@ -276,6 +308,19 @@ export class PlanNetter {
                 for (const set of this.claimedByPlan.values()) set.delete(id);
             }
         }
+        // Prune orphaned allocation Intents whose satisfies target no longer exists
+        const orphaned: string[] = [];
+        for (const allocId of this.allocationIntentIds) {
+            const allocIntent = this.planStore.getIntent(allocId);
+            if (!allocIntent) { orphaned.push(allocId); continue; }
+            if (allocIntent.satisfies && !validIds.has(allocIntent.satisfies)) {
+                orphaned.push(allocId);
+            }
+        }
+        if (orphaned.length > 0) {
+            this.planStore.removeRecords({ intentIds: orphaned });
+            for (const id of orphaned) this.allocationIntentIds.delete(id);
+        }
     }
 
     /**
@@ -288,6 +333,13 @@ export class PlanNetter {
         if (claimed) {
             for (const id of claimed) this.allocated.delete(id);
             this.claimedByPlan.delete(planId);
+        }
+        // Remove allocation Intents for the released plan
+        const toRemove = this.planStore.intentsForTag(PLAN_TAGS.SOFT_ALLOCATION)
+            .filter(i => i.plannedWithin === planId);
+        if (toRemove.length > 0) {
+            this.planStore.removeRecords({ intentIds: toRemove.map(i => i.id) });
+            for (const i of toRemove) this.allocationIntentIds.delete(i.id);
         }
     }
 
@@ -312,6 +364,7 @@ export class PlanNetter {
             this.planStore,
             opts ? opts.observer : this.observer,
             this.scheduleBook,
+            this.conservationFloors,
         );
         for (const id of this.allocated) child.allocated.add(id);
         return child;
@@ -358,12 +411,12 @@ export class PlanNetter {
         }
 
         // Scheduled outputs (not yet allocated)
-        for (const intent of this.planStore.allIntents()) {
+        for (const intent of this.planStore.intentsForSpec(specId)) {
             if (
-                intent.resourceConformsTo === specId &&
                 intent.outputOf !== undefined &&
                 !intent.finished &&
                 !this.allocated.has(intent.id) &&
+                !isPlanningSignal(intent.resourceClassifiedAs) &&
                 (intent.resourceQuantity?.hasNumericalValue ?? 0) > 0
             ) {
                 // Temporal guard: only count outputs that are ready by asOf
@@ -373,9 +426,8 @@ export class PlanNetter {
                 total += intent.resourceQuantity!.hasNumericalValue;
             }
         }
-        for (const commitment of this.planStore.allCommitments()) {
+        for (const commitment of this.planStore.commitmentsForSpec(specId)) {
             if (
-                commitment.resourceConformsTo === specId &&
                 commitment.outputOf !== undefined &&
                 !commitment.finished &&
                 !this.allocated.has(commitment.id) &&
@@ -392,9 +444,8 @@ export class PlanNetter {
         // Subtract scheduled consumptions (not yet allocated).
         // Skip non-consuming actions (use/work/cite/deliverService): they record usage
         // but don't reduce inventory (onhandEffect = 'noEffect').
-        for (const intent of this.planStore.allIntents()) {
+        for (const intent of this.planStore.intentsForSpec(specId)) {
             if (
-                intent.resourceConformsTo === specId &&
                 intent.inputOf !== undefined &&
                 !NON_CONSUMING_ACTIONS.has(intent.action) &&
                 !intent.finished &&
@@ -408,9 +459,8 @@ export class PlanNetter {
                 total -= intent.resourceQuantity!.hasNumericalValue;
             }
         }
-        for (const commitment of this.planStore.allCommitments()) {
+        for (const commitment of this.planStore.commitmentsForSpec(specId)) {
             if (
-                commitment.resourceConformsTo === specId &&
                 commitment.inputOf !== undefined &&
                 !NON_CONSUMING_ACTIONS.has(commitment.action) &&
                 !commitment.finished &&
@@ -425,6 +475,7 @@ export class PlanNetter {
             }
         }
 
-        return Math.max(0, total);
+        const floor = this.conservationFloors?.get(specId) ?? 0;
+        return Math.max(0, total - floor);
     }
 }

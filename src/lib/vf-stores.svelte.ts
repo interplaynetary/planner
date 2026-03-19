@@ -9,6 +9,7 @@ import { Observer }              from '$lib/observation/observer';
 import { Commune }               from '$lib/observation/account';
 import type { DemandEntry }      from '$lib/observation/account';
 import type { CommuneDemandPolicy, DerivedDependentPolicy } from '$lib/observation/demand-policy';
+import { buildMembershipIndex, type MembershipIndex } from '$lib/indexes/membership';
 import type {
     ResourceSpecification,
     ProcessSpecification,
@@ -20,6 +21,7 @@ import type {
     EconomicResource,
     EconomicEvent,
     Agent,
+    AgentRelationship,
     BufferZone,
     BufferProfile,
     CapacityBuffer,
@@ -103,6 +105,37 @@ export interface MemberSnapshot {
 }
 export const communeMembersState = $state<MemberSnapshot[]>([]);
 
+// ── Membership index (agent-derived federation hierarchy) ─────────────────
+export const relationshipList = $state<AgentRelationship[]>([]);
+export const membershipIndex = $state<MembershipIndex>({
+    citizens: new Set(),
+    personToScope: new Map(),
+    scopeParent: new Map(),
+    scopeToDescendantCitizens: new Map(),
+});
+
+// ── Derived federation inputs ─────────────────────────────────────────────
+
+/** All scopes reachable via membership relationships. */
+export const federationScopeIds = $derived.by(() => {
+    const idx = membershipIndex;
+    const ids = new Set<string>();
+    for (const scope of idx.personToScope.values()) ids.add(scope);
+    for (const [child, parent] of idx.scopeParent) { ids.add(child); ids.add(parent); }
+    return [...ids];
+});
+
+/** scopeParent as a Map (ready for planFederation ctx.parentOf). */
+export const federationParentOf = $derived.by(() => new Map(membershipIndex.scopeParent));
+
+/** Leaf member counts: persons directly assigned to each scope. */
+export const federationMemberCounts = $derived.by(() => {
+    const counts = new Map<string, number>();
+    for (const scope of membershipIndex.personToScope.values())
+        counts.set(scope, (counts.get(scope) ?? 0) + 1);
+    return counts;
+});
+
 // ── refresh() — sync all $state arrays from the current store instances ──
 function syncArr<T>(target: T[], items: T[]): void {
     target.splice(0, target.length, ...items);
@@ -171,6 +204,12 @@ export function refresh() {
     syncArr(resourceList,   observer.allResources());
     syncArr(eventList,      observer.allEvents());
     syncArr(agentList,               agents.allAgents());
+    syncArr(relationshipList,        agents.allRelationships());
+    const rebuilt = buildMembershipIndex(agents.allAgents(), agents.allRelationships());
+    membershipIndex.citizens = rebuilt.citizens;
+    membershipIndex.personToScope = rebuilt.personToScope;
+    membershipIndex.scopeParent = rebuilt.scopeParent;
+    membershipIndex.scopeToDescendantCitizens = rebuilt.scopeToDescendantCitizens;
     syncArr(bufferZoneList,          bufferZones.allBufferZones());
     syncArr(capacityBufferList,      capacityBuffers.allBuffers());
     syncArr(locationList,            locations.allLocations());
@@ -196,6 +235,11 @@ export function resetStores() {
     resourcePriceSvc.clear();
     adjustmentFactorList.splice(0, adjustmentFactorList.length);
     bufferProfileList.splice(0, bufferProfileList.length);
+    relationshipList.splice(0, relationshipList.length);
+    membershipIndex.citizens = new Set();
+    membershipIndex.personToScope = new Map();
+    membershipIndex.scopeParent = new Map();
+    membershipIndex.scopeToDescendantCitizens = new Map();
     communeDemandPolicies.splice(0, communeDemandPolicies.length);
     derivedDependentPolicies.splice(0, derivedDependentPolicies.length);
     communeState.activeAgentId = null;

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { SvelteMap } from "svelte/reactivity";
-  import type { EconomicResource, Intent } from "$lib/schemas";
+  import type { EconomicResource, Intent, Commitment } from "$lib/schemas";
   import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
   import {
-    PLAN_TAGS, parseDeficitNote, deficitShortfall,
+    PLAN_TAGS, deficitShortfall, type DeficitMeta,
     tradeFrom, tradeTo, tradeSpec, tradeQty,
   } from "$lib/planning/planning";
 
@@ -20,7 +20,7 @@
     planOrder: string[];
     byScope: Map<string, ScopePlanResult>;
     parentOf: (id: string) => string | undefined;
-    tradeProposals?: Intent[];
+    tradeProposals?: (Intent | Commitment)[];
     resourcesByScope?: Map<string, EconomicResource[]>;
     buffersByScope?: Map<string, BufferEntry[]>;
     selected?: string;
@@ -40,7 +40,7 @@
   }
   function scopeTotalOrig(r: ScopePlanResult): number {
     return r.planStore.intentsForTag(PLAN_TAGS.DEFICIT)
-      .reduce((s, i) => s + parseDeficitNote(i).originalShortfall, 0);
+      .reduce((s, i) => s + ((r.planStore.getMeta(i.id) as DeficitMeta)?.originalShortfall ?? 0), 0);
   }
   function scopeTotalShort(r: ScopePlanResult): number {
     return r.planStore.intentsForTag(PLAN_TAGS.DEFICIT)

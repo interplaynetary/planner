@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach } from 'bun:test';
 import { PlanNetter } from '../planning/netting';
-import { PlanStore } from '../planning/planning';
+import { PlanStore, PLAN_TAGS } from '../planning/planning';
 import { ProcessRegistry } from '../process-registry';
 import { Observer } from '../observation/observer';
 import type { EconomicResource } from '../schemas';
@@ -623,5 +623,73 @@ describe('PlanNetter', () => {
         // A subsequent netDemand should still be able to consume the same intent
         const result = netter.netDemand('spec:polyester', 7);
         expect(result.remaining).toBe(0);
+    });
+
+    // ── Tag-aware netting: planning signals excluded ─────────────────────
+
+    describe('tag-aware netting exclusion', () => {
+        test('signal Intent with outputOf is NOT consumed by netDemand', () => {
+            // A deficit-tagged Intent has outputOf (planning signal) → netting must skip it
+            planStore.addIntent({
+                action: 'produce',
+                outputOf: processId,
+                resourceConformsTo: 'spec:grain',
+                resourceQuantity: { hasNumericalValue: 10, hasUnit: 'kg' },
+                resourceClassifiedAs: [PLAN_TAGS.DEFICIT],
+                plannedWithin: plan.id,
+                finished: false,
+            });
+
+            const netter = new PlanNetter(planStore);
+            const result = netter.netDemand('spec:grain', 10);
+
+            // Signal Intent should be skipped → full remaining
+            expect(result.remaining).toBe(10);
+        });
+
+        test('non-signal Intent with outputOf IS consumed by netDemand (regression guard)', () => {
+            // A regular production Intent (no tag:plan: tags) should still be absorbed
+            planStore.addIntent({
+                action: 'produce',
+                outputOf: processId,
+                resourceConformsTo: 'spec:grain',
+                resourceQuantity: { hasNumericalValue: 10, hasUnit: 'kg' },
+                plannedWithin: plan.id,
+                finished: false,
+            });
+
+            const netter = new PlanNetter(planStore);
+            const result = netter.netDemand('spec:grain', 10);
+
+            expect(result.remaining).toBe(0);
+        });
+
+        test('netAvailableQty excludes signal Intents with outputOf', () => {
+            // Surplus-tagged Intent with outputOf → should NOT count as scheduled output
+            planStore.addIntent({
+                action: 'transfer',
+                outputOf: processId,
+                resourceConformsTo: 'spec:grain',
+                resourceQuantity: { hasNumericalValue: 8, hasUnit: 'kg' },
+                resourceClassifiedAs: [PLAN_TAGS.SURPLUS],
+                plannedWithin: plan.id,
+                finished: false,
+            });
+            // Regular production Intent → SHOULD count
+            planStore.addIntent({
+                action: 'produce',
+                outputOf: processId,
+                resourceConformsTo: 'spec:grain',
+                resourceQuantity: { hasNumericalValue: 5, hasUnit: 'kg' },
+                plannedWithin: plan.id,
+                finished: false,
+            });
+
+            const netter = new PlanNetter(planStore);
+            const qty = netter.netAvailableQty('spec:grain');
+
+            // Only the non-signal intent (5) counted, surplus (8) excluded
+            expect(qty).toBe(5);
+        });
     });
 });

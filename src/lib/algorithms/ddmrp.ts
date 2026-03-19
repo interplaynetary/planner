@@ -594,10 +594,10 @@ export function qualifyDemand(
         return true;
     }
 
-    for (const c of planStore.allCommitments()) {
+    for (const c of planStore.commitmentsForSpec(specId)) {
         if (qualifies(c)) qualified += c.resourceQuantity?.hasNumericalValue ?? 0;
     }
-    for (const i of planStore.allIntents()) {
+    for (const i of planStore.intentsForSpec(specId)) {
         if (qualifies(i)) qualified += i.resourceQuantity?.hasNumericalValue ?? 0;
     }
 
@@ -635,9 +635,8 @@ export function computeNFP(
         .reduce((sum, r) => sum + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
 
     let onorder = 0;
-    for (const c of planStore.allCommitments()) {
+    for (const c of planStore.commitmentsForSpec(specId)) {
         if (
-            c.resourceConformsTo === specId &&
             c.outputOf !== undefined &&
             !NON_CONSUMING_ACTIONS.has(c.action) &&
             !c.finished
@@ -952,8 +951,8 @@ export function projectOnHand(
         map.set(dateStr, (map.get(dateStr) ?? 0) + qty);
     }
 
-    for (const c of planStore.allCommitments()) {
-        if (c.resourceConformsTo !== specId || c.finished || !c.due) continue;
+    for (const c of planStore.commitmentsForSpec(specId)) {
+        if (c.finished || !c.due) continue;
         const d = c.due.slice(0, 10);
         const qty = c.resourceQuantity?.hasNumericalValue ?? 0;
         if (c.outputOf && !NON_CONSUMING_ACTIONS.has(c.action)) {
@@ -962,9 +961,8 @@ export function projectOnHand(
             bucket(demandByDay, d, qty);
         }
     }
-    for (const i of planStore.allIntents()) {
+    for (const i of planStore.intentsForSpec(specId)) {
         if (
-            i.resourceConformsTo === specId &&
             i.inputOf &&
             !NON_CONSUMING_ACTIONS.has(i.action) &&
             !i.finished &&
@@ -1672,9 +1670,8 @@ export function materialSyncShortfall(
 
         // Demand: consuming Commitments + Intents due within horizon
         let demand = 0;
-        for (const c of planStore.allCommitments()) {
+        for (const c of planStore.commitmentsForSpec(specId)) {
             if (
-                c.resourceConformsTo === specId &&
                 c.inputOf !== undefined &&
                 !NON_CONSUMING_ACTIONS.has(c.action) &&
                 !c.finished &&
@@ -1683,9 +1680,8 @@ export function materialSyncShortfall(
                 demand += c.resourceQuantity?.hasNumericalValue ?? 0;
             }
         }
-        for (const i of planStore.allIntents()) {
+        for (const i of planStore.intentsForSpec(specId)) {
             if (
-                i.resourceConformsTo === specId &&
                 i.inputOf !== undefined &&
                 !NON_CONSUMING_ACTIONS.has(i.action) &&
                 !i.finished &&
@@ -1697,9 +1693,8 @@ export function materialSyncShortfall(
 
         // Supply: outputOf Commitments due within horizon
         let supply = 0;
-        for (const c of planStore.allCommitments()) {
+        for (const c of planStore.commitmentsForSpec(specId)) {
             if (
-                c.resourceConformsTo === specId &&
                 c.outputOf !== undefined &&
                 !NON_CONSUMING_ACTIONS.has(c.action) &&
                 !c.finished &&
@@ -2466,8 +2461,8 @@ export function recommendBufferType(
  *
  * Workflow for each zone:
  *   1. computeADU() from the provided events slice
- *   2. recalibrateBufferZone() with fresh ADU + DLT from zone.dltDays
- *      (DLT segmentation — Gap 6 — would provide a segmented DLT here)
+ *   2. recalibrateBufferZone() with fresh ADU + dynamic DLT from legLeadTime()
+ *      (falls back to zone.dltDays when no replenishmentRecipeId is set)
  *   3. Store the updated zone back via bufferZoneStore.replaceZone()
  *
  * Zones without a matching profile in profileMap are skipped.
@@ -2478,6 +2473,7 @@ export function recommendBufferType(
  * @param profileMap       profileId → BufferProfile mapping
  * @param events           Historical EconomicEvents for ADU computation
  * @param adjustments      Active DemandAdjustmentFactors for the period
+ * @param recipeStore      RecipeStore for dynamic DLT computation via legLeadTime()
  * @param asOf             Reference date (today)
  * @param opts.windowDays  ADU rolling window in days (default 84 — 12 weeks)
  */
@@ -2486,6 +2482,7 @@ export function orchestrateBufferRecalibration(
     profileMap: Map<string, BufferProfile>,
     events: EconomicEvent[],
     adjustments: DemandAdjustmentFactor[],
+    recipeStore: RecipeStore,
     asOf: Date,
     opts?: { windowDays?: number },
 ): void {
@@ -2494,7 +2491,12 @@ export function orchestrateBufferRecalibration(
         const profile = profileMap.get(zone.profileId);
         if (!profile) continue;
         const { adu } = computeADU(events, zone.specId, windowDays, asOf);
-        const updated = recalibrateBufferZone(zone, adu, zone.dltDays, profile, adjustments, asOf);
+        let dlt = zone.dltDays;
+        if (zone.replenishmentRecipeId) {
+            const computed = legLeadTime(zone.replenishmentRecipeId, zone.upstreamStageId, zone.downstreamStageId, recipeStore);
+            if (computed > 0) dlt = computed;
+        }
+        const updated = recalibrateBufferZone(zone, adu, dlt, profile, adjustments, asOf);
         bufferZoneStore.replaceZone(updated);
     }
 }

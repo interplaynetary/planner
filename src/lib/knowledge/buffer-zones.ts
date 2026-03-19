@@ -14,15 +14,14 @@
  */
 
 import { nanoid } from 'nanoid';
-import type { BufferZone, ReplenishmentSignal } from '../schemas';
+import type { BufferZone } from '../schemas';
 
 // =============================================================================
 // BUFFER ZONE STORE
 // =============================================================================
 
 export class BufferZoneStore {
-    private zones   = new Map<string, BufferZone>();
-    private signals = new Map<string, ReplenishmentSignal>();
+    private zones = new Map<string, BufferZone>();
 
     constructor(private generateId: () => string = () => nanoid()) {}
 
@@ -127,64 +126,4 @@ export class BufferZoneStore {
         });
     }
 
-    // =========================================================================
-    // ReplenishmentSignal CRUD
-    // =========================================================================
-
-    /**
-     * Store a ReplenishmentSignal. If `id` is omitted, one is generated.
-     * Generated signals come from generateReplenishmentSignal() in ddmrp.ts.
-     */
-    addSignal(signal: Omit<ReplenishmentSignal, 'id'> & { id?: string }): ReplenishmentSignal {
-        const s: ReplenishmentSignal = { id: signal.id ?? this.generateId(), ...signal } as ReplenishmentSignal;
-        this.signals.set(s.id, s);
-        return s;
-    }
-
-    getSignal(id: string): ReplenishmentSignal | undefined {
-        return this.signals.get(id);
-    }
-
-    allSignals(): ReplenishmentSignal[] {
-        return Array.from(this.signals.values());
-    }
-
-    /** All signals with status 'open' — awaiting approval or rejection. */
-    openSignals(): ReplenishmentSignal[] {
-        return Array.from(this.signals.values()).filter(s => s.status === 'open');
-    }
-
-    /** All signals for a given ResourceSpecification ID. */
-    signalsForSpec(specId: string): ReplenishmentSignal[] {
-        return Array.from(this.signals.values()).filter(s => s.specId === specId);
-    }
-
-    /**
-     * All signals whose dueDate is on or before `asOf` and status is still 'open'.
-     * Used for the LTM alert screen: signals that should have been approved by now.
-     */
-    overdueSignals(asOf: Date): ReplenishmentSignal[] {
-        const asOfStr = asOf.toISOString().slice(0, 10);
-        return Array.from(this.signals.values())
-            .filter(s => s.status === 'open' && s.dueDate <= asOfStr);
-    }
-
-    /**
-     * Update a signal's status (approved / rejected) and optionally set
-     * approvedCommitmentId. Called by PlanStore.promoteSignalToCommitment()
-     * when you want the store copy kept in sync too.
-     *
-     * @throws if signal ID is not found
-     */
-    updateSignalStatus(
-        id: string,
-        status: 'approved' | 'rejected',
-        approvedCommitmentId?: string,
-    ): ReplenishmentSignal {
-        const existing = this.signals.get(id);
-        if (!existing) throw new Error(`ReplenishmentSignal ${id} not found`);
-        existing.status = status;
-        if (approvedCommitmentId) existing.approvedCommitmentId = approvedCommitmentId;
-        return existing;
-    }
 }

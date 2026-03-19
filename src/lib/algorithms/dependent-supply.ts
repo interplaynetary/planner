@@ -33,16 +33,20 @@ import type {
     Process,
     Commitment,
     Intent,
-    RecipeFlow,
     RecipeProcess,
     EconomicResource,
 } from '../schemas';
 import { ACTION_DEFINITIONS } from '../schemas';
 import type { RecipeStore } from '../knowledge/recipes';
-import type { PlanStore } from '../planning/planning';
+import type { PlanStore, EconomicContext } from '../planning/planning';
 import { PlanNetter } from '../planning/netting';
 import type { Observer } from '../observation/observer';
 import type { ProcessRegistry } from '../process-registry';
+import {
+    rpDurationMs,
+    computeSnlt,
+    createFlowRecord,
+} from './propagation';
 
 // =============================================================================
 // TYPES
@@ -101,15 +105,11 @@ interface SupplyTask {
  * @param agents - Optional: assign provider/receiver on commitments
  * @param generateId - Optional: ID generator (defaults to nanoid)
  */
-export function dependentSupply(params: {
+export function dependentSupply(params: EconomicContext & {
     planId: string;
     supplySpecId: string;
     supplyQuantity: number;
     availableFrom: Date;
-    recipeStore: RecipeStore;
-    planStore: PlanStore;
-    processes: ProcessRegistry;
-    observer?: Observer;
     agents?: { provider?: string; receiver?: string };
     generateId?: () => string;
     /** Optional shared netter — pass to share allocated state across algorithm calls (Mode C). */
@@ -394,40 +394,6 @@ function processSupply(
     }
 }
 
-/**
- * Compute SNLT (Socially Necessary Labour Time) for one recipe execution,
- * expressed as total work-hours per unit of primary output.
- *
- * Lower SNLT = more labour-efficient. Used to rank candidate recipes.
- * Recipes with zero work flows have SNLT=0 (pure material transformation).
- * Returns Infinity for degenerate recipes with no primary output.
- */
-function computeSnlt(recipeStore: RecipeStore, recipeId: string): number {
-    const recipe = recipeStore.getRecipe(recipeId);
-    const chain = recipeStore.getProcessChain(recipeId);
-
-    let totalWorkHours = 0;
-    for (const rp of chain) {
-        const { inputs } = recipeStore.flowsForProcess(rp.id);
-        for (const flow of inputs) {
-            if (flow.action === 'work') {
-                totalWorkHours += flow.effortQuantity?.hasNumericalValue ?? 0;
-            }
-        }
-    }
-
-    const primaryOutputSpec = recipe?.primaryOutput;
-    if (!primaryOutputSpec) return totalWorkHours;
-
-    const lastProcess = chain[chain.length - 1];
-    if (!lastProcess) return Infinity;
-    const { outputs } = recipeStore.flowsForProcess(lastProcess.id);
-    const primaryFlow = outputs.find(f => f.resourceConformsTo === primaryOutputSpec);
-    const outputQty = primaryFlow?.resourceQuantity?.hasNumericalValue ?? 0;
-    if (outputQty <= 0) return Infinity;
-
-    return totalWorkHours / outputQty;
-}
 
 /**
  * Compute the maximum number of recipe executions constrained by OTHER materials
@@ -478,98 +444,6 @@ function computeMaxByOtherMaterials(
     return minExecutions;
 }
 
-/**
- * Create a Commitment (when both agents known) or Intent (when agents unknown)
- * from a RecipeFlow.
- */
-function createFlowRecord(
-    flow: RecipeFlow,
-    processId: string,
-    direction: 'input' | 'output',
-    scaleFactor: number,
-    dueDate: Date,
-    planId: string,
-    agents: { provider?: string; receiver?: string } | undefined,
-    planStore: PlanStore,
-    atLocation?: string,
-): Commitment | Intent {
-    const def = ACTION_DEFINITIONS[flow.action];
-    if (def && def.inputOutput !== 'outputInput' && def.inputOutput !== 'notApplicable') {
-        if (direction === 'input' && def.inputOutput !== 'input') {
-            throw new Error(
-                `Action '${flow.action}' (inputOutput='${def.inputOutput}') ` +
-                `cannot be used as a process input.`
-            );
-        }
-        if (direction === 'output' && def.inputOutput !== 'output') {
-            throw new Error(
-                `Action '${flow.action}' (inputOutput='${def.inputOutput}') ` +
-                `cannot be used as a process output.`
-            );
-        }
-    }
-
-    const scaledQty = flow.resourceQuantity
-        ? { hasNumericalValue: flow.resourceQuantity.hasNumericalValue * scaleFactor, hasUnit: flow.resourceQuantity.hasUnit }
-        : undefined;
-    const scaledEffort = flow.effortQuantity
-        ? { hasNumericalValue: flow.effortQuantity.hasNumericalValue * scaleFactor, hasUnit: flow.effortQuantity.hasUnit }
-        : undefined;
-
-    const provider = agents?.provider;
-    const receiver = agents?.receiver;
-
-    if (provider && receiver) {
-        return planStore.addCommitment({
-            action: flow.action,
-            inputOf: direction === 'input' ? processId : undefined,
-            outputOf: direction === 'output' ? processId : undefined,
-            resourceConformsTo: flow.resourceConformsTo,
-            resourceClassifiedAs: flow.resourceClassifiedAs,
-            resourceQuantity: scaledQty,
-            effortQuantity: scaledEffort,
-            stage: flow.stage,
-            state: flow.state,
-            provider,
-            receiver,
-            due: dueDate.toISOString(),
-            created: new Date().toISOString(),
-            plannedWithin: planId,
-            atLocation,
-            finished: false,
-        });
-    }
-
-    return planStore.addIntent({
-        action: flow.action,
-        inputOf: direction === 'input' ? processId : undefined,
-        outputOf: direction === 'output' ? processId : undefined,
-        resourceConformsTo: flow.resourceConformsTo,
-        resourceClassifiedAs: flow.resourceClassifiedAs,
-        resourceQuantity: scaledQty,
-        effortQuantity: scaledEffort,
-        stage: flow.stage,
-        state: flow.state,
-        provider,
-        receiver,
-        due: dueDate.toISOString(),
-        plannedWithin: planId,
-        atLocation,
-        finished: false,
-    });
-}
-
-function rpDurationMs(rp: { hasDuration?: { hasNumericalValue: number; hasUnit: string } }): number {
-    if (!rp.hasDuration) return 3_600_000; // default: 1 hour
-    const { hasNumericalValue: v, hasUnit: u } = rp.hasDuration;
-    switch (u) {
-        case 'days': return v * 86_400_000;
-        case 'hours': return v * 3_600_000;
-        case 'minutes': return v * 60_000;
-        case 'seconds': return v * 1_000;
-        default: return v * 3_600_000; // assume hours
-    }
-}
 
 // =============================================================================
 // CONVENIENCE WRAPPER

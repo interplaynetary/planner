@@ -1,20 +1,21 @@
 /**
- * planForUnit — generic planning orchestrator parameterized by LocationStrategy.
+ * planForUnit — generic planning orchestrator parameterized by PlanningMode.
  *
  * Unifies the common algorithm from planForScope and planForRegion into a single
  * function. The 5 axes of difference (normalization, extraction, classification,
- * backtracking, Phase B observer) are delegated to a LocationStrategy.
+ * backtracking, Phase B observer) are delegated to a PlanningMode composed of
+ * SpatialModel, ScopePolicy, and SacrificePolicy.
  *
  * Algorithm phases:
- *   Phase 0: Normalise location IDs (strategy.normalize)
- *   Phase 1: Extract demand/supply slots (strategy.extractSlots)
- *   Phase 2: Classify each demand slot (strategy.classifySlot)
+ *   Phase 0: Normalise location IDs (mode.spatial.normalize)
+ *   Phase 1: Extract demand/supply slots (mode.spatial.extractSlots)
+ *   Phase 2: Classify each demand slot (mode.spatial.classifySlot)
  *   Phase 3: Formulate
  *     Pass 1: Explode primary independent demands (class order → due date)
  *     Derived: Compute replenishment demands from Pass 1 allocations
  *     Pass 2: Explode derived replenishment demands; collect metabolicDebt
- *     Backtrack: Retract demands to free capacity (strategy.selectRetractCandidate)
- *   Phase B: Forward-schedule unabsorbed supply (strategy.observerForSupply)
+ *     Backtrack: Retract demands to free capacity (mode.sacrifice.selectRetractCandidate)
+ *   Phase B: Forward-schedule unabsorbed supply (mode.spatial.observerForSupply)
  *   Phase 4: Collect result
  */
 
@@ -22,10 +23,10 @@ import { nanoid } from 'nanoid';
 
 import type { Intent, BufferProfile } from '../schemas';
 import type { RecipeStore } from '../knowledge/recipes';
-import { PlanStore, PLAN_TAGS, NON_CONSUMING_ACTIONS, parseDeficitNote, parseConservationNote } from './planning';
+import { PlanStore, PLAN_TAGS, PLANNING_PROCESS_SPEC, NON_CONSUMING_ACTIONS, type DeficitMeta, type ConservationMeta, type PlanningMeta } from './planning';
 import { ProcessRegistry } from '../process-registry';
 import { PlanNetter } from './netting';
-import { dependentDemand } from '../algorithms/dependent-demand';
+import { dependentDemand, type DependentDemandResult } from '../algorithms/dependent-demand';
 import { dependentSupply } from '../algorithms/dependent-supply';
 import { bufferStatus, computeNFP, generateReplenishmentSignal, type NFPResult } from '../algorithms/ddmrp';
 import type { BufferZoneStore } from '../knowledge/buffer-zones';
@@ -34,7 +35,7 @@ import type { IndependentDemandIndex } from '../indexes/independent-demand';
 import type { IndependentSupplyIndex, SupplySlot } from '../indexes/independent-supply';
 import type { Observer } from '../observation/observer';
 import type {
-    LocationStrategy,
+    PlanningMode,
     SlotRecord,
     SurplusSignal,
     MetabolicDebt,
@@ -71,6 +72,20 @@ export interface UnitPlanResult {
 }
 
 // =============================================================================
+// PLANNING SESSION
+// =============================================================================
+
+export interface PlanningSession {
+    mode: PlanningMode;
+    canonical: string[];
+    horizon: { from: Date; to: Date };
+    ctx: UnitPlanContext;
+    planStore: PlanStore;
+    netter: PlanNetter;
+    generateId: () => string;
+}
+
+// =============================================================================
 // INTERNAL TYPES
 // =============================================================================
 
@@ -92,6 +107,28 @@ interface InternalDeficit {
     source: 'unmet_demand' | 'metabolic_debt';
     originalShortfall?: number;
     resolvedAt?: string[];
+}
+
+export interface ExtractResult {
+    rawDemands: DemandSlot[];
+    extractedSupply: SupplySlot[];
+    childProvenance: Map<string, { originalShortfall: number; resolvedAt: string[]; originLocation: string }>;
+}
+
+export interface FormulateResult {
+    pass1Records: SlotRecord[];
+    allPurchaseIntents: Intent[];
+    unmetDemand: DemandSlot[];
+    allDeficits: InternalDeficit[];
+    allConservationData: Array<{
+        specId: string; onhand: number; tor: number; toy: number; tog: number;
+        zone: 'red' | 'yellow'; tippingPointBreached?: boolean;
+    }>;
+}
+
+export interface SupplyResult {
+    allSurplus: SurplusSignal[];
+    supplyPurchaseIntents: Intent[];
 }
 
 // =============================================================================
@@ -166,29 +203,25 @@ export function detectConflicts(planStore: PlanStore, observer: Observer): Confl
 // PLAN FOR UNIT
 // =============================================================================
 
-export function planForUnit(
-    strategy: LocationStrategy,
-    ids: string[],
-    horizon: { from: Date; to: Date },
-    ctx: UnitPlanContext,
+// =============================================================================
+// PHASE FUNCTIONS
+// =============================================================================
+
+/** Phase 0: Normalize location IDs. */
+export function normalizePhase(mode: PlanningMode, ids: string[]): string[] {
+    return mode.spatial.normalize(ids);
+}
+
+/** Phase 1: Extract demand/supply slots and child signals. */
+export function extractPhase(
+    session: PlanningSession,
     subStores?: PlanStore[],
-): UnitPlanResult {
-    const generateId = ctx.generateId ?? (() => nanoid());
-
-    // -------------------------------------------------------------------------
-    // Phase 0 — Normalise
-    // -------------------------------------------------------------------------
-    const canonical = strategy.normalize(ids);
-
-    // -------------------------------------------------------------------------
-    // Phase 1 — Extract demand and supply slots
-    // -------------------------------------------------------------------------
-    const { demands: rawDemands, supply: extractedSupply } = strategy.extractSlots(
-        canonical, horizon, ctx.demandIndex, ctx.supplyIndex,
+): ExtractResult {
+    const { demands: rawDemands, supply: extractedSupply } = session.mode.spatial.extractSlots(
+        session.canonical, session.horizon, session.ctx.demandIndex, session.ctx.supplyIndex,
     );
 
-    // Inject child signals directly from child PlanStores
-    const childProvenanceByIntentId = new Map<string, {
+    const childProvenance = new Map<string, {
         originalShortfall: number; resolvedAt: string[]; originLocation: string;
     }>();
     if (subStores && subStores.length > 0) {
@@ -200,10 +233,12 @@ export function planForUnit(
                     if (hasDebtTag !== isDebt) continue;
                     if (seenIntentId.has(i.id)) continue;
                     seenIntentId.add(i.id);
-                    const { originalShortfall, resolvedAt } = parseDeficitNote(i);
+                    const deficitMeta = childStore.getMeta(i.id) as DeficitMeta | undefined;
+                    const originalShortfall = deficitMeta?.originalShortfall ?? i.resourceQuantity?.hasNumericalValue ?? 0;
+                    const resolvedAt = deficitMeta?.resolvedAt ?? [];
                     const shortfall = i.resourceQuantity?.hasNumericalValue ?? 0;
                     const originLocation = i.inScopeOf?.[0] ?? i.atLocation ?? '';
-                    childProvenanceByIntentId.set(i.id, {
+                    childProvenance.set(i.id, {
                         originalShortfall,
                         resolvedAt: resolvedAt.length > 0 ? resolvedAt : (originLocation ? [originLocation] : []),
                         originLocation,
@@ -225,7 +260,6 @@ export function planForUnit(
             }
         }
 
-        // Inject child surplus as synthetic supply slots
         const seenSurplus = new Set<string>();
         for (const childStore of subStores) {
             for (const i of childStore.intentsForTag(PLAN_TAGS.SURPLUS)) {
@@ -246,30 +280,36 @@ export function planForUnit(
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Phase 2 — Classify demand slots
-    // -------------------------------------------------------------------------
-    const classified = rawDemands.map(slot => ({
+    return { rawDemands, extractedSupply, childProvenance };
+}
+
+/** Phase 2: Classify each demand slot. */
+export function classifyPhase(
+    session: PlanningSession,
+    demands: DemandSlot[],
+): Array<{ slot: DemandSlot; slotClass: DemandSlotClass }> {
+    return demands.map(slot => ({
         slot,
-        slotClass: strategy.classifySlot(slot, canonical, ctx.supplyIndex, ctx.recipeStore),
+        slotClass: session.mode.spatial.classifySlot(slot, session.canonical, session.ctx.supplyIndex, session.ctx.recipeStore),
     }));
+}
 
-    // -------------------------------------------------------------------------
-    // Phase 3 — Formulate
-    // -------------------------------------------------------------------------
-
-    let planStore: PlanStore;
-    if (subStores && subStores.length > 0) {
-        planStore = mergePlanStores(subStores, generateId);
-    } else {
-        planStore = new PlanStore(new ProcessRegistry(generateId), generateId);
-    }
-
+/** Phase 3: Formulate — Pass 1, derived demands, Pass 2, backtracking. */
+export function formulatePhase(
+    session: PlanningSession,
+    classified: Array<{ slot: DemandSlot; slotClass: DemandSlotClass }>,
+    extractedSupply: SupplySlot[],
+    subStores?: PlanStore[],
+    childProvenance?: Map<string, { originalShortfall: number; resolvedAt: string[]; originLocation: string }>,
+): FormulateResult {
+    const { mode, canonical, horizon, ctx, planStore, netter, generateId } = session;
+    const childProvenanceByIntentId = childProvenance ?? new Map();
     const processes = planStore.processes;
-    const netter = new PlanNetter(planStore, ctx.observer);
+    const econ: import('./planning').EconomicContext = {
+        recipeStore: ctx.recipeStore, planStore, processes, observer: ctx.observer,
+    };
 
-    // Federation boundary seeding
-    const seededIntentIds = strategy.injectFederationSeeds(planStore, ctx.supplyIndex);
+    const seededIntentIds = mode.scope.injectFederationSeeds(planStore, ctx.supplyIndex);
 
     const pass1Records: SlotRecord[] = [];
     const allPurchaseIntents: Intent[] = [];
@@ -281,7 +321,6 @@ export function planForUnit(
         zone: 'red' | 'yellow'; tippingPointBreached?: boolean;
     }> = [];
 
-    // Sort: classification order → due date ascending
     const sortedSlots = [...classified].sort((a, b) => {
         const classDiff = (CLASS_ORDER[a.slotClass] ?? 3) - (CLASS_ORDER[b.slotClass] ?? 3);
         if (classDiff !== 0) return classDiff;
@@ -297,8 +336,7 @@ export function planForUnit(
         const planId = `plan-${generateId()}`;
         planStore.addPlan({ id: planId, name: `Demand plan for ${slot.spec_id}` });
 
-        // Strategy-specific transport-candidate handling
-        const transportResult = strategy.handleTransportCandidate(
+        const transportResult = mode.scope.handleTransportCandidate(
             slot, planStore, planId, ctx.recipeStore, ctx.agents,
         );
         if (transportResult && slotClass === 'transport-candidate') {
@@ -308,16 +346,13 @@ export function planForUnit(
         }
 
         const result = dependentDemand({
+            ...econ,
             planId,
             demandSpecId: slot.spec_id,
             demandQuantity: slot.remaining_quantity,
             dueDate: slot.due ? new Date(slot.due) : horizon.to,
-            recipeStore: ctx.recipeStore,
-            planStore,
-            processes,
-            observer: ctx.observer,
             netter,
-            atLocation: strategy.locationOf(slot),
+            atLocation: mode.spatial.locationOf(slot),
             agents: ctx.agents,
             generateId,
             honorDecouplingPoints: true,
@@ -328,7 +363,7 @@ export function planForUnit(
 
         const childProvPass1 = childProvenanceByIntentId.get(slot.intent_id);
         if (childProvPass1?.originLocation) {
-            strategy.annotateChildCommitments(result.commitments, childProvPass1.originLocation);
+            mode.scope.annotateChildCommitments(result.commitments, childProvPass1.originLocation);
         }
     }
 
@@ -342,7 +377,7 @@ export function planForUnit(
             const resolvedHere = childProv
                 ? (childProv.originalShortfall ?? unresolved) - unresolved > 1e-9
                 : false;
-            const location = strategy.locationOf(record.slot) ?? canonical[0];
+            const location = mode.spatial.locationOf(record.slot) ?? canonical[0];
             allDeficits.push({
                 plannedWithin: record.result.plan.id,
                 intentId: record.slot.intent_id,
@@ -364,7 +399,7 @@ export function planForUnit(
     for (const record of pass1Records) {
         for (const [bufferSpecId, qty] of record.result.boundaryStops) {
             if (qty <= 1e-9) continue;
-            const location = strategy.locationOf(record.slot) ?? canonical[0];
+            const location = mode.spatial.locationOf(record.slot) ?? canonical[0];
             allDeficits.push({
                 plannedWithin: record.result.plan.id,
                 intentId: `boundary:${record.slot.intent_id}:${bufferSpecId}`,
@@ -411,7 +446,6 @@ export function planForUnit(
                 if ((zoneStatus === 'red' || zoneStatus === 'yellow') && ctx.bufferZoneStore) {
                     const spec = ctx.recipeStore.getResourceSpec(bz.specId);
                     if (!spec?.resourceClassifiedAs?.includes('tag:buffer:ecological')) {
-                        // Check for existing open replenishment Intent (no duplicates)
                         const noOpenSignal = !planStore.intentsForTag(PLAN_TAGS.REPLENISHMENT)
                             .some(i => i.resourceConformsTo === bz.specId && !i.finished);
                         if (noOpenSignal) {
@@ -420,29 +454,24 @@ export function planForUnit(
                                 zone: zoneStatus, priority: bz.tog > 0 ? onhand / bz.tog : 0,
                             };
                             const sig = generateReplenishmentSignal(bz.specId, bz.atLocation, bz, nfpForSignal, today, generateId);
-                            // Emit as tagged VF Intent (receiver-side request: "refill this buffer")
+                            const replenMeta = {
+                                onhand: sig.onhand, onorder: sig.onorder,
+                                qualifiedDemand: sig.qualifiedDemand, nfp: sig.nfp,
+                                priority: sig.priority, zone: sig.zone,
+                                recommendedQty: sig.recommendedQty, dueDate: sig.dueDate,
+                                bufferZoneId: sig.bufferZoneId, createdAt: sig.createdAt,
+                                status: 'open' as const,
+                            };
                             planStore.addIntent({
-                                id: sig.id,
-                                action: 'produce',
-                                receiver: ctx.agents?.receiver,
+                                id: sig.id, action: 'produce', receiver: ctx.agents?.receiver,
                                 resourceConformsTo: sig.specId,
-                                resourceQuantity: {
-                                    hasNumericalValue: sig.recommendedQty,
-                                    hasUnit: bz.aduUnit,
-                                },
+                                resourceQuantity: { hasNumericalValue: sig.recommendedQty, hasUnit: bz.aduUnit },
                                 due: `${sig.dueDate}T00:00:00.000Z`,
                                 ...(sig.atLocation ? { atLocation: sig.atLocation } : {}),
                                 resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT],
-                                note: JSON.stringify({
-                                    onhand: sig.onhand, onorder: sig.onorder,
-                                    qualifiedDemand: sig.qualifiedDemand, nfp: sig.nfp,
-                                    priority: sig.priority, zone: sig.zone,
-                                    recommendedQty: sig.recommendedQty, dueDate: sig.dueDate,
-                                    bufferZoneId: sig.bufferZoneId, createdAt: sig.createdAt,
-                                    status: 'open',
-                                }),
                                 finished: false,
                             });
+                            planStore.setMeta(sig.id, { kind: 'replenishment', ...replenMeta });
                         }
                     }
                 }
@@ -482,7 +511,6 @@ export function planForUnit(
         derivedDemands.push({ specId, qty });
     }
 
-    // Inject buffer-zone alert demands for specs not already in derivedDemands
     if (effectiveAlerts) {
         for (const [specId, alert] of effectiveAlerts) {
             if (alert.zone === 'red' || alert.zone === 'yellow') {
@@ -505,7 +533,6 @@ export function planForUnit(
         }
     }
 
-    // Sort red-first
     {
         const ZONE_PRIORITY: Record<string, number> = { red: 0, yellow: 1, green: 2, excess: 3 };
         derivedDemands.sort((a, b) =>
@@ -515,26 +542,15 @@ export function planForUnit(
 
     // --- Pass 2: derived replenishment demands ---
     const replenNetter = netter.fork({ observer: undefined });
-
     for (const { specId, qty } of derivedDemands) {
         const replenPlanId = `replenish-${generateId()}`;
         planStore.addPlan({ id: replenPlanId, name: `Replenishment for ${specId}` });
         const result = dependentDemand({
-            planId: replenPlanId,
-            demandSpecId: specId,
-            demandQuantity: qty,
-            dueDate: horizon.to,
-            recipeStore: ctx.recipeStore,
-            planStore,
-            processes,
-            observer: undefined,
-            netter: replenNetter,
-            agents: ctx.agents,
-            generateId,
+            ...econ, observer: undefined,
+            planId: replenPlanId, demandSpecId: specId, demandQuantity: qty,
+            dueDate: horizon.to, netter: replenNetter, agents: ctx.agents, generateId,
         });
-
         allPurchaseIntents.push(...result.purchaseIntents);
-
         const purchasedQty = result.purchaseIntents
             .filter(i => i.resourceConformsTo === specId)
             .reduce((s, i) => s + (i.resourceQuantity?.hasNumericalValue ?? 0), 0);
@@ -546,11 +562,75 @@ export function planForUnit(
     // --- Backtracking ---
     if (replenDebts.length > 0) {
         const remaining = new Set(pass1Records);
-
         while (replenDebts.length > 0 && remaining.size > 0) {
-            if (strategy.recordSacrifice === undefined) break;
+            if (mode.sacrifice.recordSacrifice === undefined) break;
 
-            const candidate = strategy.selectRetractCandidate(remaining, canonical);
+            // Scored backtracking: when optional multi-candidate methods are present
+            if (mode.sacrifice.selectRetractCandidates && mode.sacrifice.scoreCandidate) {
+                const candidates = mode.sacrifice.selectRetractCandidates(remaining, canonical, 3);
+                let best: { score: number; candidate: SlotRecord | undefined; result: import('../algorithms/dependent-demand').DependentDemandResult | null } =
+                    { score: -Infinity, candidate: undefined, result: null };
+                for (const c of candidates) {
+                    const trialNetter = netter.fork({});
+                    trialNetter.retract(c.result);
+                    const trialPlanId = `trial-${generateId()}`;
+                    planStore.addPlan({ id: trialPlanId, name: `Trial for ${c.slot.spec_id}` });
+                    const trialResult = c.slot.spec_id ? dependentDemand({
+                        ...econ, planId: trialPlanId,
+                        demandSpecId: c.slot.spec_id, demandQuantity: c.slot.remaining_quantity,
+                        dueDate: c.slot.due ? new Date(c.slot.due) : horizon.to,
+                        netter: trialNetter, atLocation: mode.spatial.locationOf(c.slot),
+                        agents: ctx.agents, generateId, honorDecouplingPoints: true,
+                    }) : null;
+                    if (trialResult) {
+                        const score = mode.sacrifice.scoreCandidate(trialResult, c.slot);
+                        if (score > best.score) best = { score, candidate: c, result: trialResult };
+                    }
+                    // Clean up trial plan records
+                    planStore.removeRecordsForPlan(trialPlanId);
+                }
+                if (best.candidate) {
+                    remaining.delete(best.candidate);
+                    netter.retract(best.candidate.result);
+                    // Re-explode on real netter
+                    const reExplodePlanId = `reexplode-${generateId()}`;
+                    planStore.addPlan({ id: reExplodePlanId, name: `Re-explode for ${best.candidate.slot.spec_id}` });
+                    const reResult = best.candidate.slot.spec_id ? dependentDemand({
+                        ...econ, planId: reExplodePlanId,
+                        demandSpecId: best.candidate.slot.spec_id, demandQuantity: best.candidate.slot.remaining_quantity,
+                        dueDate: best.candidate.slot.due ? new Date(best.candidate.slot.due) : horizon.to,
+                        netter, atLocation: mode.spatial.locationOf(best.candidate.slot),
+                        agents: ctx.agents, generateId, honorDecouplingPoints: true,
+                    }) : null;
+                    if (reResult && mode.sacrifice.isReExplodeSuccess(reResult)) {
+                        const backtrackChildProv = childProvenanceByIntentId.get(best.candidate.slot.intent_id);
+                        if (backtrackChildProv?.originLocation) {
+                            mode.scope.annotateChildCommitments(reResult.commitments, backtrackChildProv.originLocation);
+                        }
+                        pass1Records.push({ slot: best.candidate.slot, slotClass: best.candidate.slotClass, result: reResult });
+                    } else {
+                        const candidateLocation = mode.spatial.locationOf(best.candidate.slot) ?? canonical[0];
+                        mode.sacrifice.recordSacrifice(best.candidate.slot, canonical);
+                        unmetDemand.push(best.candidate.slot);
+                        allDeficits.push({
+                            plannedWithin: best.candidate.result.plan.id,
+                            intentId: best.candidate.slot.intent_id,
+                            specId: best.candidate.slot.spec_id ?? '',
+                            action: best.candidate.slot.action,
+                            shortfall: best.candidate.slot.remaining_quantity,
+                            due: best.candidate.slot.due,
+                            location: candidateLocation,
+                            source: 'unmet_demand',
+                        });
+                    }
+                    const idx = pass1Records.indexOf(best.candidate);
+                    if (idx >= 0) pass1Records.splice(idx, 1);
+                    continue;
+                }
+            }
+
+            // Existing greedy path
+            const candidate = mode.sacrifice.selectRetractCandidate(remaining, canonical);
             if (!candidate) break;
             remaining.delete(candidate);
 
@@ -562,9 +642,9 @@ export function planForUnit(
                 const retryPlanId = `replenish-retry-${generateId()}`;
                 planStore.addPlan({ id: retryPlanId, name: `Retry replenishment for ${debt.specId}` });
                 const reResult = dependentDemand({
+                    ...econ, observer: undefined,
                     planId: retryPlanId, demandSpecId: debt.specId, demandQuantity: debt.shortfall,
-                    dueDate: horizon.to, recipeStore: ctx.recipeStore, planStore, processes,
-                    observer: undefined, netter: retryReplenNetter, agents: ctx.agents, generateId,
+                    dueDate: horizon.to, netter: retryReplenNetter, agents: ctx.agents, generateId,
                 });
                 allPurchaseIntents.push(...reResult.purchaseIntents);
                 const newPurchasedQty = reResult.purchaseIntents
@@ -575,30 +655,25 @@ export function planForUnit(
             }
             replenDebts.splice(0, replenDebts.length, ...replenDebts.filter(d => !resolvedDebt.includes(d.specId)));
 
-            // Re-explode with freed capacity
             const reExplodePlanId = `reexplode-${generateId()}`;
             planStore.addPlan({ id: reExplodePlanId, name: `Re-explode for ${candidate.slot.spec_id}` });
             const reResult = candidate.slot.spec_id ? dependentDemand({
-                planId: reExplodePlanId,
-                demandSpecId: candidate.slot.spec_id,
-                demandQuantity: candidate.slot.remaining_quantity,
+                ...econ, planId: reExplodePlanId,
+                demandSpecId: candidate.slot.spec_id, demandQuantity: candidate.slot.remaining_quantity,
                 dueDate: candidate.slot.due ? new Date(candidate.slot.due) : horizon.to,
-                recipeStore: ctx.recipeStore, planStore, processes,
-                observer: ctx.observer, netter, atLocation: strategy.locationOf(candidate.slot),
-                agents: ctx.agents, generateId,
-                honorDecouplingPoints: true,
+                netter, atLocation: mode.spatial.locationOf(candidate.slot),
+                agents: ctx.agents, generateId, honorDecouplingPoints: true,
             }) : null;
 
-            if (reResult && strategy.isReExplodeSuccess(reResult)) {
+            if (reResult && mode.sacrifice.isReExplodeSuccess(reResult)) {
                 const backtrackChildProv = childProvenanceByIntentId.get(candidate.slot.intent_id);
                 if (backtrackChildProv?.originLocation) {
-                    strategy.annotateChildCommitments(reResult.commitments, backtrackChildProv.originLocation);
+                    mode.scope.annotateChildCommitments(reResult.commitments, backtrackChildProv.originLocation);
                 }
                 pass1Records.push({ slot: candidate.slot, slotClass: candidate.slotClass, result: reResult });
             } else {
-                const candidateLocation = strategy.locationOf(candidate.slot) ?? canonical[0];
-                const limitReached = strategy.recordSacrifice(candidate.slot, canonical);
-
+                const candidateLocation = mode.spatial.locationOf(candidate.slot) ?? canonical[0];
+                const limitReached = mode.sacrifice.recordSacrifice(candidate.slot, canonical);
                 unmetDemand.push(candidate.slot);
                 const backtrackProv = childProvenanceByIntentId.get(candidate.slot.intent_id);
                 allDeficits.push({
@@ -613,7 +688,6 @@ export function planForUnit(
                     originalShortfall: backtrackProv?.originalShortfall ?? candidate.slot.remaining_quantity,
                     resolvedAt: backtrackProv?.resolvedAt,
                 });
-
                 if (limitReached) break;
             }
 
@@ -641,10 +715,21 @@ export function planForUnit(
         netter.pruneStale();
     }
 
-    // -------------------------------------------------------------------------
-    // Phase B — Forward-schedule unabsorbed supply
-    // -------------------------------------------------------------------------
+    return { pass1Records, allPurchaseIntents, unmetDemand, allDeficits, allConservationData };
+}
+
+/** Phase B: Forward-schedule unabsorbed supply. */
+export function supplyPhase(
+    session: PlanningSession,
+    extractedSupply: SupplySlot[],
+): SupplyResult {
+    const { mode, horizon, ctx, planStore, netter, generateId } = session;
+    const processes = planStore.processes;
+    const econ: import('./planning').EconomicContext = {
+        recipeStore: ctx.recipeStore, planStore, processes, observer: ctx.observer,
+    };
     const allSurplus: SurplusSignal[] = [];
+    const supplyPurchaseIntents: Intent[] = [];
 
     for (const supplySlot of extractedSupply) {
         if (!supplySlot.spec_id) continue;
@@ -653,8 +738,7 @@ export function planForUnit(
         const supplyPlanId = `supply-${generateId()}`;
         planStore.addPlan({ id: supplyPlanId, name: `Supply plan for ${supplySlot.spec_id}` });
 
-        // Strategy-specific scheduled_receipt handling
-        const directSurplus = strategy.handleScheduledReceipt(
+        const directSurplus = mode.scope.handleScheduledReceipt(
             supplySlot, planStore, processes, ctx.recipeStore, generateId, supplyPlanId,
         );
         if (directSurplus) {
@@ -662,19 +746,16 @@ export function planForUnit(
             continue;
         }
 
-        const supplyObserver = strategy.observerForSupply(ctx.observer, canonical);
-
+        const supplyObserver = mode.spatial.observerForSupply(ctx.observer, session.canonical);
         const result = dependentSupply({
+            ...econ,
+            observer: supplyObserver,
             planId: supplyPlanId,
             supplySpecId: supplySlot.spec_id,
             supplyQuantity: supplySlot.quantity,
             availableFrom: supplySlot.available_from
                 ? new Date(supplySlot.available_from)
                 : horizon.from,
-            recipeStore: ctx.recipeStore,
-            planStore,
-            processes,
-            observer: supplyObserver,
             netter,
             agents: ctx.agents,
             generateId,
@@ -689,33 +770,60 @@ export function planForUnit(
                 atLocation: supplySlot.h3_cell,
             });
         }
-        allPurchaseIntents.push(...result.purchaseIntents);
+        supplyPurchaseIntents.push(...result.purchaseIntents);
     }
 
-    // -------------------------------------------------------------------------
+    return { allSurplus, supplyPurchaseIntents };
+}
+
+/** Phase 4: Collect — merge conflicts, emit signals, return result. */
+export function collectPhase(
+    session: PlanningSession,
+    formulate: FormulateResult,
+    supply: SupplyResult,
+    subStores?: PlanStore[],
+): UnitPlanResult {
+    const { mode, canonical, horizon, ctx, planStore, netter, generateId } = session;
+    const childProvenanceByIntentId = new Map<string, { originalShortfall: number; resolvedAt: string[]; originLocation: string }>();
+    if (subStores && subStores.length > 0) {
+        for (const childStore of subStores) {
+            for (const i of childStore.intentsForTag(PLAN_TAGS.DEFICIT)) {
+                const deficitMeta = childStore.getMeta(i.id) as DeficitMeta | undefined;
+                const originalShortfall = deficitMeta?.originalShortfall ?? i.resourceQuantity?.hasNumericalValue ?? 0;
+                const resolvedAt = deficitMeta?.resolvedAt ?? [];
+                const originLocation = i.inScopeOf?.[0] ?? i.atLocation ?? '';
+                childProvenanceByIntentId.set(i.id, {
+                    originalShortfall,
+                    resolvedAt: resolvedAt.length > 0 ? resolvedAt : (originLocation ? [originLocation] : []),
+                    originLocation,
+                });
+            }
+        }
+    }
+
+    const econ: import('./planning').EconomicContext = {
+        recipeStore: ctx.recipeStore, planStore, processes: planStore.processes, observer: ctx.observer,
+    };
+
+    const { pass1Records, allPurchaseIntents, unmetDemand, allDeficits, allConservationData } = formulate;
+    allPurchaseIntents.push(...supply.supplyPurchaseIntents);
+    const { allSurplus } = supply;
+
     // Merge planner: conflict detection and surgical resolution
-    // -------------------------------------------------------------------------
     if (subStores && subStores.length > 0) {
         let conflicts = detectConflicts(planStore, ctx.observer);
         let iterations = 0;
         const MAX_ITERATIONS = 10;
-
         while (conflicts.length > 0 && iterations < MAX_ITERATIONS) {
             iterations++;
-
             for (const conflict of conflicts) {
                 if (conflict.type !== 'inventory-overclaim') continue;
-
                 const competingProcessIds = conflict.candidates.filter(Boolean);
-
                 const scored = competingProcessIds.map(procId => {
-                    const record = pass1Records.find(r =>
-                        r.result.processes.some(p => p.id === procId),
-                    );
+                    const record = pass1Records.find(r => r.result.processes.some(p => p.id === procId));
                     const due = record?.slot.due ? new Date(record.slot.due).getTime() : 0;
                     return { procId, due, record };
                 });
-
                 scored.sort((a, b) => {
                     const aClass = CLASS_ORDER[a.record?.slotClass ?? 'external-dependency'] ?? 3;
                     const bClass = CLASS_ORDER[b.record?.slotClass ?? 'external-dependency'] ?? 3;
@@ -723,13 +831,12 @@ export function planForUnit(
                     if (classDiff !== 0) return classDiff;
                     return b.due - a.due;
                 });
-
                 for (const { record } of scored) {
                     if (!record) continue;
                     netter.retract(record.result);
                     unmetDemand.push(record.slot);
                     const mergeProv = childProvenanceByIntentId.get(record.slot.intent_id);
-                    const mergeLocation = strategy.locationOf(record.slot) ?? canonical[0];
+                    const mergeLocation = mode.spatial.locationOf(record.slot) ?? canonical[0];
                     allDeficits.push({
                         plannedWithin: record.result.plan.id,
                         intentId: record.slot.intent_id,
@@ -742,52 +849,34 @@ export function planForUnit(
                         originalShortfall: mergeProv?.originalShortfall ?? record.slot.remaining_quantity,
                         resolvedAt: mergeProv?.resolvedAt,
                     });
-
                     const { slot } = record;
                     if (slot.spec_id) {
                         const mergeReplanId = `merge-replan-${generateId()}`;
                         planStore.addPlan({ id: mergeReplanId, name: `Merge replan for ${slot.spec_id}` });
                         const reResult = dependentDemand({
-                            planId: mergeReplanId,
-                            demandSpecId: slot.spec_id,
-                            demandQuantity: slot.remaining_quantity,
+                            ...econ, planId: mergeReplanId,
+                            demandSpecId: slot.spec_id, demandQuantity: slot.remaining_quantity,
                             dueDate: slot.due ? new Date(slot.due) : horizon.to,
-                            recipeStore: ctx.recipeStore,
-                            planStore,
-                            processes,
-                            observer: ctx.observer,
-                            netter,
-                            agents: ctx.agents,
-                            generateId,
-                            honorDecouplingPoints: true,
+                            netter, agents: ctx.agents, generateId, honorDecouplingPoints: true,
                         });
                         allPurchaseIntents.push(...reResult.purchaseIntents);
                         const mergeChildProv = childProvenanceByIntentId.get(slot.intent_id);
                         if (mergeChildProv?.originLocation) {
-                            strategy.annotateChildCommitments(reResult.commitments, mergeChildProv.originLocation);
+                            mode.scope.annotateChildCommitments(reResult.commitments, mergeChildProv.originLocation);
                         }
                     }
-
                     const newConflicts = detectConflicts(planStore, ctx.observer);
-                    const stillConflicted = newConflicts.some(
-                        nc => nc.resourceOrAgentId === conflict.resourceOrAgentId,
-                    );
+                    const stillConflicted = newConflicts.some(nc => nc.resourceOrAgentId === conflict.resourceOrAgentId);
                     if (!stillConflicted) break;
                 }
             }
-
             conflicts = detectConflicts(planStore, ctx.observer);
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Phase 4 — Collect
-    // -------------------------------------------------------------------------
-    const laborGaps = planStore.allIntents().filter(
-        i => i.action === 'work' && i.provider === undefined,
-    );
+    // Collect
+    const laborGaps = planStore.allIntents().filter(i => i.action === 'work' && i.provider === undefined);
 
-    // Remove child-level signal Intents merged from subStores
     planStore.removeRecords({
         intentIds: [
             ...planStore.intentsForTag(PLAN_TAGS.DEFICIT),
@@ -796,113 +885,165 @@ export function planForUnit(
         ].map(i => i.id),
     });
 
-    // Emit deficit Intents
     for (const d of allDeficits) {
         const unit = planStore.getIntent(d.intentId)?.resourceQuantity?.hasUnit ?? 'unit';
-        const locFields = strategy.deficitLocationFields(d.location, canonical);
-        planStore.addIntent({
+        const locFields = mode.spatial.deficitLocationFields(d.location, canonical);
+        const deficitMeta = { originalShortfall: d.originalShortfall ?? d.shortfall, resolvedAt: d.resolvedAt ?? [] };
+        const intent = planStore.addIntent({
             id: d.intentId,
             action: d.action as import('../schemas').VfAction,
             resourceConformsTo: d.specId,
             resourceQuantity: { hasNumericalValue: d.shortfall, hasUnit: unit },
-            due: d.due,
-            atLocation: locFields.atLocation,
-            plannedWithin: d.plannedWithin,
-            inScopeOf: locFields.inScopeOf,
-            resourceClassifiedAs: [
-                PLAN_TAGS.DEFICIT,
-                ...(d.source === 'metabolic_debt' ? [PLAN_TAGS.METABOLIC_DEBT] : []),
-            ],
-            note: JSON.stringify({
-                originalShortfall: d.originalShortfall ?? d.shortfall,
-                resolvedAt: d.resolvedAt ?? [],
-            }),
+            due: d.due, atLocation: locFields.atLocation,
+            plannedWithin: d.plannedWithin, inScopeOf: locFields.inScopeOf,
+            resourceClassifiedAs: [PLAN_TAGS.DEFICIT, ...(d.source === 'metabolic_debt' ? [PLAN_TAGS.METABOLIC_DEBT] : [])],
             finished: false,
         });
+        planStore.setMeta(intent.id, { kind: 'deficit', ...deficitMeta });
     }
 
-    // Emit surplus Intents
     for (const s of allSurplus) {
         const unit = ctx.recipeStore.getResourceSpec(s.specId)?.defaultUnitOfResource ?? 'unit';
         planStore.addIntent({
-            action: 'transfer',
-            provider: canonical[0],
+            action: 'transfer', provider: canonical[0],
             resourceConformsTo: s.specId,
             resourceQuantity: { hasNumericalValue: s.quantity, hasUnit: unit },
-            hasPointInTime: s.availableFrom,
-            atLocation: s.atLocation,
+            hasPointInTime: s.availableFrom, atLocation: s.atLocation,
             plannedWithin: s.plannedWithin,
-            resourceClassifiedAs: [PLAN_TAGS.SURPLUS],
-            finished: false,
+            resourceClassifiedAs: [PLAN_TAGS.SURPLUS], finished: false,
         });
     }
 
-    // Emit conservation Intents
     {
         const emittedConservationSpecs = new Set<string>();
         for (const c of allConservationData) {
             emittedConservationSpecs.add(c.specId);
-            planStore.addIntent({
-                action: 'cite',
-                resourceConformsTo: c.specId,
+            const conservationMeta = { onhand: c.onhand, tor: c.tor, toy: c.toy, tog: c.tog, zone: c.zone, tippingPointBreached: c.tippingPointBreached };
+            const intent = planStore.addIntent({
+                action: 'cite', resourceConformsTo: c.specId,
                 resourceClassifiedAs: [PLAN_TAGS.CONSERVATION],
-                plannedWithin: `conservation:${c.specId}`,
-                note: JSON.stringify({
-                    onhand: c.onhand, tor: c.tor, toy: c.toy, tog: c.tog,
-                    zone: c.zone, tippingPointBreached: c.tippingPointBreached,
-                }),
-                finished: false,
+                plannedWithin: `conservation:${c.specId}`, finished: false,
             });
+            planStore.setMeta(intent.id, { kind: 'conservation', ...conservationMeta } as ConservationMeta);
         }
-        // Child conservation intents
         if (subStores && subStores.length > 0) {
-            const mergedChild = new Map<string, Record<string, unknown>>();
+            const mergedChild = new Map<string, { onhand: number; tor: number; toy: number; tog: number; zone: 'red' | 'yellow'; tippingPointBreached?: boolean }>();
             for (const childStore of subStores) {
                 for (const ci of childStore.intentsForTag(PLAN_TAGS.CONSERVATION)) {
-                    const cn = parseConservationNote(ci);
+                    const cn = childStore.getMeta(ci.id) as ConservationMeta | undefined;
+                    if (!cn) continue;
                     const cSpecId = ci.resourceConformsTo ?? '';
                     const existing = mergedChild.get(cSpecId);
                     if (!existing) {
-                        mergedChild.set(cSpecId, {
-                            onhand: cn.onhand, tor: cn.tor, toy: cn.toy, tog: cn.tog,
-                            zone: cn.zone, tippingPointBreached: cn.tippingPointBreached,
-                        });
+                        mergedChild.set(cSpecId, { onhand: cn.onhand, tor: cn.tor, toy: cn.toy, tog: cn.tog, zone: cn.zone, tippingPointBreached: cn.tippingPointBreached });
                     } else if (cn.tippingPointBreached) {
                         existing.tippingPointBreached = true;
                     }
                 }
             }
-            for (const [specId, note] of mergedChild) {
+            for (const [specId, data] of mergedChild) {
                 if (emittedConservationSpecs.has(specId)) {
-                    if (note.tippingPointBreached) {
-                        const existing = planStore.intentsForTag(PLAN_TAGS.CONSERVATION)
-                            .find(i => i.resourceConformsTo === specId);
+                    if (data.tippingPointBreached) {
+                        const existing = planStore.intentsForTag(PLAN_TAGS.CONSERVATION).find(i => i.resourceConformsTo === specId);
                         if (existing) {
-                            const parsed = JSON.parse(existing.note ?? '{}');
-                            parsed.tippingPointBreached = true;
+                            const existingMeta = planStore.getMeta(existing.id) as ConservationMeta;
+                            const updatedMeta: ConservationMeta = { ...existingMeta, tippingPointBreached: true };
                             planStore.removeRecords({ intentIds: [existing.id] });
-                            planStore.addIntent({ ...existing, note: JSON.stringify(parsed) });
+                            const reEmitted = planStore.addIntent({ ...existing });
+                            planStore.setMeta(reEmitted.id, updatedMeta);
                         }
                     }
                 } else {
                     emittedConservationSpecs.add(specId);
-                    planStore.addIntent({
-                        action: 'cite',
-                        resourceConformsTo: specId,
+                    const intent = planStore.addIntent({
+                        action: 'cite', resourceConformsTo: specId,
                         resourceClassifiedAs: [PLAN_TAGS.CONSERVATION],
-                        plannedWithin: `conservation:${specId}`,
-                        note: JSON.stringify(note),
-                        finished: false,
+                        plannedWithin: `conservation:${specId}`, finished: false,
                     });
+                    planStore.setMeta(intent.id, { kind: 'conservation', ...data } as ConservationMeta);
                 }
             }
         }
     }
 
-    return {
-        planStore,
-        purchaseIntents: allPurchaseIntents,
-        unmetDemand,
-        laborGaps,
+    // Planning-as-VF-Process: create a traceable planning Process
+    const planningProcessId = generateId();
+    const now = new Date().toISOString();
+
+    // Set outputOf on all signal Intents before registering the Process
+    for (const si of [
+        ...planStore.intentsForTag(PLAN_TAGS.DEFICIT),
+        ...planStore.intentsForTag(PLAN_TAGS.SURPLUS),
+        ...planStore.intentsForTag(PLAN_TAGS.CONSERVATION),
+    ]) {
+        si.outputOf = planningProcessId;
+    }
+    // Retroactively stamp replenishment Intents that lack an outputOf
+    for (const ri of planStore.intentsForTag(PLAN_TAGS.REPLENISHMENT)) {
+        if (!ri.outputOf) ri.outputOf = planningProcessId;
+    }
+
+    const planningProcess = planStore.processes.register({
+        id: planningProcessId,
+        name: `Planning: ${session.canonical.join(', ')}`,
+        basedOn: PLANNING_PROCESS_SPEC,
+        plannedWithin: planStore.allPlans()[0]?.id,
+        hasBeginning: now, hasEnd: now, finished: true,
+    });
+    const demandInputIds = pass1Records.map(r => r.slot.intent_id).filter(Boolean);
+    const planningMeta: PlanningMeta = {
+        kind: 'planning',
+        processId: planningProcessId,
+        demandInputIds,
     };
+    planStore.setMeta(planningProcess.id, planningMeta);
+
+    return { planStore, purchaseIntents: allPurchaseIntents, unmetDemand, laborGaps };
+}
+
+// =============================================================================
+// PLAN FOR UNIT — ORCHESTRATOR
+// =============================================================================
+
+export function planForUnit(
+    mode: PlanningMode,
+    ids: string[],
+    horizon: { from: Date; to: Date },
+    ctx: UnitPlanContext,
+    subStores?: PlanStore[],
+): UnitPlanResult {
+    const generateId = ctx.generateId ?? (() => nanoid());
+    const canonical = normalizePhase(mode, ids);
+
+    let planStore: PlanStore;
+    if (subStores && subStores.length > 0) {
+        planStore = mergePlanStores(subStores, generateId);
+    } else {
+        planStore = new PlanStore(new ProcessRegistry(generateId), generateId);
+    }
+
+    // Build conservation floors from ecological buffer tipping points
+    let conservationFloors: Map<string, number> | undefined;
+    if (ctx.bufferZoneStore) {
+        conservationFloors = new Map();
+        for (const bz of ctx.bufferZoneStore.allBufferZones()) {
+            if (bz.tippingPoint !== undefined) {
+                const spec = ctx.recipeStore.getResourceSpec(bz.specId);
+                if (spec?.resourceClassifiedAs?.includes('tag:buffer:ecological')) {
+                    conservationFloors.set(bz.specId, bz.tippingPoint);
+                }
+            }
+        }
+        if (conservationFloors.size === 0) conservationFloors = undefined;
+    }
+
+    const netter = new PlanNetter(planStore, ctx.observer, undefined, conservationFloors);
+
+    const session: PlanningSession = { mode, canonical, horizon, ctx, planStore, netter, generateId };
+
+    const extracted = extractPhase(session, subStores);
+    const classified = classifyPhase(session, extracted.rawDemands);
+    const formulated = formulatePhase(session, classified, extracted.extractedSupply, subStores, extracted.childProvenance);
+    const supply = supplyPhase(session, extracted.extractedSupply);
+    return collectPhase(session, formulated, supply, subStores);
 }

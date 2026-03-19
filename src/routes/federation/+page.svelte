@@ -12,7 +12,7 @@
   import type { EconomicResource, Intent, ResourceSpecification } from "$lib/schemas";
   import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
   import {
-    PLAN_TAGS, parseDeficitNote, deficitShortfall, isDeficitResolved,
+    PLAN_TAGS, deficitShortfall, type DeficitMeta, type PlanStore,
     tradeFrom, tradeTo, tradeSpec, tradeQty,
   } from "$lib/planning/planning";
   import ResourceDemandCard from "$lib/components/commune/ResourceDemandCard.svelte";
@@ -22,6 +22,8 @@
   import { planFederation } from "$lib/planning/plan-federation";
   import { RecipeStore } from "$lib/knowledge/recipes";
   import { BufferZoneStore } from "$lib/knowledge/buffer-zones";
+  import { AgentStore } from "$lib/agents";
+  import { buildMembershipIndex } from "$lib/indexes/membership";
 
   // ---------------------------------------------------------------------------
   // specNames
@@ -776,26 +778,85 @@
     }
   }
 
-  const parentMap: Record<string, string> = {
-    "agri-federation": "universal-commune",
-    "manufacturing-federation": "universal-commune",
-    "horticulture-federation": "universal-commune",
-    "food-processing-federation": "universal-commune",
-    "maritime-federation": "universal-commune",
-    "commune-grain": "agri-federation",
-    "commune-dairy": "agri-federation",
-    "commune-forge": "manufacturing-federation",
-    "commune-workshop": "manufacturing-federation",
-    "commune-olive": "horticulture-federation",
-    "commune-citrus": "horticulture-federation",
-    "commune-mill": "food-processing-federation",
-    "commune-bakery": "food-processing-federation",
-    "commune-fisher": "maritime-federation",
-    "commune-salter": "maritime-federation",
-  };
+  // ---------------------------------------------------------------------------
+  // Agent-derived hierarchy — replaces hardcoded parentMap
+  // ---------------------------------------------------------------------------
+  const agentStore = new AgentStore();
+
+  // 16 Organization agents
+  const orgDefs: { id: string; name: string }[] = [
+    { id: 'universal-commune', name: 'Universal Commune' },
+    { id: 'agri-federation', name: 'Agriculture Federation' },
+    { id: 'manufacturing-federation', name: 'Manufacturing Federation' },
+    { id: 'horticulture-federation', name: 'Horticulture Federation' },
+    { id: 'food-processing-federation', name: 'Food Processing Federation' },
+    { id: 'maritime-federation', name: 'Maritime Federation' },
+    { id: 'commune-grain', name: 'Grain Commune' },
+    { id: 'commune-dairy', name: 'Dairy Commune' },
+    { id: 'commune-forge', name: 'Forge Commune' },
+    { id: 'commune-workshop', name: 'Workshop Commune' },
+    { id: 'commune-olive', name: 'Olive Commune' },
+    { id: 'commune-citrus', name: 'Citrus Commune' },
+    { id: 'commune-mill', name: 'Mill Commune' },
+    { id: 'commune-bakery', name: 'Bakery Commune' },
+    { id: 'commune-fisher', name: 'Fisher Commune' },
+    { id: 'commune-salter', name: 'Salter Commune' },
+  ];
+  for (const o of orgDefs) agentStore.addAgent({ id: o.id, type: 'Organization', name: o.name });
+
+  // Hierarchy relationships (scope → parent)
+  const hierarchyEdges: [string, string][] = [
+    ['agri-federation', 'universal-commune'],
+    ['manufacturing-federation', 'universal-commune'],
+    ['horticulture-federation', 'universal-commune'],
+    ['food-processing-federation', 'universal-commune'],
+    ['maritime-federation', 'universal-commune'],
+    ['commune-grain', 'agri-federation'],
+    ['commune-dairy', 'agri-federation'],
+    ['commune-forge', 'manufacturing-federation'],
+    ['commune-workshop', 'manufacturing-federation'],
+    ['commune-olive', 'horticulture-federation'],
+    ['commune-citrus', 'horticulture-federation'],
+    ['commune-mill', 'food-processing-federation'],
+    ['commune-bakery', 'food-processing-federation'],
+    ['commune-fisher', 'maritime-federation'],
+    ['commune-salter', 'maritime-federation'],
+  ];
+  for (const [child, parent] of hierarchyEdges) {
+    agentStore.addRelationship({ subject: child, object: parent, relationship: 'member' });
+  }
+
+  // Person memberships (for memberCounts)
+  const communePopulations: [string, number][] = [
+    ['commune-grain', 120], ['commune-dairy', 80], ['commune-forge', 60],
+    ['commune-workshop', 90], ['commune-olive', 70], ['commune-citrus', 85],
+    ['commune-mill', 50], ['commune-bakery', 65], ['commune-fisher', 75],
+    ['commune-salter', 55],
+  ];
+  for (const [scopeId, count] of communePopulations) {
+    for (let i = 0; i < count; i++) {
+      const pid = `p-${scopeId}-${i}`;
+      agentStore.addAgent({ id: pid, type: 'Person', name: pid });
+      agentStore.addRelationship({ subject: pid, object: scopeId, relationship: 'member' });
+    }
+  }
+
+  // Build MembershipIndex from agent data
+  const membershipIdx = buildMembershipIndex(agentStore.allAgents(), agentStore.allRelationships());
+
+  // Derive all scope IDs
+  const allScopeIds: string[] = (() => {
+    const ids = new Set<string>();
+    for (const scope of membershipIdx.personToScope.values()) ids.add(scope);
+    for (const [child, parent] of membershipIdx.scopeParent) { ids.add(child); ids.add(parent); }
+    return [...ids];
+  })();
+
+  // parentOf map (ready for planFederation ctx)
+  const parentOfMap = membershipIdx.scopeParent;
 
   function mockParentOf(id: string): string | undefined {
-    return parentMap[id];
+    return membershipIdx.scopeParent.get(id);
   }
 
   // ---------------------------------------------------------------------------
@@ -898,7 +959,6 @@
   const allInventory = [...mockResources.values()].flat();
   for (const r of allInventory) combinedObserver.seedResource(r);
 
-  const parentOfMap = new Map(Object.entries(parentMap));
   const emptyAgentIndex = buildAgentIndex([], [], new Map());
 
   // Produce intents: each commune's committed production run.
@@ -948,27 +1008,16 @@
   // planFederation — reactive, re-runs when demandIndex changes
   // ---------------------------------------------------------------------------
 
-  const memberCounts = new Map<string, number>([
-    ['commune-grain',    120],
-    ['commune-dairy',     80],
-    ['commune-forge',     60],
-    ['commune-workshop',  90],
-    ['commune-olive',     70],
-    ['commune-citrus',    85],
-    ['commune-mill',      50],
-    ['commune-bakery',    65],
-    ['commune-fisher',    75],
-    ['commune-salter',    55],
-  ]);
+  // Derive member counts from personToScope
+  const memberCounts: Map<string, number> = (() => {
+    const counts = new Map<string, number>();
+    for (const scope of membershipIdx.personToScope.values())
+      counts.set(scope, (counts.get(scope) ?? 0) + 1);
+    return counts;
+  })();
 
   const federationResult = $derived.by(() => planFederation(
-    [
-      "commune-grain", "commune-dairy", "commune-forge", "commune-workshop",
-      "commune-olive", "commune-citrus", "commune-mill", "commune-bakery",
-      "commune-fisher", "commune-salter",
-      "agri-federation", "manufacturing-federation", "horticulture-federation",
-      "food-processing-federation", "maritime-federation", "universal-commune",
-    ],
+    allScopeIds,
     { from: new Date("2026-03-15"), to: new Date("2026-06-30") },
     {
       recipeStore,
@@ -986,22 +1035,24 @@
   // Hub analytics — coherence, self-sufficiency, net flows
   // ---------------------------------------------------------------------------
 
-  // Leaf communes for each hub (direct members only; UC flattens all leaves)
-  const federationLeaves: Record<string, string[]> = {
-    "agri-federation": ["commune-grain", "commune-dairy"],
-    "manufacturing-federation": ["commune-forge", "commune-workshop"],
-    "horticulture-federation": ["commune-olive", "commune-citrus"],
-    "food-processing-federation": ["commune-mill", "commune-bakery"],
-    "maritime-federation": ["commune-fisher", "commune-salter"],
-    "universal-commune": [
-      "commune-grain", "commune-dairy", "commune-forge", "commune-workshop",
-      "commune-olive", "commune-citrus", "commune-mill", "commune-bakery",
-      "commune-fisher", "commune-salter",
-    ],
-  };
-  const hubIds = new Set(Object.keys(federationLeaves));
+  // Derive hub → children from scopeParent (inverting the parent map)
+  const childrenOf = new Map<string, string[]>();
+  for (const [child, parent] of membershipIdx.scopeParent) {
+    if (!childrenOf.has(parent)) childrenOf.set(parent, []);
+    childrenOf.get(parent)!.push(child);
+  }
+  // UC's leaves = all communes (nodes that are not parents of anything)
+  const allLeaves = allScopeIds.filter(id => !childrenOf.has(id));
+  if (!childrenOf.has('universal-commune')) childrenOf.set('universal-commune', []);
+  // Ensure UC lists all leaf communes (flatten)
+  const ucChildren = childrenOf.get('universal-commune')!;
+  for (const leaf of allLeaves) {
+    if (!ucChildren.includes(leaf)) ucChildren.push(leaf);
+  }
+
+  const hubIds = new Set(childrenOf.keys());
   function isHub(id: string): boolean { return hubIds.has(id); }
-  function getLeaves(hubId: string): string[] { return federationLeaves[hubId] ?? []; }
+  function getLeaves(hubId: string): string[] { return childrenOf.get(hubId) ?? []; }
 
   // Helper: get deficits/surplus from a scope's planStore
   function scopeDeficits(r: ScopePlanResult): Intent[] {
@@ -1010,11 +1061,11 @@
   function scopeSurplus(r: ScopePlanResult): Intent[] {
     return r.planStore.intentsForTag(PLAN_TAGS.SURPLUS);
   }
-  function deficitOrigShortfall(d: Intent): number {
-    return parseDeficitNote(d).originalShortfall;
+  function deficitOrigShortfall(d: Intent, store: PlanStore): number {
+    return (store.getMeta(d.id) as DeficitMeta)?.originalShortfall ?? d.resourceQuantity?.hasNumericalValue ?? 0;
   }
-  function deficitResolvedAt(d: Intent): string[] {
-    return parseDeficitNote(d).resolvedAt;
+  function deficitResolvedAt(d: Intent, store: PlanStore): string[] {
+    return (store.getMeta(d.id) as DeficitMeta)?.resolvedAt ?? [];
   }
 
   // % of leaf deficits fully resolved
@@ -1042,7 +1093,7 @@
       if (!r) continue;
       for (const d of scopeDeficits(r)) {
         total++;
-        const resolvers = deficitResolvedAt(d);
+        const resolvers = deficitResolvedAt(d, r.planStore);
         if (resolvers.length > 0 && resolvers.every((s) => leafSet.has(s))) internal++;
       }
     }
@@ -1101,7 +1152,7 @@
 
   // Sub-federation health for universal-commune
   function computeFederationHealth() {
-    return Object.keys(federationLeaves)
+    return [...hubIds]
       .filter((id) => id !== "universal-commune")
       .map((fedId) => {
         const coherence   = computeCoherence(fedId);
@@ -1124,8 +1175,8 @@
   function restoreTrade(id: string) { rejectedTradeIds = new Set([...rejectedTradeIds].filter(x => x !== id)); }
 
   const activeProposals = $derived(
-    federationResult.federationStore.intentsForTag(PLAN_TAGS.LATERAL_TRANSFER)
-      .filter((t) => !rejectedTradeIds.has(t.id)),
+    federationResult.federationStore.allCommitments()
+      .filter((t) => t.resourceClassifiedAs?.includes(PLAN_TAGS.LATERAL_TRANSFER) && !rejectedTradeIds.has(t.id)),
   );
 
   // ---------------------------------------------------------------------------
@@ -1153,7 +1204,7 @@
     activeProposals.filter((t) => (t.provider ?? '') === selectedScope),
   );
   const incomingTrades = $derived(
-    activeProposals.filter((t) => (t.inScopeOf?.[0] ?? '') === selectedScope),
+    activeProposals.filter((t) => tradeTo(t) === selectedScope),
   );
   const hasTrades = $derived(outgoingTrades.length > 0 || incomingTrades.length > 0);
 
@@ -1174,7 +1225,7 @@
   const fullyResolvedDeficits = $derived(
     Array.from(federationResult.byScope.values()).reduce((sum, r) => {
       return sum + scopeDeficits(r).filter(
-        (d) => deficitShortfall(d) === 0 && deficitOrigShortfall(d) > 0,
+        (d) => deficitShortfall(d) === 0 && deficitOrigShortfall(d, r.planStore) > 0,
       ).length;
     }, 0),
   );
@@ -1551,8 +1602,8 @@
             <span class="supply-col-lbl" style="margin-top:6px">DEFICITS</span>
             {#each scopeDeficits(selectedResult) as d (d.id)}
               {@const shortfall = deficitShortfall(d)}
-              {@const orig = deficitOrigShortfall(d)}
-              {@const resolvedAt = deficitResolvedAt(d)}
+              {@const orig = deficitOrigShortfall(d, selectedResult.planStore)}
+              {@const resolvedAt = deficitResolvedAt(d, selectedResult.planStore)}
               {@const pctRes = orig > 0 ? Math.round(((orig - shortfall) / orig) * 100) : 100}
               {@const specId = d.resourceConformsTo ?? ''}
               {@const spec = demandSpecMap.get(specId)}
