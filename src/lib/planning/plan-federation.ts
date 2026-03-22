@@ -19,7 +19,7 @@
 
 import { nanoid } from 'nanoid';
 import type { Intent } from '../schemas';
-import { PlanStore, PLAN_TAGS, type DeficitMeta, type ConservationMeta } from './planning';
+import { PlanStore, PLAN_TAGS } from './planning';
 import { ProcessRegistry } from '../process-registry';
 import {
     planForScope,
@@ -354,8 +354,8 @@ export function matchLaterally(
     if (isCustomPolicy) {
         for (const offer of offers) {
             for (const request of requests) {
-                const offerIntent: Intent = { ...offer.intent, provider: offer.scopeId } as Intent;
-                const requestIntent: Intent = { ...request.intent, receiver: request.scopeId } as Intent;
+                const offerIntent: Intent = { ...offer.intent, provider: offer.scopeId };
+                const requestIntent: Intent = { ...request.intent, receiver: request.scopeId };
                 const score = policy.scoreMatch(offerIntent, requestIntent, ctx);
                 if (score > 0) matchCandidates.push({ offer, request, score });
             }
@@ -379,8 +379,8 @@ export function matchLaterally(
             if (!specRequests) continue;
             for (const offer of specOffers) {
                 for (const request of specRequests) {
-                    const offerIntent: Intent = { ...offer.intent, provider: offer.scopeId } as Intent;
-                    const requestIntent: Intent = { ...request.intent, receiver: request.scopeId } as Intent;
+                    const offerIntent: Intent = { ...offer.intent, provider: offer.scopeId };
+                    const requestIntent: Intent = { ...request.intent, receiver: request.scopeId };
                     const score = policy.scoreMatch(offerIntent, requestIntent, ctx);
                     if (score > 0) matchCandidates.push({ offer, request, score });
                 }
@@ -444,7 +444,7 @@ export function writeBackShortfalls(
             const newShortfall = finalShortfall.get(i.id);
             if (newShortfall === undefined) continue;
             if (Math.abs(newShortfall - (i.resourceQuantity?.hasNumericalValue ?? 0)) < 1e-9) continue;
-            const meta = result.planStore.getMeta(i.id) as DeficitMeta | undefined;
+            const meta = result.planStore.getMetaOfKind(i.id, 'deficit');
             const originalShortfall = meta?.originalShortfall ?? i.resourceQuantity?.hasNumericalValue ?? 0;
             const resolvedAt = meta?.resolvedAt ?? [];
             result.planStore.removeRecords({ intentIds: [i.id] });
@@ -497,7 +497,8 @@ export function aggregateConservation(
     for (const result of byScope.values()) {
         for (const i of result.planStore.intentsForTag(PLAN_TAGS.CONSERVATION)) {
             const specId = i.resourceConformsTo ?? '';
-            const cn = result.planStore.getMeta(i.id) as ConservationMeta;
+            const cn = result.planStore.getMetaOfKind(i.id, 'conservation');
+            if (!cn) continue;
             if (!seenSpecIds.has(specId)) {
                 seenSpecIds.add(specId);
                 signals.push({
@@ -567,8 +568,8 @@ export function planFederation(
 
     // Event log: round 0
     const events: FederationEvent[] = planOrder.map(scopeId => ({
-        kind: (effectiveDirty.has(scopeId) || !ctx.cache?.byScope.has(scopeId)
-            ? 'scope-planned' : 'scope-cached') as FederationEventKind,
+        kind: effectiveDirty.has(scopeId) || !ctx.cache?.byScope.has(scopeId)
+            ? 'scope-planned' : 'scope-cached',
         round: 0, scopeId,
     }));
 

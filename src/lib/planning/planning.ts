@@ -25,6 +25,7 @@
  *      - Primary + reciprocal intents grouped together
  */
 
+import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import type {
     Plan,
@@ -39,7 +40,6 @@ import type {
     AgreementBundle,
     Proposal,
     ProposalList,
-    RecipeExchange,
     Scenario,
     ScenarioDefinition,
     VfAction,
@@ -83,7 +83,7 @@ export function deficitShortfall(i: Intent): number {
 
 /** True when the deficit was fully resolved (shortfall reduced to 0 from a positive original). */
 export function isDeficitResolved(i: Intent, planStore: PlanStore): boolean {
-    const meta = planStore.getMeta(i.id) as DeficitMeta | undefined;
+    const meta = planStore.getMetaOfKind(i.id, 'deficit');
     return deficitShortfall(i) === 0 && (meta?.originalShortfall ?? 0) > 0;
 }
 
@@ -103,67 +103,99 @@ export function tradeQty(t: { resourceQuantity?: { hasNumericalValue: number } }
 // TYPED SIGNAL METADATA
 // =============================================================================
 
-export interface DeficitMeta {
-    kind: 'deficit';
-    originalShortfall: number;
-    resolvedAt: string[];
-}
+export const DeficitMetaSchema = z.object({
+    kind: z.literal('deficit'),
+    originalShortfall: z.number(),
+    resolvedAt: z.array(z.string()),
+});
+export type DeficitMeta = z.infer<typeof DeficitMetaSchema>;
 
-export interface ConservationMeta {
-    kind: 'conservation';
-    onhand: number; tor: number; toy: number; tog: number;
-    zone: 'red' | 'yellow';
-    tippingPointBreached?: boolean;
-}
+export const ConservationMetaSchema = z.object({
+    kind: z.literal('conservation'),
+    onhand: z.number(), tor: z.number(), toy: z.number(), tog: z.number(),
+    zone: z.enum(['red', 'yellow']),
+    tippingPointBreached: z.boolean().optional(),
+});
+export type ConservationMeta = z.infer<typeof ConservationMetaSchema>;
 
-export interface ReplenishmentMeta {
-    kind: 'replenishment';
-    onhand: number; onorder: number; qualifiedDemand: number; nfp: number;
-    priority: number; zone: 'red' | 'yellow' | 'green' | 'excess';
-    recommendedQty: number; dueDate: string;
-    bufferZoneId: string; createdAt: string;
-    status: 'open' | 'approved' | 'rejected';
-    approvedCommitmentId?: string;
-}
+export const ReplenishmentMetaSchema = z.object({
+    kind: z.literal('replenishment'),
+    onhand: z.number(), onorder: z.number(), qualifiedDemand: z.number(), nfp: z.number(),
+    priority: z.number(), zone: z.enum(['red', 'yellow', 'green', 'excess']),
+    recommendedQty: z.number(), dueDate: z.string(),
+    bufferZoneId: z.string(), createdAt: z.string(),
+    status: z.enum(['open', 'approved', 'rejected']),
+    approvedCommitmentId: z.string().optional(),
+});
+export type ReplenishmentMeta = z.infer<typeof ReplenishmentMetaSchema>;
 
-export interface PlanningMeta {
-    kind: 'planning';
-    processId: string;
-    demandInputIds: string[];   // demand Intent IDs consumed
-}
+export const PlanningMetaSchema = z.object({
+    kind: z.literal('planning'),
+    processId: z.string(),
+    demandInputIds: z.array(z.string()),   // demand Intent IDs consumed
+});
+export type PlanningMeta = z.infer<typeof PlanningMetaSchema>;
 
-export type SignalMeta = DeficitMeta | ConservationMeta | ReplenishmentMeta | PlanningMeta;
+export const SignalMetaSchema = z.discriminatedUnion('kind', [
+    DeficitMetaSchema,
+    ConservationMetaSchema,
+    ReplenishmentMetaSchema,
+    PlanningMetaSchema,
+]);
+export type SignalMeta = z.infer<typeof SignalMetaSchema>;
+
+/** Type predicate: narrows SignalMeta to a specific kind variant. */
+export function isMetaOfKind<K extends SignalMeta['kind']>(
+    meta: SignalMeta | undefined,
+    kind: K,
+): meta is Extract<SignalMeta, { kind: K }> {
+    return meta?.kind === kind;
+}
 
 // =============================================================================
 // SIGNAL ALGEBRA — typed PlanSignal discriminated union
 // =============================================================================
 
-export interface DeficitSignal {
-    kind: 'deficit';
-    specId: string; qty: number; unit: string;
-    scope?: string; originalShortfall: number; resolvedAt: string[];
-    due?: string; location?: string;
-    source?: 'unmet_demand' | 'metabolic_debt';
-}
-export interface SurplusSignal {
-    kind: 'surplus';
-    specId: string; qty: number; unit: string;
-    scope?: string; availableFrom?: string; location?: string;
-}
-export interface ConservationSignal {
-    kind: 'conservation';
-    specId: string; scope?: string;
-    onhand: number; tor: number; toy: number; tog: number;
-    zone: 'red' | 'yellow'; tippingPointBreached?: boolean;
-}
-export interface ReplenishmentPlanSignal {
-    kind: 'replenishment';
-    specId: string; qty: number; unit: string;
-    onhand: number; onorder: number; qualifiedDemand: number; nfp: number;
-    priority: number; zone: 'red' | 'yellow' | 'green' | 'excess';
-    dueDate: string; bufferZoneId: string;
-}
-export type PlanSignal = DeficitSignal | SurplusSignal | ConservationSignal | ReplenishmentPlanSignal;
+export const DeficitSignalSchema = z.object({
+    kind: z.literal('deficit'),
+    specId: z.string(), qty: z.number(), unit: z.string(),
+    scope: z.string().optional(), originalShortfall: z.number(), resolvedAt: z.array(z.string()),
+    due: z.string().optional(), location: z.string().optional(),
+    source: z.enum(['unmet_demand', 'metabolic_debt']).optional(),
+});
+export type DeficitSignal = z.infer<typeof DeficitSignalSchema>;
+
+export const SurplusSignalSchema = z.object({
+    kind: z.literal('surplus'),
+    specId: z.string(), qty: z.number(), unit: z.string(),
+    scope: z.string().optional(), availableFrom: z.string().optional(), location: z.string().optional(),
+});
+export type SurplusSignal = z.infer<typeof SurplusSignalSchema>;
+
+export const ConservationSignalSchema = z.object({
+    kind: z.literal('conservation'),
+    specId: z.string(), scope: z.string().optional(),
+    onhand: z.number(), tor: z.number(), toy: z.number(), tog: z.number(),
+    zone: z.enum(['red', 'yellow']), tippingPointBreached: z.boolean().optional(),
+});
+export type ConservationSignal = z.infer<typeof ConservationSignalSchema>;
+
+export const ReplenishmentPlanSignalSchema = z.object({
+    kind: z.literal('replenishment'),
+    specId: z.string(), qty: z.number(), unit: z.string(),
+    onhand: z.number(), onorder: z.number(), qualifiedDemand: z.number(), nfp: z.number(),
+    priority: z.number(), zone: z.enum(['red', 'yellow', 'green', 'excess']),
+    dueDate: z.string(), bufferZoneId: z.string(),
+});
+export type ReplenishmentPlanSignal = z.infer<typeof ReplenishmentPlanSignalSchema>;
+
+export const PlanSignalSchema = z.discriminatedUnion('kind', [
+    DeficitSignalSchema,
+    SurplusSignalSchema,
+    ConservationSignalSchema,
+    ReplenishmentPlanSignalSchema,
+]);
+export type PlanSignal = z.infer<typeof PlanSignalSchema>;
 
 const SIGNAL_KIND_TO_TAG: Record<PlanSignal['kind'], string> = {
     deficit: PLAN_TAGS.DEFICIT,
@@ -183,7 +215,6 @@ const TAG_TO_SIGNAL_KIND: Record<string, PlanSignal['kind']> = {
 export function signalToIntent(
     signal: PlanSignal,
     planId: string,
-    generateId: () => string,
 ): { intentFields: Omit<Intent, 'id'> & { id?: string }; meta: SignalMeta } {
     const tag = SIGNAL_KIND_TO_TAG[signal.kind];
     switch (signal.kind) {
@@ -191,7 +222,7 @@ export function signalToIntent(
             const tags = [tag, ...(signal.source === 'metabolic_debt' ? [PLAN_TAGS.METABOLIC_DEBT] : [])];
             return {
                 intentFields: {
-                    action: 'transfer' as VfAction,
+                    action: 'transfer',
                     resourceConformsTo: signal.specId,
                     resourceQuantity: { hasNumericalValue: signal.qty, hasUnit: signal.unit },
                     due: signal.due,
@@ -211,7 +242,7 @@ export function signalToIntent(
         case 'surplus': {
             return {
                 intentFields: {
-                    action: 'transfer' as VfAction,
+                    action: 'transfer',
                     provider: signal.scope,
                     resourceConformsTo: signal.specId,
                     resourceQuantity: { hasNumericalValue: signal.qty, hasUnit: signal.unit },
@@ -227,7 +258,7 @@ export function signalToIntent(
         case 'conservation': {
             return {
                 intentFields: {
-                    action: 'cite' as VfAction,
+                    action: 'cite',
                     resourceConformsTo: signal.specId,
                     resourceClassifiedAs: [tag],
                     plannedWithin: planId,
@@ -245,7 +276,7 @@ export function signalToIntent(
         case 'replenishment': {
             return {
                 intentFields: {
-                    action: 'produce' as VfAction,
+                    action: 'produce',
                     resourceConformsTo: signal.specId,
                     resourceQuantity: { hasNumericalValue: signal.qty, hasUnit: signal.unit },
                     due: signal.dueDate + 'T00:00:00.000Z',
@@ -279,7 +310,7 @@ export function intentToSignal(intent: Intent, meta: SignalMeta | undefined): Pl
 
     switch (kind) {
         case 'deficit': {
-            const dm = meta as DeficitMeta | undefined;
+            const dm = isMetaOfKind(meta, 'deficit') ? meta : undefined;
             return {
                 kind: 'deficit',
                 specId: intent.resourceConformsTo ?? '',
@@ -305,7 +336,7 @@ export function intentToSignal(intent: Intent, meta: SignalMeta | undefined): Pl
             };
         }
         case 'conservation': {
-            const cm = meta as ConservationMeta | undefined;
+            const cm = isMetaOfKind(meta, 'conservation') ? meta : undefined;
             if (!cm) return null;
             return {
                 kind: 'conservation',
@@ -317,7 +348,7 @@ export function intentToSignal(intent: Intent, meta: SignalMeta | undefined): Pl
             };
         }
         case 'replenishment': {
-            const rm = meta as ReplenishmentMeta | undefined;
+            const rm = isMetaOfKind(meta, 'replenishment') ? meta : undefined;
             if (!rm) return null;
             return {
                 kind: 'replenishment',
@@ -544,13 +575,20 @@ export class PlanStore {
     getMeta(intentId: string): SignalMeta | undefined { return this._meta.get(intentId); }
     allMeta(): ReadonlyMap<string, SignalMeta> { return this._meta; }
 
+    /** Type-safe metadata accessor: returns the meta only if it matches the requested kind. */
+    getMetaOfKind<K extends SignalMeta['kind']>(intentId: string, kind: K): Extract<SignalMeta, { kind: K }> | undefined {
+        const meta = this._meta.get(intentId);
+        if (isMetaOfKind(meta, kind)) return meta;
+        return undefined;
+    }
+
     // =========================================================================
     // SIGNAL ALGEBRA — typed emit / query
     // =========================================================================
 
     /** Emit a typed PlanSignal as a VF Intent with metadata. */
     emitSignal(signal: PlanSignal, planId: string): Intent {
-        const { intentFields, meta } = signalToIntent(signal, planId, this.generateId);
+        const { intentFields, meta } = signalToIntent(signal, planId);
         const added = this.addIntent(intentFields);
         this.setMeta(added.id, meta);
         return added;
@@ -821,7 +859,7 @@ export class PlanStore {
         });
 
         // Update meta with approval status, mark finished
-        const meta = this._meta.get(intentId) as ReplenishmentMeta | undefined;
+        const meta = this.getMetaOfKind(intentId, 'replenishment');
         if (meta) {
             meta.status = 'approved';
             meta.approvedCommitmentId = commitment.id;
@@ -840,7 +878,7 @@ export class PlanStore {
         if (!intent.resourceClassifiedAs?.includes(PLAN_TAGS.REPLENISHMENT)) {
             throw new Error(`Intent ${intentId} is not a replenishment signal`);
         }
-        const meta = this._meta.get(intentId) as ReplenishmentMeta | undefined;
+        const meta = this.getMetaOfKind(intentId, 'replenishment');
         if (meta) {
             meta.status = 'rejected';
         }
@@ -1456,11 +1494,10 @@ export class PlanStore {
                         const durableResult = this.createFlowFromRecipe(
                             flow, process.id, 'input', scaleFactor, processBegin, plan.id, agents,
                         );
-                        if ('provider' in durableResult && durableResult.provider
-                            && 'receiver' in durableResult && durableResult.receiver) {
-                            commitments.push(durableResult as Commitment);
+                        if (durableResult.type === 'commitment') {
+                            commitments.push(durableResult.record);
                         } else {
-                            intents.push(durableResult as Intent);
+                            intents.push(durableResult.record);
                         }
                         continue; // Do NOT fall through to quantity netting
                     }
@@ -1511,10 +1548,10 @@ export class PlanStore {
                 const result = this.createFlowFromRecipe(
                     adjustedFlow, process.id, 'input', scaleFactor, processBegin, plan.id, agents,
                 );
-                if ('provider' in result && result.provider && 'receiver' in result && result.receiver) {
-                    commitments.push(result as Commitment);
+                if (result.type === 'commitment') {
+                    commitments.push(result.record);
                 } else {
-                    intents.push(result as Intent);
+                    intents.push(result.record);
                 }
             }
 
@@ -1522,10 +1559,10 @@ export class PlanStore {
                 const result = this.createFlowFromRecipe(
                     flow, process.id, 'output', scaleFactor, processEnd, plan.id, agents,
                 );
-                if ('provider' in result && result.provider && 'receiver' in result && result.receiver) {
-                    commitments.push(result as Commitment);
+                if (result.type === 'commitment') {
+                    commitments.push(result.record);
                 } else {
-                    intents.push(result as Intent);
+                    intents.push(result.record);
                 }
             }
         }
@@ -1652,7 +1689,7 @@ export class PlanStore {
         dueDate: Date,
         planId: string,
         agents?: { provider?: string; receiver?: string },
-    ): Commitment | Intent {
+    ): { type: 'commitment'; record: Commitment } | { type: 'intent'; record: Intent } {
         // Validate action direction against VF spec
         const def = ACTION_DEFINITIONS[flow.action];
         if (def && def.inputOutput !== 'outputInput' && def.inputOutput !== 'notApplicable') {
@@ -1678,7 +1715,7 @@ export class PlanStore {
 
         // If we have both agents → Commitment. Otherwise → Intent.
         if (provider && receiver) {
-            return this.addCommitment({
+            return { type: 'commitment', record: this.addCommitment({
                 action: flow.action,
                 inputOf: direction === 'input' ? processId : undefined,
                 outputOf: direction === 'output' ? processId : undefined,
@@ -1694,10 +1731,10 @@ export class PlanStore {
                 created: new Date().toISOString(),
                 plannedWithin: planId,
                 finished: false,
-            });
+            }) };
         } else {
             // Create Intent: only provider or only receiver
-            return this.addIntent({
+            return { type: 'intent', record: this.addIntent({
                 action: flow.action,
                 inputOf: direction === 'input' ? processId : undefined,
                 outputOf: direction === 'output' ? processId : undefined,
@@ -1712,7 +1749,7 @@ export class PlanStore {
                 due: dueDate.toISOString(),
                 plannedWithin: planId,
                 finished: false,
-            });
+            }) };
         }
     }
 

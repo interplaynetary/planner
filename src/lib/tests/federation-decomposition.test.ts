@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { nanoid } from 'nanoid';
-import { PlanStore, PLAN_TAGS, type ConservationMeta } from '../planning/planning';
+import { PlanStore, PLAN_TAGS } from '../planning/planning';
 import { ProcessRegistry } from '../process-registry';
 import { Observer } from '../observation/observer';
 import { RecipeStore } from '../knowledge/recipes';
@@ -146,8 +146,8 @@ describe('Federation Decomposition', () => {
                 plannedWithin: 'conservation:water', finished: false,
             });
             r1.planStore.setMeta(i1.id, {
-                kind: 'conservation', onhand: 50, tor: 20, toy: 40, tog: 60, zone: 'yellow',
-            } as ConservationMeta);
+                kind: 'conservation' as const, onhand: 50, tor: 20, toy: 40, tog: 60, zone: 'yellow' as const,
+            });
 
             const r2 = makeEmptyResult();
             const i2 = r2.planStore.addIntent({
@@ -156,9 +156,9 @@ describe('Federation Decomposition', () => {
                 plannedWithin: 'conservation:water', finished: false,
             });
             r2.planStore.setMeta(i2.id, {
-                kind: 'conservation', onhand: 30, tor: 20, toy: 40, tog: 60, zone: 'yellow',
+                kind: 'conservation' as const, onhand: 30, tor: 20, toy: 40, tog: 60, zone: 'yellow' as const,
                 tippingPointBreached: true,
-            } as ConservationMeta);
+            });
 
             const byScope = new Map([['scope-a', r1], ['scope-b', r2]]);
             const signals = aggregateConservation(byScope);

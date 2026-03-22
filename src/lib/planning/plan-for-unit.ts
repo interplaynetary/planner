@@ -27,9 +27,10 @@
 
 import { nanoid } from 'nanoid';
 
+import { VfAction } from '../schemas';
 import type { Intent, BufferProfile } from '../schemas';
 import type { RecipeStore } from '../knowledge/recipes';
-import { PlanStore, PLAN_TAGS, PLANNING_PROCESS_SPEC, NON_CONSUMING_ACTIONS, type DeficitMeta, type ConservationMeta, type PlanningMeta } from './planning';
+import { PlanStore, PLAN_TAGS, PLANNING_PROCESS_SPEC, NON_CONSUMING_ACTIONS, type ConservationMeta, type PlanningMeta } from './planning';
 import { ProcessRegistry } from '../process-registry';
 import { PlanNetter } from './netting';
 import { dependentDemand, type DependentDemandResult } from '../algorithms/dependent-demand';
@@ -260,7 +261,7 @@ export function extractPhase(
                     if (hasDebtTag !== isDebt) continue;
                     if (seenIntentId.has(i.id)) continue;
                     seenIntentId.add(i.id);
-                    const deficitMeta = childStore.getMeta(i.id) as DeficitMeta | undefined;
+                    const deficitMeta = childStore.getMetaOfKind(i.id, 'deficit');
                     const originalShortfall = deficitMeta?.originalShortfall ?? i.resourceQuantity?.hasNumericalValue ?? 0;
                     const resolvedAt = deficitMeta?.resolvedAt ?? [];
                     const shortfall = i.resourceQuantity?.hasNumericalValue ?? 0;
@@ -1148,7 +1149,7 @@ export function collectPhase(
     if (subStores && subStores.length > 0) {
         for (const childStore of subStores) {
             for (const i of childStore.intentsForTag(PLAN_TAGS.DEFICIT)) {
-                const deficitMeta = childStore.getMeta(i.id) as DeficitMeta | undefined;
+                const deficitMeta = childStore.getMetaOfKind(i.id, 'deficit');
                 const originalShortfall = deficitMeta?.originalShortfall ?? i.resourceQuantity?.hasNumericalValue ?? 0;
                 const resolvedAt = deficitMeta?.resolvedAt ?? [];
                 const originLocation = i.inScopeOf?.[0] ?? i.atLocation ?? '';
@@ -1251,7 +1252,7 @@ export function collectPhase(
         const deficitMeta = { originalShortfall: d.originalShortfall ?? d.shortfall, resolvedAt: d.resolvedAt ?? [] };
         const intent = planStore.addIntent({
             id: d.intentId,
-            action: d.action as import('../schemas').VfAction,
+            action: VfAction.parse(d.action),
             resourceConformsTo: d.specId,
             resourceQuantity: { hasNumericalValue: d.shortfall, hasUnit: unit },
             due: d.due, atLocation: locFields.atLocation,
@@ -1284,13 +1285,13 @@ export function collectPhase(
                 resourceClassifiedAs: [PLAN_TAGS.CONSERVATION],
                 plannedWithin: `conservation:${c.specId}`, finished: false,
             });
-            planStore.setMeta(intent.id, { kind: 'conservation', ...conservationMeta } as ConservationMeta);
+            planStore.setMeta(intent.id, { kind: 'conservation' as const, ...conservationMeta });
         }
         if (subStores && subStores.length > 0) {
             const mergedChild = new Map<string, { onhand: number; tor: number; toy: number; tog: number; zone: 'red' | 'yellow'; tippingPointBreached?: boolean }>();
             for (const childStore of subStores) {
                 for (const ci of childStore.intentsForTag(PLAN_TAGS.CONSERVATION)) {
-                    const cn = childStore.getMeta(ci.id) as ConservationMeta | undefined;
+                    const cn = childStore.getMetaOfKind(ci.id, 'conservation');
                     if (!cn) continue;
                     const cSpecId = ci.resourceConformsTo ?? '';
                     const existing = mergedChild.get(cSpecId);
@@ -1306,7 +1307,8 @@ export function collectPhase(
                     if (data.tippingPointBreached) {
                         const existing = planStore.intentsForTag(PLAN_TAGS.CONSERVATION).find(i => i.resourceConformsTo === specId);
                         if (existing) {
-                            const existingMeta = planStore.getMeta(existing.id) as ConservationMeta;
+                            const existingMeta = planStore.getMetaOfKind(existing.id, 'conservation');
+                            if (!existingMeta) continue;
                             const updatedMeta: ConservationMeta = { ...existingMeta, tippingPointBreached: true };
                             planStore.removeRecords({ intentIds: [existing.id] });
                             const reEmitted = planStore.addIntent({ ...existing });
@@ -1320,7 +1322,7 @@ export function collectPhase(
                         resourceClassifiedAs: [PLAN_TAGS.CONSERVATION],
                         plannedWithin: `conservation:${specId}`, finished: false,
                     });
-                    planStore.setMeta(intent.id, { kind: 'conservation', ...data } as ConservationMeta);
+                    planStore.setMeta(intent.id, { kind: 'conservation' as const, ...data });
                 }
             }
         }
