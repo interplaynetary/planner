@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach } from 'bun:test';
-import { PlanNetter } from '../planning/netting';
+import { PlanNetter, NettingTransaction } from '../planning/netting';
 import { PlanStore, PLAN_TAGS } from '../planning/planning';
 import { ProcessRegistry } from '../process-registry';
 import { Observer } from '../observation/observer';
@@ -690,6 +690,112 @@ describe('PlanNetter', () => {
 
             // Only the non-signal intent (5) counted, surplus (8) excluded
             expect(qty).toBe(5);
+        });
+    });
+
+    // =============================================================================
+    // NETTING TRANSACTIONS
+    // =============================================================================
+
+    describe('NettingTransaction', () => {
+        test('begin + commit — allocations persist', () => {
+            const planStore = new PlanStore(new ProcessRegistry(nextId), nextId);
+            const netter = new PlanNetter(planStore);
+
+            // Add scheduled output (tracked in allocated set)
+            planStore.addIntent({
+                action: 'produce', outputOf: 'proc-1',
+                resourceConformsTo: 'spec:wood',
+                resourceQuantity: { hasNumericalValue: 10, hasUnit: 'unit' },
+                finished: false,
+            });
+
+            const tx = netter.begin();
+            netter.netDemand('spec:wood', 5, undefined, undefined, tx);
+            expect(netter.allocated.size).toBe(1);
+
+            tx.commit();
+            // After commit, allocation persists
+            expect(netter.allocated.size).toBe(1);
+            expect(netter.netAvailableQty('spec:wood')).toBe(0);
+        });
+
+        test('begin + rollback — allocations removed', () => {
+            const observer = new Observer();
+            observer.seedResource(makeResource({ conformsTo: 'spec:wood', quantity: 10 }));
+            const planStore = new PlanStore(new ProcessRegistry(nextId), nextId);
+            const netter = new PlanNetter(planStore, observer);
+
+            // Add a scheduled output so we can test allocated set rollback
+            planStore.addIntent({
+                action: 'produce', outputOf: 'proc-1',
+                resourceConformsTo: 'spec:wood',
+                resourceQuantity: { hasNumericalValue: 5, hasUnit: 'unit' },
+                finished: false,
+            });
+
+            const tx = netter.begin();
+            netter.netDemand('spec:wood', 12, undefined, undefined, tx);
+            // Should have allocated the intent
+            const allocatedBefore = new Set(netter.allocated);
+            expect(allocatedBefore.size).toBeGreaterThan(0);
+
+            tx.rollback();
+            // After rollback, newly allocated IDs are removed
+            // (inventory allocations are not tracked in `allocated` set, only flow IDs)
+            expect(netter.allocated.size).toBe(0);
+        });
+
+        test('double-commit throws', () => {
+            const planStore = new PlanStore(new ProcessRegistry(nextId), nextId);
+            const netter = new PlanNetter(planStore);
+            const tx = netter.begin();
+            tx.commit();
+            expect(() => tx.commit()).toThrow('already committed');
+        });
+
+        test('rollback-after-commit throws', () => {
+            const planStore = new PlanStore(new ProcessRegistry(nextId), nextId);
+            const netter = new PlanNetter(planStore);
+            const tx = netter.begin();
+            tx.commit();
+            expect(() => tx.rollback()).toThrow('Cannot rollback a committed');
+        });
+
+        test('commit-after-rollback throws', () => {
+            const planStore = new PlanStore(new ProcessRegistry(nextId), nextId);
+            const netter = new PlanNetter(planStore);
+            const tx = netter.begin();
+            tx.rollback();
+            expect(() => tx.commit()).toThrow('Cannot commit a rolled-back');
+        });
+
+        test('coexists with fork()', () => {
+            const planStore = new PlanStore(new ProcessRegistry(nextId), nextId);
+            const netter = new PlanNetter(planStore);
+
+            // Add scheduled output
+            planStore.addIntent({
+                action: 'produce', outputOf: 'proc-1',
+                resourceConformsTo: 'spec:steel',
+                resourceQuantity: { hasNumericalValue: 20, hasUnit: 'unit' },
+                finished: false,
+            });
+
+            // Fork a child netter before any allocations
+            const child = netter.fork({});
+
+            // Transaction on parent
+            const tx = netter.begin();
+            netter.netDemand('spec:steel', 10, undefined, undefined, tx);
+            tx.commit();
+
+            // Parent allocated the flow
+            expect(netter.allocated.size).toBe(1);
+            // Child was forked before the allocation, so its allocated set is empty
+            // and it still sees the full supply
+            expect(child.allocated.size).toBe(0);
+            expect(child.netAvailableQty('spec:steel')).toBe(20);
         });
     });
 });

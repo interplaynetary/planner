@@ -49,6 +49,44 @@ export interface NetDemandResult {
 }
 
 // =============================================================================
+// NETTING TRANSACTION
+// =============================================================================
+
+export class NettingTransaction {
+    private snapshot: Set<string>;
+    private newAllocations = new Set<string>();
+    private committed = false;
+    private rolledBack = false;
+
+    constructor(private netter: PlanNetter) {
+        this.snapshot = new Set(netter.allocated);
+    }
+
+    /** Track a new allocation added after this transaction began. */
+    track(id: string): void {
+        if (!this.snapshot.has(id)) this.newAllocations.add(id);
+    }
+
+    /** Commit the transaction — allocations persist. */
+    commit(): void {
+        if (this.rolledBack) throw new Error('Cannot commit a rolled-back transaction');
+        if (this.committed) throw new Error('Transaction already committed');
+        this.committed = true;
+    }
+
+    /** Rollback the transaction — remove allocations added since begin(). */
+    rollback(): void {
+        if (this.committed) throw new Error('Cannot rollback a committed transaction');
+        if (this.rolledBack) throw new Error('Transaction already rolled back');
+        for (const id of this.newAllocations) this.netter.allocated.delete(id);
+        this.rolledBack = true;
+    }
+
+    get isCommitted(): boolean { return this.committed; }
+    get isRolledBack(): boolean { return this.rolledBack; }
+}
+
+// =============================================================================
 // PLAN NETTER
 // =============================================================================
 
@@ -77,6 +115,11 @@ export class PlanNetter {
         private readonly conservationFloors?: Map<string, number>,
     ) {}
 
+    /** Start a named transaction. Allocations can be committed or rolled back. */
+    begin(): NettingTransaction {
+        return new NettingTransaction(this);
+    }
+
     /**
      * Net a demand quantity against:
      *   1. Observer inventory (resources conforming to specId)
@@ -89,6 +132,7 @@ export class PlanNetter {
         qty: number,
         opts?: { stage?: string; state?: string; neededBy?: Date; atLocation?: string },
         planId?: string,
+        tx?: NettingTransaction,
     ): NetDemandResult {
         let remaining = qty;
         const inventoryAllocated: DemandAllocation[] = [];
@@ -136,6 +180,7 @@ export class PlanNetter {
                     if (opts?.atLocation && intent.atLocation && intent.atLocation !== opts.atLocation) continue;
                     const take = Math.min(intent.resourceQuantity!.hasNumericalValue, remaining);
                     this.allocated.add(intent.id);
+                    tx?.track(intent.id);
                     if (planId) {
                         if (!this.claimedByPlan.has(planId)) this.claimedByPlan.set(planId, new Set());
                         this.claimedByPlan.get(planId)!.add(intent.id);
@@ -172,6 +217,7 @@ export class PlanNetter {
                     if (opts?.atLocation && commitment.atLocation && commitment.atLocation !== opts.atLocation) continue;
                     const take = Math.min(commitment.resourceQuantity!.hasNumericalValue, remaining);
                     this.allocated.add(commitment.id);
+                    tx?.track(commitment.id);
                     if (planId) {
                         if (!this.claimedByPlan.has(planId)) this.claimedByPlan.set(planId, new Set());
                         this.claimedByPlan.get(planId)!.add(commitment.id);

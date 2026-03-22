@@ -45,6 +45,26 @@
     ore: "Iron Ore",
     dough: "Dough",
     brine: "Brine",
+    // Frontier Tower
+    compute: "GPU Compute",
+    electronics: "Electronics",
+    "3d-filament": "3D Filament",
+    "fabricated-parts": "Fabricated Parts",
+    prototypes: "Prototypes",
+    "lab-reagents": "Lab Reagents",
+    "bio-samples": "Bio Samples",
+    supplements: "Supplements",
+    "media-content": "Media Content",
+    meals: "Meals",
+    "fitness-sessions": "Fitness Sessions",
+    "ai-models": "AI Models",
+    "node-infra": "Node Infra",
+    "wellness-pgm": "Wellness Programs",
+    "coffee-beans": "Coffee Beans",
+    coffee: "Coffee",
+    "event-tickets": "Event Tickets",
+    consulting: "Consulting",
+    ventures: "Ventures",
   };
 
   // ---------------------------------------------------------------------------
@@ -95,6 +115,26 @@
       ["vinegar",         "Citrus Vinegar",   "liter"],
       ["infused-oil",     "Infused Olive Oil","liter"],
       ["citrus-loaf",     "Citrus Loaf",      "loaf"],
+      // ── Frontier Tower resource specs ──
+      ["compute",          "GPU Compute",           "hr"      ],
+      ["electronics",      "Electronic Components", "unit"    ],
+      ["3d-filament",      "3D Printing Filament",  "kg"      ],
+      ["fabricated-parts", "Fabricated Parts",       "unit"    ],
+      ["prototypes",       "Hardware Prototypes",    "unit"    ],
+      ["lab-reagents",     "Lab Reagents",           "kit"     ],
+      ["bio-samples",      "Bio Samples",            "unit"    ],
+      ["supplements",      "Longevity Supplements",  "dose"   ],
+      ["media-content",    "Digital Media",          "unit"    ],
+      ["meals",            "Prepared Meals",         "serving" ],
+      ["fitness-sessions", "Fitness Sessions",       "session" ],
+      ["ai-models",        "Trained AI Models",      "unit"    ],
+      ["node-infra",       "Node Infrastructure",    "unit"    ],
+      ["wellness-pgm",     "Wellness Programs",      "session" ],
+      ["coffee-beans",     "Coffee Beans",           "kg"      ],
+      ["coffee",           "Brewed Coffee",          "cup"     ],
+      ["event-tickets",    "Event Tickets",          "unit"    ],
+      ["consulting",       "Consulting Hours",       "hr"      ],
+      ["ventures",         "Venture Projects",       "unit"    ],
     ];
     for (const [id, name, defaultUnitOfResource] of specDefs) rs.addResourceSpec({ id, name, defaultUnitOfResource });
 
@@ -159,6 +199,22 @@
       ["ps-fisher-implements","Fisher Implement Crafting"],
       ["ps-fisher-grove",     "Fisher Citrus Grove"],
       ["ps-salter-grove",     "Salter Citrus Grove"],
+      // ── Frontier Tower process specs ──
+      ["ps-ft-meal-prep",      "Tower Meal Preparation"],
+      ["ps-ft-coffee-brewing", "Coffee Brewing"],
+      ["ps-ft-event-prod",     "Event Production"],
+      ["ps-ft-consulting",     "Office Consulting"],
+      ["ps-ft-robotics-dev",   "Robotics Development"],
+      ["ps-ft-fitness",        "Fitness Training"],
+      ["ps-ft-media-creation", "Media Creation"],
+      ["ps-ft-fabrication",    "Maker Fabrication"],
+      ["ps-ft-neuro-research", "Neuro Research"],
+      ["ps-ft-model-training", "AI Model Training"],
+      ["ps-ft-incubation",     "Venture Incubation"],
+      ["ps-ft-supplement-synth","Supplement Synthesis"],
+      ["ps-ft-node-deploy",    "Node Deployment"],
+      ["ps-ft-wellness",       "Wellness Programming"],
+      ["ps-ft-workspace",      "Workspace Compute Services"],
     ];
     for (const [id, name] of procDefs) rs.addProcessSpec({ id, name });
 
@@ -693,6 +749,147 @@
       rs.addRecipe({ id: "recipe-salter-citrus", name: "Salter Citrus", primaryOutput: "citrus", recipeProcesses: [rp.id] });
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // Frontier Tower recipes
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // ft-lounge: wheat + dairy + coffee-beans + work → meals
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-meal-prep", name: "Tower Meal Prep", processConformsTo: "ps-ft-meal-prep" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "wheat", resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "dairy", resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "coffee-beans", resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 40, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 200, hasUnit: "serving" } });
+      rs.addRecipe({ id: "recipe-ft-meals", name: "Tower Meal Preparation", primaryOutput: "meals", recipeProcesses: [rp.id] });
+    }
+    // ft-coliving: coffee-beans + work → coffee
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-coffee-brewing", name: "Coffee Brewing", processConformsTo: "ps-ft-coffee-brewing" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "coffee-beans", resourceQuantity: { hasNumericalValue: 8, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 10, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "coffee", resourceQuantity: { hasNumericalValue: 150, hasUnit: "cup" } });
+      rs.addRecipe({ id: "recipe-ft-coffee", name: "Coffee Brewing", primaryOutput: "coffee", recipeProcesses: [rp.id] });
+    }
+    // ft-events: media-content + meals + work → event-tickets
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-event-prod", name: "Event Production", processConformsTo: "ps-ft-event-prod" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "media-content", resourceQuantity: { hasNumericalValue: 8, hasUnit: "unit" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 40, hasUnit: "serving" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 30, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "event-tickets", resourceQuantity: { hasNumericalValue: 25, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-ft-events", name: "Event Production", primaryOutput: "event-tickets", recipeProcesses: [rp.id] });
+    }
+    // ft-offices: compute + coffee + work → consulting
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-consulting", name: "Office Consulting", processConformsTo: "ps-ft-consulting" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "compute", resourceQuantity: { hasNumericalValue: 20, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "coffee", resourceQuantity: { hasNumericalValue: 30, hasUnit: "cup" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 40, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "consulting", resourceQuantity: { hasNumericalValue: 60, hasUnit: "hr" } });
+      rs.addRecipe({ id: "recipe-ft-consulting", name: "Office Consulting", primaryOutput: "consulting", recipeProcesses: [rp.id] });
+    }
+    // ft-robotics: fabricated-parts + electronics + compute + work → prototypes
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-robotics-dev", name: "Robotics Dev", processConformsTo: "ps-ft-robotics-dev" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "fabricated-parts", resourceQuantity: { hasNumericalValue: 10, hasUnit: "unit" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 25, hasUnit: "unit" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "compute", resourceQuantity: { hasNumericalValue: 30, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 60, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "prototypes", resourceQuantity: { hasNumericalValue: 8, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-ft-prototypes", name: "Robotics Prototyping", primaryOutput: "prototypes", recipeProcesses: [rp.id] });
+    }
+    // ft-movement: meals + work → fitness-sessions
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-fitness", name: "Fitness Training", processConformsTo: "ps-ft-fitness" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 15, hasUnit: "serving" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 40, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "fitness-sessions", resourceQuantity: { hasNumericalValue: 50, hasUnit: "session" } });
+      rs.addRecipe({ id: "recipe-ft-fitness", name: "Fitness Training", primaryOutput: "fitness-sessions", recipeProcesses: [rp.id] });
+    }
+    // ft-arts: 3d-filament + compute + work → media-content
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-media-creation", name: "Media Creation", processConformsTo: "ps-ft-media-creation" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "3d-filament", resourceQuantity: { hasNumericalValue: 5, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "compute", resourceQuantity: { hasNumericalValue: 8, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 35, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "media-content", resourceQuantity: { hasNumericalValue: 20, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-ft-media", name: "Media Creation", primaryOutput: "media-content", recipeProcesses: [rp.id] });
+    }
+    // ft-maker: 3d-filament + electronics + work → fabricated-parts
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-fabrication", name: "Maker Fabrication", processConformsTo: "ps-ft-fabrication" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "3d-filament", resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 20, hasUnit: "unit" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 50, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "fabricated-parts", resourceQuantity: { hasNumericalValue: 25, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-ft-fabrication", name: "Maker Fabrication", primaryOutput: "fabricated-parts", recipeProcesses: [rp.id] });
+    }
+    // ft-neuro: lab-reagents + compute + work → bio-samples
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-neuro-research", name: "Neuro Research", processConformsTo: "ps-ft-neuro-research" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "lab-reagents", resourceQuantity: { hasNumericalValue: 10, hasUnit: "kit" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "compute", resourceQuantity: { hasNumericalValue: 25, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 40, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "bio-samples", resourceQuantity: { hasNumericalValue: 12, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-ft-bio-samples", name: "Neuro Bio-Sampling", primaryOutput: "bio-samples", recipeProcesses: [rp.id] });
+    }
+    // ft-ai: compute + electronics + work → ai-models
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-model-training", name: "AI Model Training", processConformsTo: "ps-ft-model-training" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "compute", resourceQuantity: { hasNumericalValue: 80, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 5, hasUnit: "unit" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 20, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "ai-models", resourceQuantity: { hasNumericalValue: 5, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-ft-ai-models", name: "AI Model Training", primaryOutput: "ai-models", recipeProcesses: [rp.id] });
+    }
+    // ft-accelerate: prototypes + media-content + consulting + work → ventures
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-incubation", name: "Venture Incubation", processConformsTo: "ps-ft-incubation" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "prototypes", resourceQuantity: { hasNumericalValue: 3, hasUnit: "unit" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "media-content", resourceQuantity: { hasNumericalValue: 5, hasUnit: "unit" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "consulting", resourceQuantity: { hasNumericalValue: 15, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 50, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "ventures", resourceQuantity: { hasNumericalValue: 4, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-ft-ventures", name: "Venture Incubation", primaryOutput: "ventures", recipeProcesses: [rp.id] });
+    }
+    // ft-longevity: bio-samples + lab-reagents + work → supplements
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-supplement-synth", name: "Supplement Synthesis", processConformsTo: "ps-ft-supplement-synth" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "bio-samples", resourceQuantity: { hasNumericalValue: 6, hasUnit: "unit" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "lab-reagents", resourceQuantity: { hasNumericalValue: 8, hasUnit: "kit" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 30, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "supplements", resourceQuantity: { hasNumericalValue: 30, hasUnit: "dose" } });
+      rs.addRecipe({ id: "recipe-ft-supplements", name: "Supplement Synthesis", primaryOutput: "supplements", recipeProcesses: [rp.id] });
+    }
+    // ft-decentral: compute + electronics + work → node-infra
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-node-deploy", name: "Node Deployment", processConformsTo: "ps-ft-node-deploy" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "compute", resourceQuantity: { hasNumericalValue: 40, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 12, hasUnit: "unit" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 25, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "node-infra", resourceQuantity: { hasNumericalValue: 8, hasUnit: "unit" } });
+      rs.addRecipe({ id: "recipe-ft-node-infra", name: "Node Deployment", primaryOutput: "node-infra", recipeProcesses: [rp.id] });
+    }
+    // ft-flourishing: fitness-sessions + supplements + meals + work → wellness-pgm
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-wellness", name: "Wellness Programming", processConformsTo: "ps-ft-wellness" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "fitness-sessions", resourceQuantity: { hasNumericalValue: 15, hasUnit: "session" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "supplements", resourceQuantity: { hasNumericalValue: 10, hasUnit: "dose" } });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 20, hasUnit: "serving" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 20, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "wellness-pgm", resourceQuantity: { hasNumericalValue: 20, hasUnit: "session" } });
+      rs.addRecipe({ id: "recipe-ft-wellness", name: "Wellness Programs", primaryOutput: "wellness-pgm", recipeProcesses: [rp.id] });
+    }
+    // ft-coworking: electronics + work → compute (shared GPU/CPU infrastructure)
+    {
+      const rp = rs.addRecipeProcess({ id: "rp-ft-workspace", name: "Workspace Compute", processConformsTo: "ps-ft-workspace" });
+      rs.addRecipeFlow({ action: "consume", recipeInputOf: rp.id, resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 8, hasUnit: "unit" } });
+      rs.addRecipeFlow({ action: "work", recipeInputOf: rp.id, effortQuantity: { hasNumericalValue: 15, hasUnit: "hr" } });
+      rs.addRecipeFlow({ action: "produce", recipeOutputOf: rp.id, resourceConformsTo: "compute", resourceQuantity: { hasNumericalValue: 100, hasUnit: "hr" } });
+      rs.addRecipe({ id: "recipe-ft-compute", name: "Workspace Compute Services", primaryOutput: "compute", recipeProcesses: [rp.id] });
+    }
+
     return rs;
   }
 
@@ -739,6 +936,62 @@
     ["commune-salter", [{ id: "res-salter-salt", name: "Salt Reserve", conformsTo: "salt",
       accountingQuantity: { hasNumericalValue: 70, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 70, hasUnit: "kg" },
       primaryAccountable: "commune-salter", classifiedAs: ["individual-claimable"], custodianScope: "commune-salter" }]],
+    // ── Frontier Tower inventory ──────────────────────────────────────────────
+    ["ft-lounge", [
+      { id: "res-ft-meals", name: "Meals Stock", conformsTo: "meals",
+        accountingQuantity: { hasNumericalValue: 30, hasUnit: "serving" }, onhandQuantity: { hasNumericalValue: 30, hasUnit: "serving" },
+        primaryAccountable: "ft-lounge", custodianScope: "ft-lounge" },
+      { id: "res-ft-beans", name: "Coffee Bean Reserve", conformsTo: "coffee-beans",
+        accountingQuantity: { hasNumericalValue: 5, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 5, hasUnit: "kg" },
+        primaryAccountable: "ft-lounge", custodianScope: "ft-lounge" },
+    ]],
+    ["ft-coliving", [{ id: "res-ft-coffee", name: "Brewed Coffee", conformsTo: "coffee",
+      accountingQuantity: { hasNumericalValue: 20, hasUnit: "cup" }, onhandQuantity: { hasNumericalValue: 20, hasUnit: "cup" },
+      primaryAccountable: "ft-coliving", custodianScope: "ft-coliving" }]],
+    ["ft-maker", [
+      { id: "res-ft-filament", name: "Filament Stock", conformsTo: "3d-filament",
+        accountingQuantity: { hasNumericalValue: 10, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 10, hasUnit: "kg" },
+        primaryAccountable: "ft-maker", custodianScope: "ft-maker" },
+      { id: "res-ft-maker-elec", name: "Electronics Stock", conformsTo: "electronics",
+        accountingQuantity: { hasNumericalValue: 8, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 8, hasUnit: "unit" },
+        primaryAccountable: "ft-maker", custodianScope: "ft-maker" },
+    ]],
+    ["ft-robotics", [{ id: "res-ft-prototypes", name: "Prototype Stock", conformsTo: "prototypes",
+      accountingQuantity: { hasNumericalValue: 2, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 2, hasUnit: "unit" },
+      primaryAccountable: "ft-robotics", custodianScope: "ft-robotics" }]],
+    ["ft-arts", [{ id: "res-ft-media", name: "Media Archive", conformsTo: "media-content",
+      accountingQuantity: { hasNumericalValue: 4, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 4, hasUnit: "unit" },
+      primaryAccountable: "ft-arts", custodianScope: "ft-arts" }]],
+    ["ft-neuro", [{ id: "res-ft-reagents", name: "Reagent Supply", conformsTo: "lab-reagents",
+      accountingQuantity: { hasNumericalValue: 4, hasUnit: "kit" }, onhandQuantity: { hasNumericalValue: 4, hasUnit: "kit" },
+      primaryAccountable: "ft-neuro", custodianScope: "ft-neuro" }]],
+    ["ft-ai", [{ id: "res-ft-ai-models", name: "Trained Models", conformsTo: "ai-models",
+      accountingQuantity: { hasNumericalValue: 1, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 1, hasUnit: "unit" },
+      primaryAccountable: "ft-ai", custodianScope: "ft-ai" }]],
+    ["ft-longevity", [{ id: "res-ft-supplements", name: "Supplement Stock", conformsTo: "supplements",
+      accountingQuantity: { hasNumericalValue: 8, hasUnit: "dose" }, onhandQuantity: { hasNumericalValue: 8, hasUnit: "dose" },
+      primaryAccountable: "ft-longevity", custodianScope: "ft-longevity" }]],
+    ["ft-decentral", [{ id: "res-ft-nodes", name: "Node Infrastructure", conformsTo: "node-infra",
+      accountingQuantity: { hasNumericalValue: 2, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 2, hasUnit: "unit" },
+      primaryAccountable: "ft-decentral", custodianScope: "ft-decentral" }]],
+    ["ft-movement", [{ id: "res-ft-fitness", name: "Fitness Sessions", conformsTo: "fitness-sessions",
+      accountingQuantity: { hasNumericalValue: 10, hasUnit: "session" }, onhandQuantity: { hasNumericalValue: 10, hasUnit: "session" },
+      primaryAccountable: "ft-movement", custodianScope: "ft-movement" }]],
+    ["ft-flourishing", [{ id: "res-ft-wellness", name: "Wellness Programs", conformsTo: "wellness-pgm",
+      accountingQuantity: { hasNumericalValue: 5, hasUnit: "session" }, onhandQuantity: { hasNumericalValue: 5, hasUnit: "session" },
+      primaryAccountable: "ft-flourishing", custodianScope: "ft-flourishing" }]],
+    ["ft-coworking", [{ id: "res-ft-compute", name: "GPU Compute Pool", conformsTo: "compute",
+      accountingQuantity: { hasNumericalValue: 25, hasUnit: "hr" }, onhandQuantity: { hasNumericalValue: 25, hasUnit: "hr" },
+      primaryAccountable: "ft-coworking", custodianScope: "ft-coworking" }]],
+    ["ft-events", [{ id: "res-ft-tickets", name: "Event Tickets", conformsTo: "event-tickets",
+      accountingQuantity: { hasNumericalValue: 5, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 5, hasUnit: "unit" },
+      primaryAccountable: "ft-events", custodianScope: "ft-events" }]],
+    ["ft-offices", [{ id: "res-ft-consulting", name: "Consulting Hours", conformsTo: "consulting",
+      accountingQuantity: { hasNumericalValue: 10, hasUnit: "hr" }, onhandQuantity: { hasNumericalValue: 10, hasUnit: "hr" },
+      primaryAccountable: "ft-offices", custodianScope: "ft-offices" }]],
+    ["ft-accelerate", [{ id: "res-ft-ventures", name: "Venture Projects", conformsTo: "ventures",
+      accountingQuantity: { hasNumericalValue: 1, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 1, hasUnit: "unit" },
+      primaryAccountable: "ft-accelerate", custodianScope: "ft-accelerate" }]],
   ]);
 
   // ---- Buffer zones per scope (spec-based, unchanged) -----------------------
@@ -801,6 +1054,23 @@
     { id: 'commune-bakery', name: 'Bakery Commune' },
     { id: 'commune-fisher', name: 'Fisher Commune' },
     { id: 'commune-salter', name: 'Salter Commune' },
+    // Frontier Tower federation
+    { id: 'frontier-tower',    name: 'Frontier Tower' },
+    { id: 'ft-coliving',       name: 'Co-Living 1' },
+    { id: 'ft-events',         name: 'Event & Hackathon Space' },
+    { id: 'ft-offices',        name: 'Private Offices' },
+    { id: 'ft-robotics',       name: 'Robotics & Hard Tech' },
+    { id: 'ft-movement',       name: 'Movement Floor & Fitness' },
+    { id: 'ft-arts',           name: 'Arts & Music' },
+    { id: 'ft-maker',          name: 'Maker Space' },
+    { id: 'ft-neuro',          name: 'Neuro & Biotech' },
+    { id: 'ft-ai',             name: 'AI & Autonomous Systems' },
+    { id: 'ft-accelerate',     name: 'Accelerate' },
+    { id: 'ft-longevity',      name: 'Longevity' },
+    { id: 'ft-decentral',      name: 'Decentralized Tech' },
+    { id: 'ft-flourishing',    name: 'Flourishing' },
+    { id: 'ft-coworking',      name: 'Co-Working' },
+    { id: 'ft-lounge',         name: 'Lounge' },
   ];
   for (const o of orgDefs) agentStore.addAgent({ id: o.id, type: 'Organization', name: o.name });
 
@@ -821,6 +1091,23 @@
     ['commune-bakery', 'food-processing-federation'],
     ['commune-fisher', 'maritime-federation'],
     ['commune-salter', 'maritime-federation'],
+    // Frontier Tower → UC, floors → Frontier Tower
+    ['frontier-tower',    'universal-commune'],
+    ['ft-coliving',       'frontier-tower'],
+    ['ft-events',         'frontier-tower'],
+    ['ft-offices',        'frontier-tower'],
+    ['ft-robotics',       'frontier-tower'],
+    ['ft-movement',       'frontier-tower'],
+    ['ft-arts',           'frontier-tower'],
+    ['ft-maker',          'frontier-tower'],
+    ['ft-neuro',          'frontier-tower'],
+    ['ft-ai',             'frontier-tower'],
+    ['ft-accelerate',     'frontier-tower'],
+    ['ft-longevity',      'frontier-tower'],
+    ['ft-decentral',      'frontier-tower'],
+    ['ft-flourishing',    'frontier-tower'],
+    ['ft-coworking',      'frontier-tower'],
+    ['ft-lounge',         'frontier-tower'],
   ];
   for (const [child, parent] of hierarchyEdges) {
     agentStore.addRelationship({ subject: child, object: parent, relationship: 'member' });
@@ -832,6 +1119,12 @@
     ['commune-workshop', 90], ['commune-olive', 70], ['commune-citrus', 85],
     ['commune-mill', 50], ['commune-bakery', 65], ['commune-fisher', 75],
     ['commune-salter', 55],
+    // Frontier Tower floors
+    ['ft-coliving', 40],       ['ft-events', 25],       ['ft-offices', 30],
+    ['ft-robotics', 20],       ['ft-movement', 35],     ['ft-arts', 25],
+    ['ft-maker', 20],          ['ft-neuro', 15],        ['ft-ai', 20],
+    ['ft-accelerate', 15],     ['ft-longevity', 15],    ['ft-decentral', 20],
+    ['ft-flourishing', 15],    ['ft-coworking', 45],    ['ft-lounge', 30],
   ];
   for (const [scopeId, count] of communePopulations) {
     for (let i = 0; i < count; i++) {
@@ -949,6 +1242,105 @@
     { id: "ci-bakery-oil",     action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 15, hasUnit: "liter" }, inScopeOf: ["commune-bakery"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
     { id: "ci-fisher-oil",     action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 12, hasUnit: "liter" }, inScopeOf: ["commune-fisher"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
     { id: "ci-salter-oil",     action: "transfer", resourceConformsTo: "olive-oil", resourceQuantity: { hasNumericalValue: 10, hasUnit: "liter" }, inScopeOf: ["commune-salter"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Frontier Tower demands
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // ── Lounge needs raw ingredients (from external communes) ────────────────
+    { id: "di-ft-lounge-wheat",  action: "transfer", resourceConformsTo: "wheat",       resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" }, inScopeOf: ["ft-lounge"], due: "2026-04-01" },
+    { id: "di-ft-lounge-dairy",  action: "transfer", resourceConformsTo: "dairy",       resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" }, inScopeOf: ["ft-lounge"], due: "2026-04-01" },
+    { id: "di-ft-lounge-beans",  action: "transfer", resourceConformsTo: "coffee-beans", resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg" }, inScopeOf: ["ft-lounge"], due: "2026-04-01" },
+
+    // ── Co-Living needs coffee beans ─────────────────────────────────────────
+    { id: "di-ft-coliving-beans", action: "transfer", resourceConformsTo: "coffee-beans", resourceQuantity: { hasNumericalValue: 8, hasUnit: "kg" }, inScopeOf: ["ft-coliving"], due: "2026-04-01" },
+
+    // ── Events needs media + meals (inter-floor) ────────────────────────────
+    { id: "di-ft-events-media",  action: "transfer", resourceConformsTo: "media-content", resourceQuantity: { hasNumericalValue: 8,  hasUnit: "unit"    }, inScopeOf: ["ft-events"], due: "2026-04-01" },
+    { id: "di-ft-events-meals",  action: "transfer", resourceConformsTo: "meals",         resourceQuantity: { hasNumericalValue: 40, hasUnit: "serving" }, inScopeOf: ["ft-events"], due: "2026-04-01" },
+
+    // ── Offices needs compute + coffee (inter-floor) ────────────────────────
+    { id: "di-ft-offices-comp",  action: "transfer", resourceConformsTo: "compute", resourceQuantity: { hasNumericalValue: 20, hasUnit: "hr"  }, inScopeOf: ["ft-offices"], due: "2026-04-01" },
+    { id: "di-ft-offices-coffee",action: "transfer", resourceConformsTo: "coffee",  resourceQuantity: { hasNumericalValue: 30, hasUnit: "cup" }, inScopeOf: ["ft-offices"], due: "2026-04-01" },
+
+    // ── Robotics needs parts + electronics + compute ────────────────────────
+    { id: "di-ft-robo-parts",    action: "transfer", resourceConformsTo: "fabricated-parts", resourceQuantity: { hasNumericalValue: 10, hasUnit: "unit" }, inScopeOf: ["ft-robotics"], due: "2026-04-01" },
+    { id: "di-ft-robo-elec",     action: "transfer", resourceConformsTo: "electronics",     resourceQuantity: { hasNumericalValue: 25, hasUnit: "unit" }, inScopeOf: ["ft-robotics"], due: "2026-04-01" },
+    { id: "di-ft-robo-comp",     action: "transfer", resourceConformsTo: "compute",         resourceQuantity: { hasNumericalValue: 30, hasUnit: "hr"   }, inScopeOf: ["ft-robotics"], due: "2026-04-01" },
+
+    // ── Movement needs meals ────────────────────────────────────────────────
+    { id: "di-ft-move-meals",    action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 15, hasUnit: "serving" }, inScopeOf: ["ft-movement"], due: "2026-04-01" },
+
+    // ── Arts needs filament + compute ───────────────────────────────────────
+    { id: "di-ft-arts-filament", action: "transfer", resourceConformsTo: "3d-filament", resourceQuantity: { hasNumericalValue: 5, hasUnit: "kg" }, inScopeOf: ["ft-arts"], due: "2026-04-01" },
+    { id: "di-ft-arts-comp",     action: "transfer", resourceConformsTo: "compute",     resourceQuantity: { hasNumericalValue: 8, hasUnit: "hr" }, inScopeOf: ["ft-arts"], due: "2026-04-01" },
+
+    // ── Maker needs filament + electronics ──────────────────────────────────
+    { id: "di-ft-maker-filament",action: "transfer", resourceConformsTo: "3d-filament", resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg"   }, inScopeOf: ["ft-maker"], due: "2026-04-01" },
+    { id: "di-ft-maker-elec",    action: "transfer", resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 20, hasUnit: "unit" }, inScopeOf: ["ft-maker"], due: "2026-04-01" },
+
+    // ── Neuro needs reagents + compute ──────────────────────────────────────
+    { id: "di-ft-neuro-reagents",action: "transfer", resourceConformsTo: "lab-reagents", resourceQuantity: { hasNumericalValue: 10, hasUnit: "kit" }, inScopeOf: ["ft-neuro"], due: "2026-04-01" },
+    { id: "di-ft-neuro-comp",    action: "transfer", resourceConformsTo: "compute",      resourceQuantity: { hasNumericalValue: 25, hasUnit: "hr"  }, inScopeOf: ["ft-neuro"], due: "2026-04-01" },
+
+    // ── AI needs compute (heavy!) + electronics ─────────────────────────────
+    { id: "di-ft-ai-comp",       action: "transfer", resourceConformsTo: "compute",     resourceQuantity: { hasNumericalValue: 80, hasUnit: "hr"   }, inScopeOf: ["ft-ai"], due: "2026-04-01" },
+    { id: "di-ft-ai-elec",       action: "transfer", resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 5,  hasUnit: "unit" }, inScopeOf: ["ft-ai"], due: "2026-04-01" },
+
+    // ── Accelerate needs prototypes + media + consulting ────────────────────
+    { id: "di-ft-accel-proto",   action: "transfer", resourceConformsTo: "prototypes",    resourceQuantity: { hasNumericalValue: 3,  hasUnit: "unit" }, inScopeOf: ["ft-accelerate"], due: "2026-04-01" },
+    { id: "di-ft-accel-media",   action: "transfer", resourceConformsTo: "media-content", resourceQuantity: { hasNumericalValue: 5,  hasUnit: "unit" }, inScopeOf: ["ft-accelerate"], due: "2026-04-01" },
+    { id: "di-ft-accel-consult", action: "transfer", resourceConformsTo: "consulting",    resourceQuantity: { hasNumericalValue: 15, hasUnit: "hr"   }, inScopeOf: ["ft-accelerate"], due: "2026-04-01" },
+
+    // ── Longevity needs bio-samples + reagents ──────────────────────────────
+    { id: "di-ft-long-bio",      action: "transfer", resourceConformsTo: "bio-samples",  resourceQuantity: { hasNumericalValue: 6, hasUnit: "unit" }, inScopeOf: ["ft-longevity"], due: "2026-04-01" },
+    { id: "di-ft-long-reagents", action: "transfer", resourceConformsTo: "lab-reagents", resourceQuantity: { hasNumericalValue: 8, hasUnit: "kit"  }, inScopeOf: ["ft-longevity"], due: "2026-04-01" },
+
+    // ── Decentral needs compute + electronics ───────────────────────────────
+    { id: "di-ft-dec-comp",      action: "transfer", resourceConformsTo: "compute",     resourceQuantity: { hasNumericalValue: 40, hasUnit: "hr"   }, inScopeOf: ["ft-decentral"], due: "2026-04-01" },
+    { id: "di-ft-dec-elec",      action: "transfer", resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 12, hasUnit: "unit" }, inScopeOf: ["ft-decentral"], due: "2026-04-01" },
+
+    // ── Flourishing needs fitness + supplements + meals ─────────────────────
+    { id: "di-ft-flour-fitness", action: "transfer", resourceConformsTo: "fitness-sessions", resourceQuantity: { hasNumericalValue: 15, hasUnit: "session" }, inScopeOf: ["ft-flourishing"], due: "2026-04-01" },
+    { id: "di-ft-flour-suppl",   action: "transfer", resourceConformsTo: "supplements",      resourceQuantity: { hasNumericalValue: 10, hasUnit: "dose"    }, inScopeOf: ["ft-flourishing"], due: "2026-04-01" },
+    { id: "di-ft-flour-meals",   action: "transfer", resourceConformsTo: "meals",             resourceQuantity: { hasNumericalValue: 20, hasUnit: "serving" }, inScopeOf: ["ft-flourishing"], due: "2026-04-01" },
+
+    // ── Co-Working needs electronics (for compute infra) ────────────────────
+    { id: "di-ft-cowk-elec",     action: "transfer", resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 8, hasUnit: "unit" }, inScopeOf: ["ft-coworking"], due: "2026-04-01" },
+
+    // ── Claimable: meals (tower residents eat!) ─────────────────────────────
+    { id: "ci-ft-coliving-meals",   action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 40, hasUnit: "serving" }, inScopeOf: ["ft-coliving"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-offices-meals",    action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 30, hasUnit: "serving" }, inScopeOf: ["ft-offices"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-robotics-meals",   action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 20, hasUnit: "serving" }, inScopeOf: ["ft-robotics"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-arts-meals",       action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 25, hasUnit: "serving" }, inScopeOf: ["ft-arts"],       due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-neuro-meals",      action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 15, hasUnit: "serving" }, inScopeOf: ["ft-neuro"],      due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-ai-meals",         action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 20, hasUnit: "serving" }, inScopeOf: ["ft-ai"],         due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-accel-meals",      action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 15, hasUnit: "serving" }, inScopeOf: ["ft-accelerate"], due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-long-meals",       action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 15, hasUnit: "serving" }, inScopeOf: ["ft-longevity"],  due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-dec-meals",        action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 20, hasUnit: "serving" }, inScopeOf: ["ft-decentral"],  due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-flour-meals-cl",   action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 15, hasUnit: "serving" }, inScopeOf: ["ft-flourishing"],due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-cowk-meals",       action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 45, hasUnit: "serving" }, inScopeOf: ["ft-coworking"],  due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-maker-meals",      action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 20, hasUnit: "serving" }, inScopeOf: ["ft-maker"],      due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-move-meals-cl",    action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 35, hasUnit: "serving" }, inScopeOf: ["ft-movement"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-lounge-meals",     action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 30, hasUnit: "serving" }, inScopeOf: ["ft-lounge"],     due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-events-meals-cl",  action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 25, hasUnit: "serving" }, inScopeOf: ["ft-events"],     due: "2026-04-01", resourceClassifiedAs: CLAIM },
+
+    // ── Claimable: coffee (tower-wide demand) ───────────────────────────────
+    { id: "ci-ft-offices-coffee",   action: "transfer", resourceConformsTo: "coffee", resourceQuantity: { hasNumericalValue: 35, hasUnit: "cup" }, inScopeOf: ["ft-offices"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-cowk-coffee",      action: "transfer", resourceConformsTo: "coffee", resourceQuantity: { hasNumericalValue: 40, hasUnit: "cup" }, inScopeOf: ["ft-coworking"],  due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-ai-coffee",        action: "transfer", resourceConformsTo: "coffee", resourceQuantity: { hasNumericalValue: 30, hasUnit: "cup" }, inScopeOf: ["ft-ai"],         due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-accel-coffee",     action: "transfer", resourceConformsTo: "coffee", resourceQuantity: { hasNumericalValue: 25, hasUnit: "cup" }, inScopeOf: ["ft-accelerate"], due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-neuro-coffee",     action: "transfer", resourceConformsTo: "coffee", resourceQuantity: { hasNumericalValue: 20, hasUnit: "cup" }, inScopeOf: ["ft-neuro"],      due: "2026-04-01", resourceClassifiedAs: CLAIM },
+
+    // ── Claimable: supplements (tower residents) ────────────────────────────
+    { id: "ci-ft-coliving-suppl",   action: "transfer", resourceConformsTo: "supplements", resourceQuantity: { hasNumericalValue: 12, hasUnit: "dose" }, inScopeOf: ["ft-coliving"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-move-suppl",       action: "transfer", resourceConformsTo: "supplements", resourceQuantity: { hasNumericalValue: 10, hasUnit: "dose" }, inScopeOf: ["ft-movement"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-lounge-suppl",     action: "transfer", resourceConformsTo: "supplements", resourceQuantity: { hasNumericalValue: 8,  hasUnit: "dose" }, inScopeOf: ["ft-lounge"],     due: "2026-04-01", resourceClassifiedAs: CLAIM },
+
+    // ── Claimable: fitness sessions (tower-wide) ────────────────────────────
+    { id: "ci-ft-coliving-fitness", action: "transfer", resourceConformsTo: "fitness-sessions", resourceQuantity: { hasNumericalValue: 12, hasUnit: "session" }, inScopeOf: ["ft-coliving"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-cowk-fitness",     action: "transfer", resourceConformsTo: "fitness-sessions", resourceQuantity: { hasNumericalValue: 10, hasUnit: "session" }, inScopeOf: ["ft-coworking"],  due: "2026-04-01", resourceClassifiedAs: CLAIM },
+    { id: "ci-ft-offices-fitness",  action: "transfer", resourceConformsTo: "fitness-sessions", resourceQuantity: { hasNumericalValue: 8,  hasUnit: "session" }, inScopeOf: ["ft-offices"],    due: "2026-04-01", resourceClassifiedAs: CLAIM },
   ]);
 
   // ---------------------------------------------------------------------------
@@ -995,6 +1387,23 @@
     { id: "pi-fisher-tools-local", action: "produce", outputOf: "rp-fisher-tools",      resourceConformsTo: "tools",  resourceQuantity: { hasNumericalValue: 12,  hasUnit: "unit" }, inScopeOf: ["commune-fisher"]   },
     { id: "pi-fisher-citrus-loc",  action: "produce", outputOf: "rp-fisher-citrus",     resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 20,  hasUnit: "kg"   }, inScopeOf: ["commune-fisher"]   },
     { id: "pi-salter-citrus-loc",  action: "produce", outputOf: "rp-salter-citrus",     resourceConformsTo: "citrus", resourceQuantity: { hasNumericalValue: 25,  hasUnit: "kg"   }, inScopeOf: ["commune-salter"]   },
+
+    // ── Frontier Tower produce intents ────────────────────────────────────────
+    { id: "pi-ft-lounge-meals",    action: "produce", outputOf: "rp-ft-meal-prep",       resourceConformsTo: "meals",            resourceQuantity: { hasNumericalValue: 200, hasUnit: "serving" }, inScopeOf: ["ft-lounge"]      },
+    { id: "pi-ft-coliving-coffee", action: "produce", outputOf: "rp-ft-coffee-brewing",  resourceConformsTo: "coffee",           resourceQuantity: { hasNumericalValue: 150, hasUnit: "cup"     }, inScopeOf: ["ft-coliving"]    },
+    { id: "pi-ft-events-tickets",  action: "produce", outputOf: "rp-ft-event-prod",      resourceConformsTo: "event-tickets",    resourceQuantity: { hasNumericalValue: 25,  hasUnit: "unit"    }, inScopeOf: ["ft-events"]      },
+    { id: "pi-ft-offices-consult", action: "produce", outputOf: "rp-ft-consulting",      resourceConformsTo: "consulting",       resourceQuantity: { hasNumericalValue: 60,  hasUnit: "hr"      }, inScopeOf: ["ft-offices"]     },
+    { id: "pi-ft-robo-prototypes", action: "produce", outputOf: "rp-ft-robotics-dev",    resourceConformsTo: "prototypes",       resourceQuantity: { hasNumericalValue: 8,   hasUnit: "unit"    }, inScopeOf: ["ft-robotics"]    },
+    { id: "pi-ft-move-fitness",    action: "produce", outputOf: "rp-ft-fitness",          resourceConformsTo: "fitness-sessions", resourceQuantity: { hasNumericalValue: 50,  hasUnit: "session" }, inScopeOf: ["ft-movement"]    },
+    { id: "pi-ft-arts-media",      action: "produce", outputOf: "rp-ft-media-creation",  resourceConformsTo: "media-content",    resourceQuantity: { hasNumericalValue: 20,  hasUnit: "unit"    }, inScopeOf: ["ft-arts"]        },
+    { id: "pi-ft-maker-parts",     action: "produce", outputOf: "rp-ft-fabrication",     resourceConformsTo: "fabricated-parts", resourceQuantity: { hasNumericalValue: 25,  hasUnit: "unit"    }, inScopeOf: ["ft-maker"]       },
+    { id: "pi-ft-neuro-samples",   action: "produce", outputOf: "rp-ft-neuro-research",  resourceConformsTo: "bio-samples",      resourceQuantity: { hasNumericalValue: 12,  hasUnit: "unit"    }, inScopeOf: ["ft-neuro"]       },
+    { id: "pi-ft-ai-models",       action: "produce", outputOf: "rp-ft-model-training",  resourceConformsTo: "ai-models",        resourceQuantity: { hasNumericalValue: 5,   hasUnit: "unit"    }, inScopeOf: ["ft-ai"]          },
+    { id: "pi-ft-accel-ventures",  action: "produce", outputOf: "rp-ft-incubation",      resourceConformsTo: "ventures",         resourceQuantity: { hasNumericalValue: 4,   hasUnit: "unit"    }, inScopeOf: ["ft-accelerate"]  },
+    { id: "pi-ft-long-supplements",action: "produce", outputOf: "rp-ft-supplement-synth", resourceConformsTo: "supplements",      resourceQuantity: { hasNumericalValue: 30,  hasUnit: "dose"    }, inScopeOf: ["ft-longevity"]   },
+    { id: "pi-ft-dec-nodes",       action: "produce", outputOf: "rp-ft-node-deploy",     resourceConformsTo: "node-infra",       resourceQuantity: { hasNumericalValue: 8,   hasUnit: "unit"    }, inScopeOf: ["ft-decentral"]   },
+    { id: "pi-ft-flour-wellness",  action: "produce", outputOf: "rp-ft-wellness",        resourceConformsTo: "wellness-pgm",     resourceQuantity: { hasNumericalValue: 20,  hasUnit: "session" }, inScopeOf: ["ft-flourishing"] },
+    { id: "pi-ft-cowk-compute",    action: "produce", outputOf: "rp-ft-workspace",       resourceConformsTo: "compute",          resourceQuantity: { hasNumericalValue: 100, hasUnit: "hr"      }, inScopeOf: ["ft-coworking"]   },
   ];
 
   // Supply index = on-hand inventory + committed produce intents (Stratum 2a).

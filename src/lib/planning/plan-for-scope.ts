@@ -6,13 +6,12 @@
  * ScopeStrategy that parameterizes the scope-specific behaviour.
  */
 
-import type { Intent, BufferProfile, Commitment } from '../schemas';
+import type { Intent, Commitment } from '../schemas';
 import type { RecipeStore } from '../knowledge/recipes';
 import { Observer } from '../observation/observer';
 import { PlanStore } from './planning';
 import type { ProcessRegistry } from '../process-registry';
 import type { DependentDemandResult } from '../algorithms/dependent-demand';
-import type { BufferZoneStore } from '../knowledge/buffer-zones';
 import {
     type IndependentDemandIndex,
     type DemandSlot,
@@ -24,7 +23,7 @@ import {
     querySupplyByScope,
     querySupplyBySpec,
 } from '../indexes/independent-supply';
-import { planForUnit, type UnitPlanContext, type UnitPlanResult } from './plan-for-unit';
+import { planForUnit, type PlanningContext, type UnitPlanResult } from './plan-for-unit';
 import type {
     DemandSlotClass,
     SlotRecord,
@@ -42,22 +41,10 @@ export type { DemandSlotClass } from './location-strategy';
 // TYPES
 // =============================================================================
 
-export interface ScopePlanContext {
-    recipeStore: RecipeStore;
-    observer: Observer;
-    demandIndex: IndependentDemandIndex;
-    supplyIndex: IndependentSupplyIndex;
+export interface ScopePlanContext extends PlanningContext {
     parentOf?: Map<string, string>;
-    generateId?: () => string;
-    agents?: { provider?: string; receiver?: string };
-    config?: { insuranceFactor?: number };
-    bufferAlerts?: Map<string, { onhand: number; tor: number; toy: number; tog: number; zone: 'red' | 'yellow' | 'green' | 'excess'; tippingPointBreached?: boolean }>;
-    bufferZoneStore?: BufferZoneStore;
-    bufferProfiles?: Map<string, BufferProfile>;
     memberCounts?: Map<string, number>;
     sacrificeDepth?: number;
-    sneIndex?: import('../algorithms/SNE').SNEIndex;
-    agentIndex?: import('../indexes/agents').AgentIndex;
 }
 
 export interface ScopePlanResult {
@@ -383,20 +370,7 @@ export function planForScope(
         scope: new FederationScopePolicy(),
         sacrifice: new ProportionalSacrifice(ctx.memberCounts, ctx.sacrificeDepth ?? Infinity),
     };
-    const unitCtx: UnitPlanContext = {
-        recipeStore: ctx.recipeStore,
-        observer: ctx.observer,
-        demandIndex: ctx.demandIndex,
-        supplyIndex: ctx.supplyIndex,
-        generateId: ctx.generateId,
-        agents: ctx.agents,
-        config: ctx.config,
-        bufferAlerts: ctx.bufferAlerts,
-        bufferZoneStore: ctx.bufferZoneStore,
-        bufferProfiles: ctx.bufferProfiles,
-        sneIndex: ctx.sneIndex,
-        agentIndex: ctx.agentIndex,
-    };
+    const { parentOf, memberCounts, sacrificeDepth, ...unitCtx } = ctx;
     return planForUnit(mode, scopeIds, horizon, unitCtx, subStores);
 }
 

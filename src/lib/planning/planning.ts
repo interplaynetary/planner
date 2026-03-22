@@ -135,6 +135,205 @@ export interface PlanningMeta {
 export type SignalMeta = DeficitMeta | ConservationMeta | ReplenishmentMeta | PlanningMeta;
 
 // =============================================================================
+// SIGNAL ALGEBRA — typed PlanSignal discriminated union
+// =============================================================================
+
+export interface DeficitSignal {
+    kind: 'deficit';
+    specId: string; qty: number; unit: string;
+    scope?: string; originalShortfall: number; resolvedAt: string[];
+    due?: string; location?: string;
+    source?: 'unmet_demand' | 'metabolic_debt';
+}
+export interface SurplusSignal {
+    kind: 'surplus';
+    specId: string; qty: number; unit: string;
+    scope?: string; availableFrom?: string; location?: string;
+}
+export interface ConservationSignal {
+    kind: 'conservation';
+    specId: string; scope?: string;
+    onhand: number; tor: number; toy: number; tog: number;
+    zone: 'red' | 'yellow'; tippingPointBreached?: boolean;
+}
+export interface ReplenishmentPlanSignal {
+    kind: 'replenishment';
+    specId: string; qty: number; unit: string;
+    onhand: number; onorder: number; qualifiedDemand: number; nfp: number;
+    priority: number; zone: 'red' | 'yellow' | 'green' | 'excess';
+    dueDate: string; bufferZoneId: string;
+}
+export type PlanSignal = DeficitSignal | SurplusSignal | ConservationSignal | ReplenishmentPlanSignal;
+
+const SIGNAL_KIND_TO_TAG: Record<PlanSignal['kind'], string> = {
+    deficit: PLAN_TAGS.DEFICIT,
+    surplus: PLAN_TAGS.SURPLUS,
+    conservation: PLAN_TAGS.CONSERVATION,
+    replenishment: PLAN_TAGS.REPLENISHMENT,
+};
+
+const TAG_TO_SIGNAL_KIND: Record<string, PlanSignal['kind']> = {
+    [PLAN_TAGS.DEFICIT]: 'deficit',
+    [PLAN_TAGS.SURPLUS]: 'surplus',
+    [PLAN_TAGS.CONSERVATION]: 'conservation',
+    [PLAN_TAGS.REPLENISHMENT]: 'replenishment',
+};
+
+/** Convert a typed PlanSignal into Intent fields + metadata for PlanStore. */
+export function signalToIntent(
+    signal: PlanSignal,
+    planId: string,
+    generateId: () => string,
+): { intentFields: Omit<Intent, 'id'> & { id?: string }; meta: SignalMeta } {
+    const tag = SIGNAL_KIND_TO_TAG[signal.kind];
+    switch (signal.kind) {
+        case 'deficit': {
+            const tags = [tag, ...(signal.source === 'metabolic_debt' ? [PLAN_TAGS.METABOLIC_DEBT] : [])];
+            return {
+                intentFields: {
+                    action: 'transfer' as VfAction,
+                    resourceConformsTo: signal.specId,
+                    resourceQuantity: { hasNumericalValue: signal.qty, hasUnit: signal.unit },
+                    due: signal.due,
+                    atLocation: signal.location,
+                    inScopeOf: signal.scope ? [signal.scope] : undefined,
+                    plannedWithin: planId,
+                    resourceClassifiedAs: tags,
+                    finished: false,
+                },
+                meta: {
+                    kind: 'deficit',
+                    originalShortfall: signal.originalShortfall,
+                    resolvedAt: signal.resolvedAt,
+                },
+            };
+        }
+        case 'surplus': {
+            return {
+                intentFields: {
+                    action: 'transfer' as VfAction,
+                    provider: signal.scope,
+                    resourceConformsTo: signal.specId,
+                    resourceQuantity: { hasNumericalValue: signal.qty, hasUnit: signal.unit },
+                    hasPointInTime: signal.availableFrom,
+                    atLocation: signal.location,
+                    plannedWithin: planId,
+                    resourceClassifiedAs: [tag],
+                    finished: false,
+                },
+                meta: { kind: 'planning', processId: '', demandInputIds: [] },
+            };
+        }
+        case 'conservation': {
+            return {
+                intentFields: {
+                    action: 'cite' as VfAction,
+                    resourceConformsTo: signal.specId,
+                    resourceClassifiedAs: [tag],
+                    plannedWithin: planId,
+                    finished: false,
+                },
+                meta: {
+                    kind: 'conservation',
+                    onhand: signal.onhand, tor: signal.tor,
+                    toy: signal.toy, tog: signal.tog,
+                    zone: signal.zone,
+                    tippingPointBreached: signal.tippingPointBreached,
+                },
+            };
+        }
+        case 'replenishment': {
+            return {
+                intentFields: {
+                    action: 'produce' as VfAction,
+                    resourceConformsTo: signal.specId,
+                    resourceQuantity: { hasNumericalValue: signal.qty, hasUnit: signal.unit },
+                    due: signal.dueDate + 'T00:00:00.000Z',
+                    resourceClassifiedAs: [tag],
+                    plannedWithin: planId,
+                    finished: false,
+                },
+                meta: {
+                    kind: 'replenishment',
+                    onhand: signal.onhand, onorder: signal.onorder,
+                    qualifiedDemand: signal.qualifiedDemand, nfp: signal.nfp,
+                    priority: signal.priority, zone: signal.zone,
+                    recommendedQty: signal.qty, dueDate: signal.dueDate,
+                    bufferZoneId: signal.bufferZoneId,
+                    createdAt: new Date().toISOString(),
+                    status: 'open',
+                },
+            };
+        }
+    }
+}
+
+/** Convert an Intent + metadata back to a typed PlanSignal, or null if not a signal. */
+export function intentToSignal(intent: Intent, meta: SignalMeta | undefined): PlanSignal | null {
+    const tags = intent.resourceClassifiedAs ?? [];
+    let kind: PlanSignal['kind'] | undefined;
+    for (const t of tags) {
+        if (TAG_TO_SIGNAL_KIND[t]) { kind = TAG_TO_SIGNAL_KIND[t]; break; }
+    }
+    if (!kind) return null;
+
+    switch (kind) {
+        case 'deficit': {
+            const dm = meta as DeficitMeta | undefined;
+            return {
+                kind: 'deficit',
+                specId: intent.resourceConformsTo ?? '',
+                qty: intent.resourceQuantity?.hasNumericalValue ?? 0,
+                unit: intent.resourceQuantity?.hasUnit ?? 'unit',
+                scope: intent.inScopeOf?.[0],
+                originalShortfall: dm?.originalShortfall ?? intent.resourceQuantity?.hasNumericalValue ?? 0,
+                resolvedAt: dm?.resolvedAt ?? [],
+                due: intent.due,
+                location: intent.atLocation,
+                source: tags.includes(PLAN_TAGS.METABOLIC_DEBT) ? 'metabolic_debt' : 'unmet_demand',
+            };
+        }
+        case 'surplus': {
+            return {
+                kind: 'surplus',
+                specId: intent.resourceConformsTo ?? '',
+                qty: intent.resourceQuantity?.hasNumericalValue ?? 0,
+                unit: intent.resourceQuantity?.hasUnit ?? 'unit',
+                scope: intent.provider,
+                availableFrom: intent.hasPointInTime,
+                location: intent.atLocation,
+            };
+        }
+        case 'conservation': {
+            const cm = meta as ConservationMeta | undefined;
+            if (!cm) return null;
+            return {
+                kind: 'conservation',
+                specId: intent.resourceConformsTo ?? '',
+                scope: intent.inScopeOf?.[0],
+                onhand: cm.onhand, tor: cm.tor, toy: cm.toy, tog: cm.tog,
+                zone: cm.zone,
+                tippingPointBreached: cm.tippingPointBreached,
+            };
+        }
+        case 'replenishment': {
+            const rm = meta as ReplenishmentMeta | undefined;
+            if (!rm) return null;
+            return {
+                kind: 'replenishment',
+                specId: intent.resourceConformsTo ?? '',
+                qty: intent.resourceQuantity?.hasNumericalValue ?? 0,
+                unit: intent.resourceQuantity?.hasUnit ?? 'unit',
+                onhand: rm.onhand, onorder: rm.onorder,
+                qualifiedDemand: rm.qualifiedDemand, nfp: rm.nfp,
+                priority: rm.priority, zone: rm.zone,
+                dueDate: rm.dueDate, bufferZoneId: rm.bufferZoneId,
+            };
+        }
+    }
+}
+
+// =============================================================================
 // ECONOMIC CONTEXT
 // =============================================================================
 
@@ -344,6 +543,26 @@ export class PlanStore {
     setMeta(intentId: string, meta: SignalMeta): void { this._meta.set(intentId, meta); }
     getMeta(intentId: string): SignalMeta | undefined { return this._meta.get(intentId); }
     allMeta(): ReadonlyMap<string, SignalMeta> { return this._meta; }
+
+    // =========================================================================
+    // SIGNAL ALGEBRA — typed emit / query
+    // =========================================================================
+
+    /** Emit a typed PlanSignal as a VF Intent with metadata. */
+    emitSignal(signal: PlanSignal, planId: string): Intent {
+        const { intentFields, meta } = signalToIntent(signal, planId, this.generateId);
+        const added = this.addIntent(intentFields);
+        this.setMeta(added.id, meta);
+        return added;
+    }
+
+    /** Query all signals of a given kind, returned as typed PlanSignal objects. */
+    signalsOfKind<K extends PlanSignal['kind']>(kind: K): Extract<PlanSignal, { kind: K }>[] {
+        const tag = SIGNAL_KIND_TO_TAG[kind];
+        return this.intentsForTag(tag)
+            .map(i => intentToSignal(i, this.getMeta(i.id)))
+            .filter((s): s is Extract<PlanSignal, { kind: K }> => s?.kind === kind);
+    }
 
     // =========================================================================
     // BULK OPERATIONS — merge / retract

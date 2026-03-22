@@ -8,13 +8,11 @@
 
 import * as h3 from 'h3-js';
 
-import type { Intent, BufferProfile, Commitment } from '../schemas';
+import type { Intent } from '../schemas';
 import type { RecipeStore } from '../knowledge/recipes';
 import type { Observer } from '../observation/observer';
 import { PlanStore } from './planning';
-import type { ProcessRegistry } from '../process-registry';
 import type { DependentDemandResult } from '../algorithms/dependent-demand';
-import type { BufferZoneStore } from '../knowledge/buffer-zones';
 import {
     type IndependentDemandIndex,
     type DemandSlot,
@@ -26,7 +24,7 @@ import {
     querySupplyByLocation,
     querySupplyBySpec,
 } from '../indexes/independent-supply';
-import { planForUnit, detectConflicts as _detectConflicts, type UnitPlanContext, type UnitPlanResult } from './plan-for-unit';
+import { planForUnit, detectConflicts as _detectConflicts, type PlanningContext, type UnitPlanResult } from './plan-for-unit';
 import {
     NULL_SCOPE_POLICY,
     type DemandSlotClass,
@@ -44,20 +42,7 @@ export type { DemandSlotClass, SurplusSignal, MetabolicDebt, Conflict } from './
 // TYPES
 // =============================================================================
 
-export interface RegionPlanContext {
-    recipeStore: RecipeStore;
-    observer: Observer;
-    demandIndex: IndependentDemandIndex;
-    supplyIndex: IndependentSupplyIndex;
-    generateId?: () => string;
-    agents?: { provider?: string; receiver?: string };
-    config?: { insuranceFactor?: number };
-    bufferAlerts?: Map<string, { onhand: number; tor: number; toy: number; tog: number; zone: 'red' | 'yellow' | 'green' | 'excess'; tippingPointBreached?: boolean }>;
-    bufferZoneStore?: BufferZoneStore;
-    bufferProfiles?: Map<string, BufferProfile>;
-    sneIndex?: import('../algorithms/SNE').SNEIndex;
-    agentIndex?: import('../indexes/agents').AgentIndex;
-}
+export type RegionPlanContext = PlanningContext;
 
 export interface ConservationSignal {
     plannedWithin: string;
@@ -246,20 +231,6 @@ export function planForRegion(
         scope: NULL_SCOPE_POLICY,
         sacrifice: new SimpleSacrifice(),
     };
-    const unitCtx: UnitPlanContext = {
-        recipeStore: ctx.recipeStore,
-        observer: ctx.observer,
-        demandIndex: ctx.demandIndex,
-        supplyIndex: ctx.supplyIndex,
-        generateId: ctx.generateId,
-        agents: ctx.agents,
-        config: ctx.config,
-        bufferAlerts: ctx.bufferAlerts,
-        bufferZoneStore: ctx.bufferZoneStore,
-        bufferProfiles: ctx.bufferProfiles,
-        sneIndex: ctx.sneIndex,
-        agentIndex: ctx.agentIndex,
-    };
-    return planForUnit(mode, cells, horizon, unitCtx, subStores);
+    return planForUnit(mode, cells, horizon, ctx, subStores);
 }
 

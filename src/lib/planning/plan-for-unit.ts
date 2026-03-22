@@ -56,7 +56,7 @@ import type {
 // CONTEXT AND RESULT TYPES
 // =============================================================================
 
-export interface UnitPlanContext {
+export interface PlanningContext {
     recipeStore: RecipeStore;
     observer: Observer;
     demandIndex: IndependentDemandIndex;
@@ -74,6 +74,7 @@ export interface UnitPlanContext {
     sneIndex?: SNEIndex;
     agentIndex?: AgentIndex;
 }
+export type UnitPlanContext = PlanningContext;
 
 export interface UnitPlanResult {
     planStore: PlanStore;
@@ -90,7 +91,7 @@ export interface PlanningSession {
     mode: PlanningMode;
     canonical: string[];
     horizon: { from: Date; to: Date };
-    ctx: UnitPlanContext;
+    ctx: PlanningContext;
     planStore: PlanStore;
     netter: PlanNetter;
     generateId: () => string;
@@ -394,6 +395,348 @@ function computeEffectiveAlerts(
     return alerts;
 }
 
+// =============================================================================
+// DEMAND TIER TYPES (Step 4A)
+// =============================================================================
+
+export interface DemandTierInput {
+    specId: string;
+    qty: number;
+    slot?: DemandSlot;
+    slotClass?: DemandSlotClass;
+    due?: Date;
+    atLocation?: string;
+}
+
+export interface TierResult {
+    tierName: string;
+    records: SlotRecord[];
+    purchaseIntents: Intent[];
+    debts: MetabolicDebt[];
+    deferred: Array<{ slot: DemandSlot; slotClass: DemandSlotClass }>;
+    handledSpecs: Set<string>;
+}
+
+export interface DemandTier {
+    name: string;
+    priority: number;
+    planPrefix: string;
+    honorDecouplingPoints?: boolean;
+    suppressObserver?: boolean;
+    netter?: (main: PlanNetter, session: PlanningSession) => PlanNetter;
+    guard?: (specId: string, qty: number, alerts: AlertMap | undefined, netter: PlanNetter) => boolean;
+    demands: (prior: TierResult[], session: PlanningSession, alerts: AlertMap | undefined,
+              classified: Array<{ slot: DemandSlot; slotClass: DemandSlotClass }>) => DemandTierInput[];
+}
+
+// =============================================================================
+// PIPELINE HELPERS (Steps 4B-4E)
+// =============================================================================
+
+/** 4B: Process a single demand item through dependentDemand. */
+function processSingleDemand(
+    input: DemandTierInput,
+    tier: DemandTier,
+    session: PlanningSession,
+    econ: import('./planning').EconomicContext,
+    effectiveNetter: PlanNetter,
+): { result: DependentDemandResult; planId: string } {
+    const { planStore, generateId, sneIndex, horizon, ctx, mode } = session;
+    const planId = `${tier.planPrefix}-${generateId()}`;
+    const specId = input.specId;
+
+    // Determine plan name based on tier
+    let planName: string;
+    if (tier.name === 'buffer-preeval') {
+        planName = `Buffer-first replenishment for ${specId}`;
+    } else if (tier.name === 'replenishment') {
+        planName = `Replenishment for ${specId}`;
+    } else if (tier.name === 'primary-deferred') {
+        planName = `Deferred demand for ${specId}`;
+    } else {
+        planName = `Demand plan for ${specId}`;
+    }
+    planStore.addPlan({ id: planId, name: planName });
+
+    // For slot-based demands (primary tier), handle transport candidates first
+    if (input.slot && input.slotClass === 'transport-candidate') {
+        const transportResult = mode.scope.handleTransportCandidate(
+            input.slot, planStore, planId, ctx.recipeStore, ctx.agents,
+        );
+        if (transportResult) {
+            return { result: transportResult, planId };
+        }
+    }
+
+    const dueDate = input.due ?? (input.slot?.due ? new Date(input.slot.due) : horizon.to);
+    const atLocation = input.slot ? mode.spatial.locationOf(input.slot) : input.atLocation;
+
+    const result = dependentDemand({
+        ...econ,
+        observer: tier.suppressObserver ? undefined : econ.observer,
+        sneIndex,
+        planId,
+        demandSpecId: specId,
+        demandQuantity: input.qty,
+        dueDate,
+        netter: effectiveNetter,
+        atLocation,
+        agents: ctx.agents,
+        generateId,
+        honorDecouplingPoints: tier.honorDecouplingPoints,
+    });
+
+    return { result, planId };
+}
+
+/** 4C: Compute derived replenishment demands from pass 1 records. */
+function computeDerivedDemands(
+    pass1Records: SlotRecord[],
+    handledSpecs: Set<string>,
+    effectiveAlerts: AlertMap | undefined,
+    session: PlanningSession,
+    allConservationData: Array<{
+        specId: string; onhand: number; tor: number; toy: number; tog: number;
+        zone: 'red' | 'yellow'; tippingPointBreached?: boolean;
+    }>,
+): Array<{ specId: string; qty: number; zone?: 'red' | 'yellow' | 'green' | 'excess' }> {
+    const { ctx } = session;
+    const consumedBySpec = new Map<string, number>();
+    const boundaryBySpec = new Map<string, number>();
+    for (const { result } of pass1Records) {
+        for (const alloc of result.allocated) {
+            consumedBySpec.set(alloc.specId, (consumedBySpec.get(alloc.specId) ?? 0) + alloc.quantity);
+        }
+        for (const [specId, qty] of result.boundaryStops) {
+            boundaryBySpec.set(specId, (boundaryBySpec.get(specId) ?? 0) + qty);
+        }
+    }
+    const derivedDemands: Array<{ specId: string; qty: number; zone?: 'red' | 'yellow' | 'green' | 'excess' }> = [];
+    const allBufferSpecs = new Set([...consumedBySpec.keys(), ...boundaryBySpec.keys()]);
+    for (const specId of allBufferSpecs) {
+        if (handledSpecs.has(specId)) continue;
+        const qty = (consumedBySpec.get(specId) ?? 0) + (boundaryBySpec.get(specId) ?? 0);
+        const spec = ctx.recipeStore.getResourceSpec(specId);
+        if (!spec?.resourceClassifiedAs?.includes(PLAN_TAGS.REPLENISHMENT_REQUIRED)) continue;
+        if (spec.resourceClassifiedAs?.includes('tag:buffer:ecological')) continue;
+
+        if (effectiveAlerts) {
+            const alert = effectiveAlerts.get(specId);
+            if (alert) {
+                if (alert.zone === 'green' || alert.zone === 'excess') continue;
+                const replenQty = Math.max(0, alert.tog - alert.onhand);
+                if (replenQty > 1e-9) derivedDemands.push({ specId, qty: replenQty, zone: alert.zone });
+                continue;
+            }
+        }
+        derivedDemands.push({ specId, qty });
+    }
+
+    if (effectiveAlerts) {
+        for (const [specId, alert] of effectiveAlerts) {
+            if (handledSpecs.has(specId)) continue;
+            if (alert.zone === 'red' || alert.zone === 'yellow') {
+                const spec = ctx.recipeStore.getResourceSpec(specId);
+                if (spec?.resourceClassifiedAs?.includes('tag:buffer:ecological')) {
+                    if (!allConservationData.some(c => c.specId === specId)) {
+                        allConservationData.push({
+                            specId,
+                            onhand: alert.onhand, tor: alert.tor, toy: alert.toy, tog: alert.tog,
+                            zone: alert.zone, tippingPointBreached: alert.tippingPointBreached,
+                        });
+                    }
+                    continue;
+                }
+                const replenQty = Math.max(0, alert.tog - alert.onhand);
+                if (replenQty > 1e-9 && !derivedDemands.some(d => d.specId === specId)) {
+                    derivedDemands.push({ specId, qty: replenQty, zone: alert.zone });
+                }
+            }
+        }
+    }
+
+    derivedDemands.sort((a, b) => {
+        const specA = ctx.recipeStore.getResourceSpec(a.specId);
+        const specB = ctx.recipeStore.getResourceSpec(b.specId);
+        const tierA = bufferTypeFromTags(specA?.resourceClassifiedAs ?? []);
+        const tierB = bufferTypeFromTags(specB?.resourceClassifiedAs ?? []);
+        return compositeBufferPriority(tierA, a.zone ?? 'green')
+             - compositeBufferPriority(tierB, b.zone ?? 'green');
+    });
+
+    return derivedDemands;
+}
+
+/** 4D: Execute the demand pipeline across sorted tiers. */
+function executeDemandPipeline(
+    tiers: DemandTier[],
+    session: PlanningSession,
+    econ: import('./planning').EconomicContext,
+    alerts: AlertMap | undefined,
+    classified: Array<{ slot: DemandSlot; slotClass: DemandSlotClass }>,
+    childProvenanceByIntentId: Map<string, { originalShortfall: number; resolvedAt: string[]; originLocation: string }>,
+    allConservationData: Array<{
+        specId: string; onhand: number; tor: number; toy: number; tog: number;
+        zone: 'red' | 'yellow'; tippingPointBreached?: boolean;
+    }>,
+): TierResult[] {
+    const { mode, netter } = session;
+    const sortedTiers = [...tiers].sort((a, b) => a.priority - b.priority);
+    const results: TierResult[] = [];
+
+    for (const tier of sortedTiers) {
+        const tierResult: TierResult = {
+            tierName: tier.name,
+            records: [],
+            purchaseIntents: [],
+            debts: [],
+            deferred: [],
+            handledSpecs: new Set<string>(),
+        };
+
+        const effectiveNetter = tier.netter ? tier.netter(netter, session) : netter;
+        const demands = tier.demands(results, session, alerts, classified);
+
+        for (const input of demands) {
+            // Apply guard if present
+            if (tier.guard && input.slot && tier.guard(input.specId, input.qty, alerts, netter)) {
+                tierResult.deferred.push({ slot: input.slot, slotClass: input.slotClass! });
+                continue;
+            }
+
+            const { result, planId } = processSingleDemand(input, tier, session, econ, effectiveNetter);
+
+            if (input.slot) {
+                tierResult.records.push({ slot: input.slot, result, slotClass: input.slotClass! });
+            }
+            tierResult.purchaseIntents.push(...result.purchaseIntents);
+
+            // Track debts for buffer-preeval and replenishment tiers
+            if (tier.name === 'buffer-preeval' || tier.name === 'replenishment') {
+                const purchasedQty = result.purchaseIntents
+                    .filter(i => i.resourceConformsTo === input.specId)
+                    .reduce((s, i) => s + (i.resourceQuantity?.hasNumericalValue ?? 0), 0);
+                if (purchasedQty > 1e-9) {
+                    tierResult.debts.push({ specId: input.specId, shortfall: purchasedQty, plannedWithin: planId });
+                }
+            }
+
+            // Track handled specs for buffer-preeval
+            if (tier.name === 'buffer-preeval') {
+                tierResult.handledSpecs.add(input.specId);
+            }
+
+            // Annotate child provenance for slot-based demands
+            if (input.slot) {
+                const childProv = childProvenanceByIntentId.get(input.slot.intent_id);
+                if (childProv?.originLocation) {
+                    mode.scope.annotateChildCommitments(result.commitments, childProv.originLocation);
+                }
+            }
+        }
+
+        results.push(tierResult);
+
+        // After the primary tier: compute derived demands and insert replenishment tier demands
+        if (tier.name === 'primary') {
+            // The replenishment tier's demands() callback will call computeDerivedDemands
+            // when executeDemandPipeline processes the replenishment tier next.
+            // No special logic needed here — it's driven by the tier ordering.
+        }
+    }
+
+    return results;
+}
+
+/** 4E: Build the 3 standard demand tiers. */
+function buildStandardTiers(
+    bufferFirstActive: boolean,
+    sortedSlots: Array<{ slot: DemandSlot; slotClass: DemandSlotClass }>,
+    precomputedAlerts: AlertMap | undefined,
+    effectiveAlerts: AlertMap | undefined,
+    session: PlanningSession,
+    allConservationData: Array<{
+        specId: string; onhand: number; tor: number; toy: number; tog: number;
+        zone: 'red' | 'yellow'; tippingPointBreached?: boolean;
+    }>,
+): DemandTier[] {
+    const { ctx, netter } = session;
+    const tiers: DemandTier[] = [];
+
+    // Tier 0: buffer-preeval (opt-in)
+    if (bufferFirstActive) {
+        tiers.push({
+            name: 'buffer-preeval',
+            priority: 0,
+            planPrefix: 'pass0-replenish',
+            suppressObserver: true,
+            demands: (_prior, _session, alerts) => {
+                if (!alerts) return [];
+                const pass0Demands: Array<{ specId: string; qty: number; priority: number }> = [];
+                for (const [specId, alert] of alerts) {
+                    if (alert.zone !== 'red' && alert.zone !== 'yellow') continue;
+                    const spec = ctx.recipeStore.getResourceSpec(specId);
+                    if (spec?.resourceClassifiedAs?.includes('tag:buffer:ecological')) continue;
+                    const qty = Math.max(0, alert.tog - alert.onhand);
+                    if (qty <= 1e-9) continue;
+                    const bType = bufferTypeFromTags(spec?.resourceClassifiedAs ?? []);
+                    const priority = compositeBufferPriority(bType, alert.zone);
+                    pass0Demands.push({ specId, qty, priority });
+                }
+                pass0Demands.sort((a, b) => a.priority - b.priority);
+                return pass0Demands.map(d => ({ specId: d.specId, qty: d.qty }));
+            },
+        });
+    }
+
+    // Tier 1: primary independent demands
+    tiers.push({
+        name: 'primary',
+        priority: 1,
+        planPrefix: 'plan',
+        honorDecouplingPoints: true,
+        guard: bufferFirstActive
+            ? (specId, qty, alerts, netterRef) => {
+                if (!alerts) return false;
+                const alert = alerts.get(specId);
+                if (!alert || (alert.zone !== 'red' && alert.zone !== 'yellow')) return false;
+                const available = netterRef.netAvailableQty(specId);
+                return (available - qty) < alert.toy;
+            }
+            : undefined,
+        demands: () => {
+            return sortedSlots
+                .filter(({ slot }) => !!slot.spec_id)
+                .map(({ slot, slotClass }) => ({
+                    specId: slot.spec_id!,
+                    qty: slot.remaining_quantity,
+                    slot,
+                    slotClass,
+                    due: slot.due ? new Date(slot.due) : undefined,
+                }));
+        },
+    });
+
+    // Tier 2: replenishment (derived demands)
+    tiers.push({
+        name: 'replenishment',
+        priority: 2,
+        planPrefix: 'replenish',
+        suppressObserver: true,
+        netter: (main) => main.fork({ observer: undefined }),
+        demands: (prior, _session, _alerts) => {
+            const pass0 = prior.find(r => r.tierName === 'buffer-preeval');
+            const primary = prior.find(r => r.tierName === 'primary');
+            const handledSpecs = pass0?.handledSpecs ?? new Set<string>();
+            const pass1Records = primary?.records ?? [];
+            const derived = computeDerivedDemands(pass1Records, handledSpecs, effectiveAlerts, session, allConservationData);
+            return derived.map(d => ({ specId: d.specId, qty: d.qty }));
+        },
+    });
+
+    return tiers;
+}
+
 /** Phase 3: Formulate — Pass 1, derived demands, Pass 2, backtracking. */
 export function formulatePhase(
     session: PlanningSession,
@@ -429,109 +772,79 @@ export function formulatePhase(
         return dueA - dueB;
     });
 
-    // --- Pass 0: Buffer pre-evaluation (opt-in) ---
+    // --- Compute effective alerts (pre-compute for buffer-first, lazy otherwise) ---
     const bufferFirstActive = !!(ctx.bufferZoneStore && ctx.bufferProfiles);
     let precomputedAlerts: AlertMap | undefined;
-    const pass0Debts: MetabolicDebt[] = [];
-    const pass0HandledSpecs = new Set<string>();
-    const deferredDemands: Array<{ slot: DemandSlot; slotClass: DemandSlotClass }> = [];
 
     if (bufferFirstActive) {
         precomputedAlerts = computeEffectiveAlerts(
             ctx.bufferZoneStore!, ctx.bufferProfiles, ctx.recipeStore, planStore, ctx.observer, generateId, ctx.agents,
         );
-
-        // Build Pass 0 replenishment demands for red/yellow non-ecological buffers
-        const pass0Demands: Array<{ specId: string; qty: number; priority: number }> = [];
-        for (const [specId, alert] of precomputedAlerts) {
-            if (alert.zone !== 'red' && alert.zone !== 'yellow') continue;
-            const spec = ctx.recipeStore.getResourceSpec(specId);
-            if (spec?.resourceClassifiedAs?.includes('tag:buffer:ecological')) continue;
-            const qty = Math.max(0, alert.tog - alert.onhand);
-            if (qty <= 1e-9) continue;
-            const bType = bufferTypeFromTags(spec?.resourceClassifiedAs ?? []);
-            const priority = compositeBufferPriority(bType, alert.zone);
-            pass0Demands.push({ specId, qty, priority });
-        }
-        pass0Demands.sort((a, b) => a.priority - b.priority);
-
-        // Explode Pass 0 demands on main netter (reserves capacity before Pass 1)
-        for (const { specId, qty } of pass0Demands) {
-            const pass0PlanId = `pass0-replenish-${generateId()}`;
-            planStore.addPlan({ id: pass0PlanId, name: `Buffer-first replenishment for ${specId}` });
-            const result = dependentDemand({
-                ...econ, observer: undefined, sneIndex,
-                planId: pass0PlanId, demandSpecId: specId, demandQuantity: qty,
-                dueDate: horizon.to, netter, agents: ctx.agents, generateId,
-            });
-            allPurchaseIntents.push(...result.purchaseIntents);
-            const purchasedQty = result.purchaseIntents
-                .filter(i => i.resourceConformsTo === specId)
-                .reduce((s, i) => s + (i.resourceQuantity?.hasNumericalValue ?? 0), 0);
-            if (purchasedQty > 1e-9) {
-                pass0Debts.push({ specId, shortfall: purchasedQty, plannedWithin: pass0PlanId });
-            }
-            pass0HandledSpecs.add(specId);
-        }
     }
 
-    // Buffer guard helper — defers demands that would push a stressed buffer below TOY
-    function shouldDeferForBufferGuard(
-        specId: string,
-        quantity: number,
-        alerts: AlertMap | undefined,
-    ): boolean {
-        if (!alerts) return false;
-        const alert = alerts.get(specId);
-        if (!alert || (alert.zone !== 'red' && alert.zone !== 'yellow')) return false;
-        const available = netter.netAvailableQty(specId);
-        return (available - quantity) < alert.toy;
+    const effectiveAlerts = bufferFirstActive
+        ? precomputedAlerts
+        : (ctx.bufferZoneStore
+            ? computeEffectiveAlerts(ctx.bufferZoneStore, ctx.bufferProfiles, ctx.recipeStore, planStore, ctx.observer, generateId, ctx.agents)
+            : ctx.bufferAlerts);
+
+    // --- Build standard tiers and execute pipeline ---
+    const tiers = buildStandardTiers(
+        bufferFirstActive, sortedSlots, precomputedAlerts, effectiveAlerts, session, allConservationData,
+    );
+    const tierResults = executeDemandPipeline(
+        tiers, session, econ, precomputedAlerts ?? effectiveAlerts, classified,
+        childProvenanceByIntentId, allConservationData,
+    );
+
+    // --- Extract results from tier pipeline ---
+    const pass0Result = tierResults.find(r => r.tierName === 'buffer-preeval');
+    const primaryResult = tierResults.find(r => r.tierName === 'primary');
+    const replenResult = tierResults.find(r => r.tierName === 'replenishment');
+
+    // Collect pass1Records (primary + deferred retries) and purchase intents from all tiers
+    if (primaryResult) {
+        pass1Records.push(...primaryResult.records);
+        allPurchaseIntents.push(...primaryResult.purchaseIntents);
+    }
+    if (pass0Result) {
+        allPurchaseIntents.push(...pass0Result.purchaseIntents);
+        replenDebts.push(...pass0Result.debts);
+    }
+    if (replenResult) {
+        allPurchaseIntents.push(...replenResult.purchaseIntents);
+        replenDebts.push(...replenResult.debts);
     }
 
-    // --- Pass 1: primary independent demands ---
-    for (const { slot, slotClass } of sortedSlots) {
-        if (!slot.spec_id) continue;
-
-        if (bufferFirstActive && shouldDeferForBufferGuard(slot.spec_id, slot.remaining_quantity, precomputedAlerts)) {
-            deferredDemands.push({ slot, slotClass });
-            continue;
-        }
-
-        const planId = `plan-${generateId()}`;
-        planStore.addPlan({ id: planId, name: `Demand plan for ${slot.spec_id}` });
-
-        const transportResult = mode.scope.handleTransportCandidate(
-            slot, planStore, planId, ctx.recipeStore, ctx.agents,
-        );
-        if (transportResult && slotClass === 'transport-candidate') {
-            pass1Records.push({ slot, result: transportResult, slotClass });
-            allPurchaseIntents.push(...transportResult.purchaseIntents);
-            continue;
-        }
-
-        const result = dependentDemand({
-            ...econ, sneIndex,
-            planId,
-            demandSpecId: slot.spec_id,
-            demandQuantity: slot.remaining_quantity,
-            dueDate: slot.due ? new Date(slot.due) : horizon.to,
-            netter,
-            atLocation: mode.spatial.locationOf(slot),
-            agents: ctx.agents,
-            generateId,
-            honorDecouplingPoints: true,
-        });
-
-        pass1Records.push({ slot, result, slotClass });
+    // --- Pass 1b: retry deferred demands after replenishment ---
+    const deferredDemands = primaryResult?.deferred ?? [];
+    const deferredTier: DemandTier = {
+        name: 'primary-deferred',
+        priority: 3,
+        planPrefix: 'plan-deferred',
+        honorDecouplingPoints: true,
+        demands: () => deferredDemands
+            .filter(({ slot }) => !!slot.spec_id)
+            .map(({ slot, slotClass }) => ({
+                specId: slot.spec_id!,
+                qty: slot.remaining_quantity,
+                slot,
+                slotClass,
+                due: slot.due ? new Date(slot.due) : undefined,
+            })),
+    };
+    const deferredInputs = deferredTier.demands(tierResults, session, precomputedAlerts ?? effectiveAlerts, classified);
+    for (const input of deferredInputs) {
+        const { result } = processSingleDemand(input, deferredTier, session, econ, netter);
+        pass1Records.push({ slot: input.slot!, result, slotClass: input.slotClass! });
         allPurchaseIntents.push(...result.purchaseIntents);
-
-        const childProvPass1 = childProvenanceByIntentId.get(slot.intent_id);
-        if (childProvPass1?.originLocation) {
-            mode.scope.annotateChildCommitments(result.commitments, childProvPass1.originLocation);
+        const childProv = childProvenanceByIntentId.get(input.slot!.intent_id);
+        if (childProv?.originLocation) {
+            mode.scope.annotateChildCommitments(result.commitments, childProv.originLocation);
         }
     }
 
-    // Emit deficit signals for Pass 1
+    // --- Emit deficit signals for Pass 1 (post-pipeline) ---
     for (const record of pass1Records) {
         const unresolved = record.result.purchaseIntents
             .filter(i => i.resourceConformsTo === record.slot.spec_id)
@@ -577,120 +890,12 @@ export function formulatePhase(
         }
     }
 
-    // --- Derive effectiveAlerts ---
-    const effectiveAlerts = bufferFirstActive
-        ? precomputedAlerts
-        : (ctx.bufferZoneStore
-            ? computeEffectiveAlerts(ctx.bufferZoneStore, ctx.bufferProfiles, ctx.recipeStore, planStore, ctx.observer, generateId, ctx.agents)
-            : ctx.bufferAlerts);
+    // Merge Pass 0 debts into replenishment debts for backtracking
+    // (pass0 debts already in replenDebts from tier extraction above,
+    //  but replenishment debts were added after — reorder so pass0 debts come last)
+    // Actually both are already merged in replenDebts from tier extraction order.
 
-    // --- Compute derived replenishment demands ---
-    const consumedBySpec = new Map<string, number>();
-    const boundaryBySpec = new Map<string, number>();
-    for (const { result } of pass1Records) {
-        for (const alloc of result.allocated) {
-            consumedBySpec.set(alloc.specId, (consumedBySpec.get(alloc.specId) ?? 0) + alloc.quantity);
-        }
-        for (const [specId, qty] of result.boundaryStops) {
-            boundaryBySpec.set(specId, (boundaryBySpec.get(specId) ?? 0) + qty);
-        }
-    }
-    const derivedDemands: Array<{ specId: string; qty: number; zone?: 'red' | 'yellow' | 'green' | 'excess' }> = [];
-    const allBufferSpecs = new Set([...consumedBySpec.keys(), ...boundaryBySpec.keys()]);
-    for (const specId of allBufferSpecs) {
-        if (pass0HandledSpecs.has(specId)) continue;
-        const qty = (consumedBySpec.get(specId) ?? 0) + (boundaryBySpec.get(specId) ?? 0);
-        const spec = ctx.recipeStore.getResourceSpec(specId);
-        if (!spec?.resourceClassifiedAs?.includes(PLAN_TAGS.REPLENISHMENT_REQUIRED)) continue;
-        if (spec.resourceClassifiedAs?.includes('tag:buffer:ecological')) continue;
-
-        if (effectiveAlerts) {
-            const alert = effectiveAlerts.get(specId);
-            if (alert) {
-                if (alert.zone === 'green' || alert.zone === 'excess') continue;
-                const replenQty = Math.max(0, alert.tog - alert.onhand);
-                if (replenQty > 1e-9) derivedDemands.push({ specId, qty: replenQty, zone: alert.zone });
-                continue;
-            }
-        }
-        derivedDemands.push({ specId, qty });
-    }
-
-    if (effectiveAlerts) {
-        for (const [specId, alert] of effectiveAlerts) {
-            if (pass0HandledSpecs.has(specId)) continue;
-            if (alert.zone === 'red' || alert.zone === 'yellow') {
-                const spec = ctx.recipeStore.getResourceSpec(specId);
-                if (spec?.resourceClassifiedAs?.includes('tag:buffer:ecological')) {
-                    if (!allConservationData.some(c => c.specId === specId)) {
-                        allConservationData.push({
-                            specId,
-                            onhand: alert.onhand, tor: alert.tor, toy: alert.toy, tog: alert.tog,
-                            zone: alert.zone, tippingPointBreached: alert.tippingPointBreached,
-                        });
-                    }
-                    continue;
-                }
-                const replenQty = Math.max(0, alert.tog - alert.onhand);
-                if (replenQty > 1e-9 && !derivedDemands.some(d => d.specId === specId)) {
-                    derivedDemands.push({ specId, qty: replenQty, zone: alert.zone });
-                }
-            }
-        }
-    }
-
-    derivedDemands.sort((a, b) => {
-        const specA = ctx.recipeStore.getResourceSpec(a.specId);
-        const specB = ctx.recipeStore.getResourceSpec(b.specId);
-        const tierA = bufferTypeFromTags(specA?.resourceClassifiedAs ?? []);
-        const tierB = bufferTypeFromTags(specB?.resourceClassifiedAs ?? []);
-        return compositeBufferPriority(tierA, a.zone ?? 'green')
-             - compositeBufferPriority(tierB, b.zone ?? 'green');
-    });
-
-    // --- Pass 2: derived replenishment demands ---
-    const replenNetter = netter.fork({ observer: undefined });
-    for (const { specId, qty } of derivedDemands) {
-        const replenPlanId = `replenish-${generateId()}`;
-        planStore.addPlan({ id: replenPlanId, name: `Replenishment for ${specId}` });
-        const result = dependentDemand({
-            ...econ, observer: undefined, sneIndex,
-            planId: replenPlanId, demandSpecId: specId, demandQuantity: qty,
-            dueDate: horizon.to, netter: replenNetter, agents: ctx.agents, generateId,
-        });
-        allPurchaseIntents.push(...result.purchaseIntents);
-        const purchasedQty = result.purchaseIntents
-            .filter(i => i.resourceConformsTo === specId)
-            .reduce((s, i) => s + (i.resourceQuantity?.hasNumericalValue ?? 0), 0);
-        if (purchasedQty > 1e-9) {
-            replenDebts.push({ specId, shortfall: purchasedQty, plannedWithin: replenPlanId });
-        }
-    }
-
-    // --- Pass 1b: retry deferred demands after replenishment ---
-    for (const { slot, slotClass } of deferredDemands) {
-        if (!slot.spec_id) continue;
-        const planId = `plan-deferred-${generateId()}`;
-        planStore.addPlan({ id: planId, name: `Deferred demand for ${slot.spec_id}` });
-        const result = dependentDemand({
-            ...econ, sneIndex, planId,
-            demandSpecId: slot.spec_id, demandQuantity: slot.remaining_quantity,
-            dueDate: slot.due ? new Date(slot.due) : horizon.to,
-            netter, atLocation: mode.spatial.locationOf(slot),
-            agents: ctx.agents, generateId, honorDecouplingPoints: true,
-        });
-        pass1Records.push({ slot, result, slotClass });
-        allPurchaseIntents.push(...result.purchaseIntents);
-        const childProv = childProvenanceByIntentId.get(slot.intent_id);
-        if (childProv?.originLocation) {
-            mode.scope.annotateChildCommitments(result.commitments, childProv.originLocation);
-        }
-    }
-
-    // Merge Pass 0 debts into backtracking
-    replenDebts.push(...pass0Debts);
-
-    // --- Backtracking ---
+    // --- Backtracking (stays in formulatePhase) ---
     if (replenDebts.length > 0) {
         const remaining = new Set(pass1Records);
         while (replenDebts.length > 0 && remaining.size > 0) {
@@ -1164,7 +1369,7 @@ export function planForUnit(
     mode: PlanningMode,
     ids: string[],
     horizon: { from: Date; to: Date },
-    ctx: UnitPlanContext,
+    ctx: PlanningContext,
     subStores?: PlanStore[],
 ): UnitPlanResult {
     const generateId = ctx.generateId ?? (() => nanoid());
