@@ -12,9 +12,10 @@
   import type { EconomicResource, Intent, ResourceSpecification } from "$lib/schemas";
   import type { ScopePlanResult } from "$lib/planning/plan-for-scope";
   import {
-    PLAN_TAGS, deficitShortfall, type DeficitMeta, type PlanStore,
+    PLAN_TAGS, PlanStore, deficitShortfall, type DeficitMeta,
     tradeFrom, tradeTo, tradeSpec, tradeQty,
   } from "$lib/planning/planning";
+  import { ProcessRegistry } from "$lib/process-registry";
   import ResourceDemandCard from "$lib/components/commune/ResourceDemandCard.svelte";
   import { buildIndependentDemandIndex } from "$lib/indexes/independent-demand";
   import { buildIndependentSupplyIndex, querySupplyByScope } from "$lib/indexes/independent-supply";
@@ -24,6 +25,10 @@
   import { BufferZoneStore } from "$lib/knowledge/buffer-zones";
   import { AgentStore } from "$lib/agents";
   import { buildMembershipIndex } from "$lib/indexes/membership";
+  import BufferStatusDashboard from "$lib/components/execution/BufferStatusDashboard.svelte";
+  import { BufferSnapshotStore } from "$lib/knowledge/buffer-snapshots";
+  import { startExecution } from "$lib/execution/scope-execution";
+  import type { ExecutionAlert } from "$lib/execution/alerts";
 
   // ---------------------------------------------------------------------------
   // specNames
@@ -1351,6 +1356,12 @@
   const allInventory = [...mockResources.values()].flat();
   for (const r of allInventory) combinedObserver.seedResource(r);
 
+  // Reactive execution: monitors fire on Observer events, alerts accumulate
+  const snapshotStore = new BufferSnapshotStore();
+  const executionHandle = startExecution(
+    { observer: combinedObserver, planStore: new PlanStore(new ProcessRegistry()), bufferZoneStore, snapshotStore },
+  );
+
   const emptyAgentIndex = buildAgentIndex([], [], new Map());
 
   // Produce intents: each commune's committed production run.
@@ -1676,6 +1687,58 @@
         )
       : [],
   );
+
+  // ---------------------------------------------------------------------------
+  // Buffer health, execution priority, metrics
+  // ---------------------------------------------------------------------------
+
+  const scopeBufferZones = $derived(
+    selectedScope ? (mockBufferZones.get(selectedScope) ?? []) : [],
+  );
+  const bufferHealthEntries = $derived.by(() => {
+    void observerTick; // reactive: recompute when Observer events fire
+    return scopeBufferZones.flatMap(bz => {
+      const fullZone = bufferZoneStore.zonesForSpec(bz.specId)[0];
+      if (!fullZone) return [];
+      return [{
+        bufferZone: fullZone,
+        onhand: combinedObserver.conformingResources(bz.specId)
+          .reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0),
+        specName: specNames[bz.specId] ?? bz.specId,
+      }];
+    });
+  });
+  // Reactive: recompute when observerTick changes (events recorded)
+  const executionPriority = $derived.by(() => {
+    void observerTick; // trigger recomputation on Observer events
+    return scopeBufferZones.map(bz => {
+      const onhand = combinedObserver.conformingResources(bz.specId)
+        .reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+      const percentage = bz.tog > 0 ? onhand / bz.tog : 0;
+      const zone: 'red' | 'yellow' | 'green' | 'excess' =
+        onhand <= bz.tor ? 'red'
+        : onhand <= bz.toy ? 'yellow'
+        : onhand <= bz.tog ? 'green'
+        : 'excess';
+      return { specId: bz.specId, onhand, tor: bz.tor, toy: bz.toy, tog: bz.tog, percentage, zone };
+    }).sort((a, b) => a.percentage - b.percentage);
+  });
+  const otifSummary = $derived.by(() => {
+    if (!selectedResult) return { otifRate: '\u2014', onTimeRate: '\u2014', inFullRate: '\u2014' };
+    const commitments = selectedResult.planStore.allCommitments().filter(c => c.due);
+    if (commitments.length === 0) return { otifRate: '\u2014', onTimeRate: '\u2014', inFullRate: '\u2014' };
+    const finished = commitments.filter(c => c.finished);
+    const rate = commitments.length > 0 ? Math.round(finished.length / commitments.length * 100) : 0;
+    return { otifRate: `${rate}`, onTimeRate: `${rate}`, inFullRate: `${rate}` };
+  });
+  const signalCount = $derived(
+    selectedResult?.planStore.intentsForTag(PLAN_TAGS.REPLENISHMENT).length ?? 0,
+  );
+  // Live alert count from reactive execution engine
+  const liveAlertCount = $derived.by(() => {
+    void observerTick;
+    return executionHandle.alerts.length;
+  });
 
   // ---------------------------------------------------------------------------
   // Claimable items
@@ -2072,6 +2135,64 @@
           {#if demandSpecsForScope.length === 0}
             <span class="demands-empty">No demands set for this scope. Use the picker to add one.</span>
           {/if}
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if selectedScope && selectedResult && !selectedIsHub && scopeBufferZones.length > 0}
+    <div class="buffer-health-band">
+      <div class="buffer-health-head">
+        <span class="band-lbl">BUFFER HEALTH &middot; {selectedScope}</span>
+      </div>
+      <div class="buffer-health-body">
+        <BufferStatusDashboard entries={bufferHealthEntries} />
+      </div>
+    </div>
+  {/if}
+
+  {#if selectedScope && scopeBufferZones.length > 0}
+    <div class="alerts-band">
+      <div class="alerts-head">
+        <span class="band-lbl">EXECUTION &middot; {selectedScope}</span>
+        {#if liveAlertCount > 0}<span class="band-val" style="color:var(--zone-yellow)">{liveAlertCount} alert{liveAlertCount !== 1 ? 's' : ''}</span>{/if}
+      </div>
+      <div class="alerts-body">
+        {#each executionPriority as entry (entry.specId)}
+          <div class="alert-card zone-{entry.zone}">
+            <span class="alert-spec">{specNames[entry.specId] ?? entry.specId}</span>
+            <span class="alert-pct">{Math.round(entry.percentage * 100)}%</span>
+            <span class="alert-zone">{entry.zone.toUpperCase()}</span>
+          </div>
+        {/each}
+        {#if executionPriority.length === 0}
+          <span class="alerts-empty">No buffered items</span>
+        {/if}
+      </div>
+    </div>
+  {/if}
+
+  {#if selectedScope && selectedResult && !selectedIsHub}
+    <div class="metrics-band">
+      <div class="metrics-head">
+        <span class="band-lbl">METRICS &middot; {selectedScope}</span>
+      </div>
+      <div class="metrics-body">
+        <div class="metric-card">
+          <span class="metric-label">OTIF</span>
+          <span class="metric-value">{otifSummary.otifRate}%</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">ON TIME</span>
+          <span class="metric-value">{otifSummary.onTimeRate}%</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">IN FULL</span>
+          <span class="metric-value">{otifSummary.inFullRate}%</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-label">SIGNALS</span>
+          <span class="metric-value">{signalCount}</span>
         </div>
       </div>
     </div>
@@ -2723,4 +2844,60 @@
     opacity: 0.45;
     align-self: center;
   }
+
+  /* ---- Buffer health / Execution / Metrics bands ---- */
+  .buffer-health-band, .alerts-band, .metrics-band {
+    border-top: 1px solid var(--border-faint);
+    padding: 8px 12px;
+  }
+  .buffer-health-head, .alerts-head, .metrics-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .buffer-health-body {
+    overflow-x: auto;
+  }
+  .alerts-body {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .alert-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 80px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 0.65rem;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .alert-card.zone-red { border-color: var(--zone-red); }
+  .alert-card.zone-yellow { border-color: var(--zone-yellow); }
+  .alert-card.zone-green { border-color: var(--zone-green); }
+  .alert-spec { font-weight: 600; }
+  .alert-pct { font-size: 1.1rem; font-weight: 700; }
+  .alert-zone { text-transform: uppercase; font-size: 0.55rem; opacity: 0.6; }
+  .alerts-empty { opacity: 0.4; font-size: 0.65rem; }
+
+  .metrics-body {
+    display: flex;
+    gap: 8px;
+  }
+  .metric-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 80px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .metric-label { font-size: 0.55rem; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.05em; }
+  .metric-value { font-size: 1.2rem; font-weight: 700; }
 </style>
