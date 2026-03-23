@@ -76,7 +76,7 @@ After Pass 1 consumption is known:
 - Compute `effectiveAlerts` from `BufferZoneStore`: for each buffer zone, call `computeNFP()` (if `bufferProfiles` provided) or fall back to `bufferStatus()` from raw on-hand
 - For red/yellow non-ecological buffers with no open signal: generate `ReplenishmentSignal` (quantity = `TOG − NFP`, rounded up to MOQ)
 - For ecological buffers in red/yellow: emit `ConservationSignal` instead
-- Collect derived replenishment demands from consumed specs tagged `tag:plan:replenishment-required` and from alerts
+- Collect derived replenishment demands from consumed specs that have active BufferZones (decoupling points are derived from BufferZone existence, not spec-level tags)
 - **Sort derived demands red-first** (`ZONE_PRIORITY`: red < yellow < green < excess)
 
 **Pass 2 — Derived Replenishment:** Explode derived demands via `dependentDemand()` on a **forked netter** with no safety-stock observer. Unmet replenishment becomes MetabolicDebt.
@@ -125,15 +125,19 @@ Phase 2 — Classify: for each demand slot →
   'producible-with-imports' | 'external-dependency'
   Sort by CLASS_ORDER (0–3) then due date
 
-Phase 3 — Formulate:
+Phase 3 — Formulate (demand pipeline: buffer-preeval → primary → replenishment tiers):
+  Pass 0 (buffer-preeval): reserve capacity for red/yellow buffers on main netter
   Pass 1 (primary): dependentDemand() with netting per sorted slot
+    honorDecouplingPoints stops BFS at specs with active BufferZones
+    Buffer guards defer demands that would breach TOY
     Transport candidates handled via FederationScopePolicy
   Derived: effectiveAlerts from BufferZoneStore + computeNFP()
     ReplenishmentSignals for non-ecological red/yellow buffers
     ConservationSignals for ecological red/yellow buffers
-    Derived replenishment demands sorted red-first
-  Pass 2 (derived): dependentDemand() on forked netter (no inventory)
+    Derived demands from consumed specs with BufferZones, sorted red-first
+  Pass 2 (replenishment): dependentDemand() on forked netter (no inventory)
     Unmet = MetabolicDebt
+  Pass 1b: retry deferred demands after replenishment
   Backtrack: ProportionalSacrifice retraction loop
     Scored trial-retraction of Pass 1 allocations
     sacrificeDepth limit; unmet → deficit signals
@@ -275,25 +279,13 @@ Combined priority ordering:
 
 ---
 
-## 8. Buffer Custody `✗`
+## 8. Custody `✓`
 
-> _This section is aspirational. No buffer custody model exists in code. The Observer tracks `onhandQuantity` (custody-based) vs `accountingQuantity` per resource, but there is no collective-custody or scope-assembly-responsibility layer._
+VF custody is already modeled at the resource level: `primaryAccountable` (rights holder), `custodianScope` (physical steward), `onhandQuantity` (custody-based) vs `accountingQuantity` (rights-based), and distinct `transferCustody` / `transferAllRights` actions.
 
-**Buffer Custody is Collective:** While individual resources have individual custodians, **buffers as aggregates** have collective custody. The scope assembly is collectively responsible for maintaining the buffer within its target zones. This means:
+The custody protocol (`src/lib/algorithms/custody.ts`) is a general-purpose mechanism for any resource with a custodian — not buffer-specific. It implements: entrustment limits (capped by `α × total_claim_capacity × svc_market_equivalent`), incentive-compatibility checks, hierarchy-level routing (individual → scope → universal commune), penalty mechanics, and tranche-based loss coverage. When any custodian misappropriates any entrusted resource, the settlement is a proportional drawdown against that custodian's accounts via the tranche cascade.
 
-- No single individual can deplete a buffer below TOY without assembly approval
-- Buffer status is a public dashboard, visible to all scope members
-- Buffer failure triggers collective review, not just individual penalties
-- The assembly sets buffer policy; individuals execute custody of specific items within the buffer
-
-This creates a **nested custody model**:
-
-```
-Buffer (scope collective responsibility)
-  ├── Item A (individual custodian Maria)
-  ├── Item B (individual custodian Javier)
-  └── Item C (individual custodian collective k-of-n)
-```
+Buffer *policy* (who sets zone targets, who approves draws below TOY) is a governance concern orthogonal to the custody data model.
 
 ---
 
@@ -335,44 +327,28 @@ CONSTRAINTS (in priority order):
 
 > _`BufferHealthReport` is implemented in `src/lib/algorithms/ddmrp.ts` via `buildBufferHealthReport()`. Aggregates per-buffer zone status and summary counts. Uses `computeNFP` when BufferProfile is available, falls back to raw `bufferStatus`._
 
+Actual implementation:
+
 ```typescript
 interface BufferHealthReport {
-  scope: string;
-  timestamp: Date;
-  buffers: {
-    [bufferId: string]: {
-      type: "ecological" | "strategic" | "metabolic" | "reserve" | "social" | "consumption";
-      currentLevel: number;
-      tor: number;
-      toy: number;
-      tog: number;
-      zone: "RED" | "YELLOW" | "GREEN" | "EXCESS";
-      trend: "improving" | "stable" | "declining" | "critical";
-      daysUntilTOR: number;
-      replenishmentSignals: ReplenishmentSignal[];
-      custody: {
-        responsibleScope: string;
-        individualCustodians: number;
-        collectiveLiability: boolean;
-      };
-    };
-  };
-  aggregateHealth: {
-    percentBuffersInGreen: number;
-    percentBuffersInYellow: number;
-    percentBuffersInRed: number;
-    ecologicalHealthIndex: number;
-    strategicHealthIndex: number;
-  };
-  metabolicDebt: {
-    hasDebt: boolean;
-    buffersInRed: string[];
-    requiredAction: string;
+  asOf: Date;
+  buffers: Array<{
+    specId: string;
+    zone: 'red' | 'yellow' | 'green' | 'excess';
+    onhand: number;
+    tor: number; toy: number; tog: number;
+    tippingPointBreached?: boolean;
+  }>;
+  summary: {
+    redCount: number;
+    yellowCount: number;
+    greenCount: number;
+    excessCount: number;
   };
 }
 ```
 
-This would become the **primary dashboard** for scope assemblies. Before discussing new projects or consumption, they check buffer health. Red buffers mean **emergency session**. Yellow buffers mean **replenishment planning** before new initiatives.
+This is the **primary dashboard** for scope assemblies. Before discussing new projects or consumption, they check buffer health. Red buffers mean **emergency session**. Yellow buffers mean **replenishment planning** before new initiatives.
 
 ---
 
@@ -391,7 +367,7 @@ This would become the **primary dashboard** for scope assemblies. Before discuss
 | Aspect            | Original Framing                           | Buffer-First Framing                          | Status |
 | ----------------- | ------------------------------------------ | --------------------------------------------- | ------ |
 | Primary objective | Satisfy independent demands                | Maintain buffer health                        | `✓`    |
-| Demands           | Independent (primary), Derived (secondary) | All demands are derived from buffer status    | `◐`    |
+| Demands           | Independent (primary), Derived (secondary) | Independent demand + buffer-derived replenishment at decoupling points (DDMRP) | `✓`    |
 | Replenishment     | One of several derived demand types        | The fundamental planning activity             | `✓`    |
 | Failure mode      | Unmet demand                               | Metabolic debt (buffer below TOR)             | `✓`    |
 | Priority          | Independent demand criticality             | Buffer zone (Red > Yellow > Green)            | `✓`    |
@@ -405,4 +381,4 @@ The buffer-first perspective transforms the planner from a **demand satisfaction
 - **Extractive planning:** "What do people want? How do we get it?"
 - **Regenerative planning:** "What buffers must we maintain? What demands can we satisfy given that constraint?"
 
-The architecture implements the full buffer-first inversion: Pass 0 pre-evaluates buffer health before demand allocation, buffer guards on Pass 1 defer demands threatening critical buffers, composite tier×zone priority ordering across buffer types, SNE-based recipe ranking throughout the pipeline, agent capacity ceiling detection, Phase B surplus routing to stressed buffers, aggregated `BufferHealthReport`, and automatic DLT segmentation at buffer boundaries via `computeDecoupledLeadTime()`. Remaining: per-day granular labor limits (constraint 4), OTIF tracker, S&OP aggregation.
+The architecture implements the full buffer-first inversion: Pass 0 pre-evaluates buffer health before demand allocation, buffer guards on Pass 1 defer demands threatening critical buffers, decoupling points derived from BufferZone existence (not spec-level tags), composite tier×zone priority ordering across buffer types, SNE-based recipe ranking throughout the pipeline, agent capacity ceiling detection, Phase B surplus routing to stressed buffers, aggregated `BufferHealthReport`, and automatic DLT segmentation at buffer boundaries via `computeDecoupledLeadTime()`. Remaining: per-day granular labor limits (constraint 4), OTIF tracker, S&OP aggregation.

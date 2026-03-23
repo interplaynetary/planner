@@ -4,7 +4,7 @@
 **Schema source**: `src/lib/schemas.ts`
 **Algorithm source**: `src/lib/algorithms/ddmrp.ts`
 **Seed**: `src/lib/vf-seed.ts`
-**Last reviewed**: 2026-03-07
+**Last reviewed**: 2026-03-22
 
 ---
 
@@ -43,7 +43,7 @@ Chapter 7 defines six factors that govern where decoupling points should be plac
 | Rationale note | `PositioningAnalysis.note` | **A** | Free-text justification |
 | Link positioning analysis to item | `ResourceSpecification.positioningAnalysis` | **A** | Inline embedding; rationale travels with the spec |
 | Link item to buffer profile | `ResourceSpecification.bufferProfileId` | **A** | String reference to `BufferProfile.id` |
-| Replenishment trigger flag | `ResourceSpecification.replenishmentRequired` | **A** | Pass 2 trigger for `planForRegion()` |
+| Decoupling point detection | BufferZone existence for specId | **A** | Decoupling derived from `bufferZoneStore` (not spec-level tag; `replenishmentRequired` field removed) |
 | Decoupling point marker (process) | `ProcessSpecification.isDecouplingPoint` | **A** | Design-time boolean |
 | Control point marker (process) | `ProcessSpecification.isControlPoint` | **A** | Design-time boolean |
 
@@ -578,11 +578,42 @@ factors.supplyOffsetDays
 
 ---
 
+## Ch 10 — Demand Driven Execution
+
+| Concept | Function | Status | Notes |
+|---|---|---|---|
+| Current on-hand alert | `bufferStatus()` | **A** | Zone from on-hand vs TOR/TOY/TOG |
+| Projected on-hand alert | `computeNFP()` | **A** | NFP = onhand + onorder − qualifiedDemand; zone + priority |
+| Execution priority display | `computeExecutionPriority()` | **A** | On-hand severity ranking for shop floor sequencing |
+| Material synchronization alert | `computeMaterialSyncAlerts()` | **A** | Shortfall detection for non-buffered process inputs |
+| Lead time alert | `computeLeadTimeAlerts()` | **A** | Countdown zones (G/Y/R/late) for non-stocked items |
+
+## Ch 12 — Metrics and Analytics
+
+| Concept | Function | Status | Notes |
+|---|---|---|---|
+| Signal integrity | `computeSignalIntegrity()` | **A** | Timing + qty accuracy of replenishment signals vs approved orders |
+| OTIF | `computeOTIF()` | **A** | On-Time In-Full delivery measurement |
+| Flow index / velocity | `flowIndex()`, `classifyFlowSpeed()` | **A** | ADU/TOG ratio; fast/slow mover classification |
+| ADU alerts | `detectADUAlerts()` | **A** | Surge/drop detection against aduAlertHighPct/LowPct thresholds |
+| Decoupling point integrity (historical) | — | **G** | Requires time-series on-hand snapshots; point-in-time status available via `bufferStatus()` |
+
+## Ch 13 — DDS&OP
+
+| Concept | Function | Status | Notes |
+|---|---|---|---|
+| Current vs projected buffer zones | `projectBufferZones()` | **A** | Side-by-side comparison of zones at current vs projected ADU |
+| Buffer recalibration | `recalibrateBufferZone()` | **A** | ADU-based recalculation on configurable cadence |
+| 5-step DDS&OP process | Scope assembly + BufferHealthReport | **A** | Governance process; tools are available, cadence is scope-determined |
+
 ## Remaining Partial Items
 
-All 20 gaps (G-1 through G-13, N-1 through N-7) are now implemented. Two concepts remain **P** (partial):
+All algorithmic and infrastructure gaps are resolved:
 
-| Section | Concept | Reason | Notes |
-|---|---|---|---|
-| §9 | Formal time-buffer sizing formula | LTM alert covers last-1/3 of DLT; full variability-in-routing-time formula not implemented | Low priority; execution alert is sufficient for most use cases |
-| §12 | Zone-recalculation scheduler engine | `recalculationCadence` stored on profile; no server-side cron/trigger | Infrastructure concern, not algorithm gap |
+| Section | Concept | Resolution |
+|---|---|---|
+| §9 | Time buffer sizing formula | **A** — `computeTimeBuffer()` sizes buffer from routing time × variability × coverage factor |
+| §12 | Zone-recalculation scheduler | **A** — `runRecalibrationCycle()` batch-recalibrates all due zones; cadence detection via `zonesDueForRecalibration()` |
+| Ch 12 | Historical on-hand snapshots | **A** — `BufferSnapshotStore` + `captureBufferSnapshots()` in `src/lib/knowledge/buffer-snapshots.ts` |
+
+One remaining infrastructure concern: no server-side cron/timer auto-invokes `runRecalibrationCycle()` or `captureBufferSnapshots()`. The functions exist; scheduling is a deployment concern.

@@ -28,6 +28,7 @@ import { PlanStore, PLAN_TAGS } from '../planning/planning';
 import { ProcessRegistry } from '../process-registry';
 import { RecipeStore } from '../knowledge/recipes';
 import { Observer } from '../observation/observer';
+import { BufferZoneStore } from '../knowledge/buffer-zones';
 import type { Intent, EconomicResource, SpatialThing } from '../schemas';
 
 // ===========================================================================
@@ -56,7 +57,7 @@ function makeRecipes() {
     // Register specs
     rs.addResourceSpec({ id: 'spec:bread', name: 'Bread', resourceClassifiedAs: [] });
     rs.addResourceSpec({ id: 'spec:wheat', name: 'Wheat', resourceClassifiedAs: [] });
-    rs.addResourceSpec({ id: 'spec:soil-nutrients', name: 'Soil Nutrients', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
+    rs.addResourceSpec({ id: 'spec:soil-nutrients', name: 'Soil Nutrients', resourceClassifiedAs: [] });
 
     // compost → soil-nutrients (replenishment recipe)
     const compostRP = rs.addRecipeProcess({ name: 'Compost', hasDuration: { hasNumericalValue: 2, hasUnit: 'h' } });
@@ -79,6 +80,22 @@ function makeEmptyIndexes(locations: Map<string, SpatialThing> = new Map()) {
     const ai = buildAgentIndex([], [], new Map(), 7);
     const si = buildIndependentSupplyIndex([], [], [], ai, locations, 7);
     return { di, si };
+}
+
+/** Create a BufferZoneStore with zones for the given spec IDs (marks them as decoupling points). */
+function makeBzStore(...specIds: string[]): BufferZoneStore {
+    const bzStore = new BufferZoneStore();
+    for (const specId of specIds) {
+        bzStore.addBufferZone({
+            specId,
+            profileId: 'default',
+            bufferClassification: 'replenished',
+            adu: 1, aduUnit: 'kg', dltDays: 1, moq: 0, moqUnit: 'kg',
+            tor: 5, toy: 10, tog: 20,
+            lastComputedAt: new Date().toISOString(),
+        });
+    }
+    return bzStore;
 }
 
 // ===========================================================================
@@ -336,7 +353,7 @@ describe('planForRegion — two-pass integration (Mode C)', () => {
 
         // Register specs — soil-nutrients is replenishment-required
         rs.addResourceSpec({ id: 'spec:wheat', name: 'Wheat', resourceClassifiedAs: [] });
-        rs.addResourceSpec({ id: 'spec:soil-nutrients', name: 'Soil Nutrients', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
+        rs.addResourceSpec({ id: 'spec:soil-nutrients', name: 'Soil Nutrients', resourceClassifiedAs: [] });
         rs.addResourceSpec({ id: 'spec:compost-material', name: 'Compost Material', resourceClassifiedAs: [] });
 
         const obs = makeObserver();
@@ -372,6 +389,7 @@ describe('planForRegion — two-pass integration (Mode C)', () => {
             demandIndex: di,
             supplyIndex: si,
             generateId: genId,
+            bufferZoneStore: makeBzStore('spec:soil-nutrients'),
         };
 
         const result = planForRegion(
@@ -411,7 +429,7 @@ describe('planForRegion — metabolicDebt when replenishment recipe missing', ()
 
         rs.addResourceSpec({ id: 'spec:wheat-rare', name: 'Rare Wheat', resourceClassifiedAs: ['tag:plan:Consumption'] });
         // rare-nutrients is replenishment-required but has NO recipe
-        rs.addResourceSpec({ id: 'spec:rare-nutrients', name: 'Rare Nutrients', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
+        rs.addResourceSpec({ id: 'spec:rare-nutrients', name: 'Rare Nutrients', resourceClassifiedAs: [] });
 
         const obs = makeObserver();
         // Put some rare-nutrients in stock so Pass 1 can consume them
@@ -444,6 +462,7 @@ describe('planForRegion — metabolicDebt when replenishment recipe missing', ()
             demandIndex: di,
             supplyIndex: si,
             generateId: genId,
+            bufferZoneStore: makeBzStore('spec:rare-nutrients'),
         };
 
         const result = planForRegion(
@@ -534,7 +553,7 @@ describe('planForRegion — backtracking', () => {
 
         rs.addResourceSpec({ id: 'spec:primary-output', name: 'Primary Output', resourceClassifiedAs: [] });
         rs.addResourceSpec({ id: 'spec:support-output', name: 'Support Output', resourceClassifiedAs: [] });
-        rs.addResourceSpec({ id: 'spec:critical-resource', name: 'Critical Resource', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
+        rs.addResourceSpec({ id: 'spec:critical-resource', name: 'Critical Resource', resourceClassifiedAs: [] });
         rs.addResourceSpec({ id: 'spec:raw-material', name: 'Raw Material', resourceClassifiedAs: [] });
 
         const obs = makeObserver();
@@ -785,7 +804,7 @@ describe('planForRegion — Group B: MetabolicDebt.plannedWithin', () => {
         rs.addRecipeFlow({ action: 'produce', resourceConformsTo: 'spec:wheat-b', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeOutputOf: growRP.id });
 
         rs.addResourceSpec({ id: 'spec:wheat-b', name: 'Wheat B', resourceClassifiedAs: [] });
-        rs.addResourceSpec({ id: 'spec:rare-b', name: 'Rare B', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
+        rs.addResourceSpec({ id: 'spec:rare-b', name: 'Rare B', resourceClassifiedAs: [] });
         // No recipe for spec:rare-b → metabolicDebt
 
         const obs = makeObserver();
@@ -818,6 +837,7 @@ describe('planForRegion — Group B: MetabolicDebt.plannedWithin', () => {
             demandIndex: di,
             supplyIndex: si,
             generateId: genId,
+            bufferZoneStore: makeBzStore('spec:rare-b'),
         };
 
         const result = planForRegion(
@@ -864,7 +884,7 @@ describe('planForRegion — Group C: deficits from backtracking', () => {
 
         rs.addResourceSpec({ id: 'spec:primary-c-out', name: 'Primary C', resourceClassifiedAs: [] });
         rs.addResourceSpec({ id: 'spec:support-c-out', name: 'Support C', resourceClassifiedAs: [] });
-        rs.addResourceSpec({ id: 'spec:limited-c', name: 'Limited C', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
+        rs.addResourceSpec({ id: 'spec:limited-c', name: 'Limited C', resourceClassifiedAs: [] });
         rs.addResourceSpec({ id: 'spec:raw-c', name: 'Raw C', resourceClassifiedAs: [] });
 
         const obs = makeObserver();
@@ -942,7 +962,7 @@ describe('planForRegion — Group D: deficits from metabolicDebt', () => {
         rs.addRecipeFlow({ action: 'produce', resourceConformsTo: 'spec:wheat-d', resourceQuantity: { hasNumericalValue: 1, hasUnit: 'kg' }, recipeOutputOf: growRP.id });
 
         rs.addResourceSpec({ id: 'spec:wheat-d', name: 'Wheat D', resourceClassifiedAs: [] });
-        rs.addResourceSpec({ id: 'spec:rare-d', name: 'Rare D', resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED] });
+        rs.addResourceSpec({ id: 'spec:rare-d', name: 'Rare D', resourceClassifiedAs: [] });
         // No recipe for spec:rare-d → metabolicDebt
 
         const obs = makeObserver();
@@ -975,6 +995,7 @@ describe('planForRegion — Group D: deficits from metabolicDebt', () => {
             demandIndex: di,
             supplyIndex: si,
             generateId: genId,
+            bufferZoneStore: makeBzStore('spec:rare-d'),
         };
 
         const result = planForRegion(

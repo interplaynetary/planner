@@ -590,7 +590,6 @@ export const ResourceSpecificationSchema = z.object({
     mediumOfExchange: z.boolean().optional(),
     // DDMRP extensions
     bufferProfileId: z.string().optional(),               // BufferProfile ID
-    replenishmentRequired: z.boolean().optional(),        // tag:plan:replenishment-required (Pass 2 trigger)
     /** DDMRP Ch 6 positioning factors — rationale for decoupling-point placement. */
     positioningAnalysis: PositioningAnalysisSchema.optional(),
 });

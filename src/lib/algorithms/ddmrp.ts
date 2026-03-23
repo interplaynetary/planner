@@ -13,6 +13,7 @@
  *   Ch 12 — Signal Integrity
  */
 
+import { z } from 'zod';
 import type {
     EconomicEvent,
     EconomicResource,
@@ -27,6 +28,7 @@ import type {
     PositioningAnalysis,
 } from '../schemas';
 import { ACTION_DEFINITIONS } from '../schemas';
+import { PLAN_TAGS, isMetaOfKind } from '../planning/planning';
 import type { PlanStore } from '../planning/planning';
 import type { Observer, FulfillmentState } from '../observation/observer';
 import type { RecipeStore } from '../knowledge/recipes';
@@ -3037,4 +3039,664 @@ export function buildBufferHealthReport(
     }
 
     return { asOf: now, buffers, summary };
+}
+
+// =============================================================================
+// 28. computeOTIF — On-Time In-Full delivery performance
+// =============================================================================
+
+export const OTIFResultSchema = z.object({
+    commitmentId: z.string(),
+    specId: z.string(),
+    dueDate: z.string(),
+    promisedQty: z.number(),
+    deliveredQty: z.number(),
+    deliveredDate: z.string().optional(),
+    onTime: z.boolean(),
+    inFull: z.boolean(),
+    otif: z.boolean(),
+});
+export type OTIFResult = z.infer<typeof OTIFResultSchema>;
+
+/**
+ * Compute On-Time In-Full (OTIF) delivery performance for a set of commitments.
+ *
+ * For each commitment with a `due` date, finds fulfilling events (where
+ * event.fulfills === commitment.id), sums delivered quantity, and determines
+ * the latest delivery date. Commitments without `due` or with `finished === false`
+ * and no fulfilling events are skipped.
+ *
+ * DDMRP ref: Ptak & Smith Ch 10 — execution metrics.
+ */
+export function computeOTIF(
+    commitments: Commitment[],
+    events: EconomicEvent[],
+): { results: OTIFResult[]; summary: { total: number; onTimeRate: number; inFullRate: number; otifRate: number } } {
+    // Index events by fulfills for O(1) lookup
+    const eventsByCommitment = new Map<string, EconomicEvent[]>();
+    for (const ev of events) {
+        if (ev.fulfills) {
+            let list = eventsByCommitment.get(ev.fulfills);
+            if (!list) { list = []; eventsByCommitment.set(ev.fulfills, list); }
+            list.push(ev);
+        }
+    }
+
+    const results: OTIFResult[] = [];
+
+    for (const c of commitments) {
+        if (!c.due) continue;
+        const fulfillingEvents = eventsByCommitment.get(c.id) ?? [];
+        // Skip commitments with finished === false and no fulfilling events
+        if (c.finished === false && fulfillingEvents.length === 0) continue;
+
+        const promisedQty = c.resourceQuantity?.hasNumericalValue ?? 0;
+        let deliveredQty = 0;
+        let latestDate: string | undefined;
+
+        for (const ev of fulfillingEvents) {
+            deliveredQty += ev.resourceQuantity?.hasNumericalValue ?? 0;
+            const evDate = ev.hasPointInTime;
+            if (evDate && (!latestDate || evDate > latestDate)) {
+                latestDate = evDate;
+            }
+        }
+
+        const onTime = latestDate !== undefined ? latestDate <= c.due : false;
+        const inFull = deliveredQty >= promisedQty;
+        const otif = onTime && inFull;
+
+        results.push({
+            commitmentId: c.id,
+            specId: c.resourceConformsTo ?? '',
+            dueDate: c.due,
+            promisedQty,
+            deliveredQty,
+            deliveredDate: latestDate,
+            onTime,
+            inFull,
+            otif,
+        });
+    }
+
+    const total = results.length;
+    const onTimeCount = results.filter(r => r.onTime).length;
+    const inFullCount = results.filter(r => r.inFull).length;
+    const otifCount = results.filter(r => r.otif).length;
+
+    return {
+        results,
+        summary: {
+            total,
+            onTimeRate: total > 0 ? onTimeCount / total : 0,
+            inFullRate: total > 0 ? inFullCount / total : 0,
+            otifRate: total > 0 ? otifCount / total : 0,
+        },
+    };
+}
+
+// =============================================================================
+// 29. computeMaterialSyncAlerts — material synchronization alerts
+// =============================================================================
+
+export const MaterialSyncAlertSchema = z.object({
+    processId: z.string(),
+    inputCommitmentId: z.string(),
+    specId: z.string(),
+    releaseDate: z.string(),
+    requiredQty: z.number(),
+    projectedAvailable: z.number(),
+    shortage: z.number(),
+    parentBufferZone: z.string().optional(),
+});
+export type MaterialSyncAlert = z.infer<typeof MaterialSyncAlertSchema>;
+
+/**
+ * Detect material synchronization alerts for non-buffered process inputs.
+ *
+ * For each unfinished process, checks input commitments whose action is
+ * a consuming action (not use/work/cite/deliverService). Buffered inputs
+ * (those with a matching BufferZone) are protected and skipped. For
+ * non-buffered inputs, computes projected available = on-hand + incoming
+ * supply due before the input's due date. If projected < required, an
+ * alert is emitted with the shortage quantity.
+ *
+ * DDMRP ref: Ptak & Smith Ch 11 — Demand Driven Scheduling.
+ */
+export function computeMaterialSyncAlerts(
+    planStore: PlanStore,
+    observer: Observer,
+    bufferZoneStore?: BufferZoneStore,
+    asOf?: Date,
+): MaterialSyncAlert[] {
+    const alerts: MaterialSyncAlert[] = [];
+
+    for (const process of planStore.allProcesses()) {
+        if (process.finished) continue;
+
+        const inputCommitments = planStore.commitmentsForProcess(process.id)
+            .filter(c => c.inputOf === process.id);
+
+        for (const c of inputCommitments) {
+            // Skip non-consuming actions
+            if (NON_CONSUMING_ACTIONS.has(c.action)) continue;
+
+            const specId = c.resourceConformsTo;
+            if (!specId) continue;
+
+            // Skip buffered inputs — they are protected by the buffer
+            if (bufferZoneStore?.findZone(specId)) continue;
+
+            const requiredQty = c.resourceQuantity?.hasNumericalValue ?? 0;
+            const releaseDate = c.due ?? c.hasPointInTime ?? '';
+            if (!releaseDate) continue;
+
+            // On-hand from observer
+            const onhand = observer.conformingResources(specId)
+                .reduce((sum, r) => sum + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+
+            // Incoming supply: unfinished output commitments + intents due before releaseDate
+            let incomingSupply = 0;
+
+            for (const oc of planStore.allCommitments()) {
+                if (oc.finished) continue;
+                if (!oc.outputOf) continue;
+                if (oc.resourceConformsTo !== specId) continue;
+                const ocDue = oc.due ?? oc.hasPointInTime;
+                if (ocDue && ocDue <= releaseDate) {
+                    incomingSupply += oc.resourceQuantity?.hasNumericalValue ?? 0;
+                }
+            }
+
+            for (const oi of planStore.allIntents()) {
+                if (oi.finished) continue;
+                if (!oi.outputOf) continue;
+                if (oi.resourceConformsTo !== specId) continue;
+                const oiDue = oi.due ?? oi.hasPointInTime;
+                if (oiDue && oiDue <= releaseDate) {
+                    incomingSupply += oi.resourceQuantity?.hasNumericalValue ?? 0;
+                }
+            }
+
+            const projectedAvailable = onhand + incomingSupply;
+            if (projectedAvailable < requiredQty) {
+                alerts.push({
+                    processId: process.id,
+                    inputCommitmentId: c.id,
+                    specId,
+                    releaseDate,
+                    requiredQty,
+                    projectedAvailable,
+                    shortage: requiredQty - projectedAvailable,
+                });
+            }
+        }
+    }
+
+    return alerts;
+}
+
+// =============================================================================
+// 30. computeLeadTimeAlerts — order lead time zone classification
+// =============================================================================
+
+const MS_PER_DAY = 86_400_000;
+
+export const LeadTimeAlertSchema = z.object({
+    orderId: z.string(),
+    specId: z.string(),
+    dueDate: z.string(),
+    leadTimeDays: z.number(),
+    daysRemaining: z.number(),
+    alertZone: z.enum(['green', 'yellow', 'red', 'late']),
+});
+export type LeadTimeAlert = z.infer<typeof LeadTimeAlertSchema>;
+
+/**
+ * Compute lead time alerts for open orders.
+ *
+ * For each order, computes daysRemaining = (dueDate - asOf) / MS_PER_DAY.
+ * If past due (daysRemaining < 0), zone is 'late'. The alert horizon =
+ * leadTimeDays / 3. Orders outside the alert horizon are skipped. Within
+ * the horizon, the remaining days are classified into 3 equal zones:
+ *   - first third (farthest out) = 'green'
+ *   - second third = 'yellow'
+ *   - last third (closest to due) = 'red'
+ *
+ * DDMRP ref: Ptak & Smith Ch 10 — execution alerts.
+ */
+export function computeLeadTimeAlerts(
+    openOrders: Array<{ id: string; specId: string; dueDate: string; leadTimeDays: number }>,
+    asOf: Date,
+): LeadTimeAlert[] {
+    const alerts: LeadTimeAlert[] = [];
+
+    for (const order of openOrders) {
+        const dueMs = new Date(order.dueDate).getTime();
+        const daysRemaining = (dueMs - asOf.getTime()) / MS_PER_DAY;
+
+        if (daysRemaining < 0) {
+            alerts.push({
+                orderId: order.id,
+                specId: order.specId,
+                dueDate: order.dueDate,
+                leadTimeDays: order.leadTimeDays,
+                daysRemaining,
+                alertZone: 'late',
+            });
+            continue;
+        }
+
+        const alertHorizon = order.leadTimeDays / 3;
+        // Orders outside the alert horizon are not in scope
+        if (daysRemaining > alertHorizon) continue;
+
+        const thirdSize = alertHorizon / 3;
+        let alertZone: 'green' | 'yellow' | 'red';
+
+        if (daysRemaining > 2 * thirdSize) {
+            alertZone = 'green';
+        } else if (daysRemaining > thirdSize) {
+            alertZone = 'yellow';
+        } else {
+            alertZone = 'red';
+        }
+
+        alerts.push({
+            orderId: order.id,
+            specId: order.specId,
+            dueDate: order.dueDate,
+            leadTimeDays: order.leadTimeDays,
+            daysRemaining,
+            alertZone,
+        });
+    }
+
+    return alerts;
+}
+
+// =============================================================================
+// 31. computeSignalIntegrity — replenishment signal accuracy tracking
+// =============================================================================
+
+export const SignalIntegrityRecordSchema = z.object({
+    signalId: z.string(),
+    specId: z.string(),
+    recommendedDate: z.string(),
+    recommendedQty: z.number(),
+    actualDate: z.string().optional(),
+    actualQty: z.number().optional(),
+    timingDeltaDays: z.number(),
+    qtyDelta: z.number(),
+    status: z.enum(['approved', 'rejected', 'open']),
+});
+export type SignalIntegrityRecord = z.infer<typeof SignalIntegrityRecordSchema>;
+
+/**
+ * Compute signal integrity metrics for replenishment signals.
+ *
+ * Examines all replenishment-tagged intents in the PlanStore, retrieves
+ * their ReplenishmentMeta, and computes timing and quantity deltas between
+ * what was recommended and what was approved/delivered.
+ *
+ * DDMRP ref: Ptak & Smith Ch 12 — Signal Integrity.
+ */
+export function computeSignalIntegrity(
+    planStore: PlanStore,
+): { records: SignalIntegrityRecord[]; timingAccuracy: number; qtyAccuracy: number } {
+    const repIntents = planStore.intentsForTag(PLAN_TAGS.REPLENISHMENT);
+    const records: SignalIntegrityRecord[] = [];
+
+    for (const intent of repIntents) {
+        const meta = planStore.getMetaOfKind(intent.id, 'replenishment');
+        if (!meta) continue;
+
+        const recommendedDate = meta.dueDate;
+        const recommendedQty = meta.recommendedQty;
+        let actualDate: string | undefined;
+        let actualQty: number | undefined;
+        let timingDeltaDays = 0;
+        let qtyDelta = 0;
+
+        if (meta.approvedCommitmentId) {
+            const commitment = planStore.getCommitment(meta.approvedCommitmentId);
+            if (commitment) {
+                actualDate = commitment.due ?? commitment.created;
+                actualQty = commitment.resourceQuantity?.hasNumericalValue;
+
+                if (actualDate) {
+                    const recMs = new Date(recommendedDate).getTime();
+                    const actMs = new Date(actualDate).getTime();
+                    timingDeltaDays = (actMs - recMs) / MS_PER_DAY;
+                }
+                if (actualQty !== undefined) {
+                    qtyDelta = actualQty - recommendedQty;
+                }
+            }
+        }
+
+        records.push({
+            signalId: intent.id,
+            specId: intent.resourceConformsTo ?? '',
+            recommendedDate,
+            recommendedQty,
+            actualDate,
+            actualQty,
+            timingDeltaDays,
+            qtyDelta,
+            status: meta.status,
+        });
+    }
+
+    // Compute accuracy metrics from approved signals
+    const approved = records.filter(r => r.status === 'approved');
+    const timingAccuracy = approved.length > 0
+        ? 1 - (approved.reduce((sum, r) => sum + Math.abs(r.timingDeltaDays), 0) / approved.length /
+            Math.max(1, Math.max(...approved.map(r => Math.abs(r.timingDeltaDays)))))
+        : 1;
+    const qtyAccuracy = approved.length > 0
+        ? 1 - (approved.reduce((sum, r) => sum + Math.abs(r.qtyDelta), 0) /
+            Math.max(1, approved.reduce((sum, r) => sum + r.recommendedQty, 0)))
+        : 1;
+
+    return { records, timingAccuracy, qtyAccuracy };
+}
+
+// =============================================================================
+// 32. computeExecutionPriority — buffer-based execution priority list
+// =============================================================================
+
+export const ExecutionPriorityEntrySchema = z.object({
+    specId: z.string(),
+    onhand: z.number(),
+    tor: z.number(),
+    toy: z.number(),
+    tog: z.number(),
+    percentage: z.number(),
+    zone: z.enum(['red', 'yellow', 'green', 'excess']),
+});
+export type ExecutionPriorityEntry = z.infer<typeof ExecutionPriorityEntrySchema>;
+
+/**
+ * Compute execution priority list sorted by buffer penetration (most critical first).
+ *
+ * For each buffer zone in the store, computes on-hand from observer conforming
+ * resources, calculates percentage = onhand / tog, classifies into zone via
+ * `bufferStatus()`, and sorts ascending by percentage (lowest = most critical).
+ *
+ * DDMRP ref: Ptak & Smith Ch 10 — execution alerts, prioritized execution.
+ */
+export function computeExecutionPriority(
+    bufferZoneStore: BufferZoneStore,
+    observer: Observer,
+): ExecutionPriorityEntry[] {
+    const entries: ExecutionPriorityEntry[] = [];
+
+    for (const bz of bufferZoneStore.allBufferZones()) {
+        const onhand = observer.conformingResources(bz.specId)
+            .reduce((sum, r) => sum + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+
+        const status = bufferStatus(onhand, bz);
+        const percentage = bz.tog > 0 ? onhand / bz.tog : 0;
+
+        entries.push({
+            specId: bz.specId,
+            onhand,
+            tor: bz.tor,
+            toy: bz.toy,
+            tog: bz.tog,
+            percentage,
+            zone: status.zone,
+        });
+    }
+
+    // Sort ascending by percentage (most critical first)
+    entries.sort((a, b) => a.percentage - b.percentage);
+
+    return entries;
+}
+
+// =============================================================================
+// 33. ADU Alerts — Ch 8 demand trend shift monitoring
+// =============================================================================
+
+export const ADUAlertSchema = z.object({
+    specId: z.string(),
+    previousADU: z.number(),
+    currentADU: z.number(),
+    changePct: z.number(),
+    direction: z.enum(['surge', 'drop']),
+    thresholdPct: z.number(),
+});
+export type ADUAlert = z.infer<typeof ADUAlertSchema>;
+
+/**
+ * Detect ADU exception alerts by comparing each buffer zone's stored ADU
+ * against a freshly computed current ADU value.
+ *
+ * A "surge" alert fires when changePct > aduAlertHighPct.
+ * A "drop" alert fires when changePct < -aduAlertLowPct.
+ *
+ * DDMRP ref: Ptak & Smith Ch 7 §"ADU Exceptions", Ch 8 demand trend monitoring.
+ */
+export function detectADUAlerts(
+    bufferZoneStore: BufferZoneStore,
+    currentADUs: Map<string, number>,
+): ADUAlert[] {
+    const alerts: ADUAlert[] = [];
+
+    for (const zone of bufferZoneStore.allBufferZones()) {
+        const currentADU = currentADUs.get(zone.specId);
+        if (currentADU == null || zone.adu === 0) continue;
+
+        const changePct = (currentADU - zone.adu) / zone.adu;
+
+        if (zone.aduAlertHighPct != null && changePct > zone.aduAlertHighPct) {
+            alerts.push({
+                specId: zone.specId,
+                previousADU: zone.adu,
+                currentADU,
+                changePct,
+                direction: 'surge',
+                thresholdPct: zone.aduAlertHighPct,
+            });
+        } else if (zone.aduAlertLowPct != null && changePct < -zone.aduAlertLowPct) {
+            alerts.push({
+                specId: zone.specId,
+                previousADU: zone.adu,
+                currentADU,
+                changePct: Math.abs(changePct),
+                direction: 'drop',
+                thresholdPct: zone.aduAlertLowPct,
+            });
+        }
+    }
+
+    return alerts;
+}
+
+// =============================================================================
+// 34. DDS&OP Buffer Projections — Ch 13 current vs projected zone comparison
+// =============================================================================
+
+export const BufferProjectionSchema = z.object({
+    specId: z.string(),
+    currentADU: z.number(),
+    projectedADU: z.number(),
+    current: z.object({ tor: z.number(), toy: z.number(), tog: z.number(), avgOnHand: z.number() }),
+    projected: z.object({ tor: z.number(), toy: z.number(), tog: z.number(), avgOnHand: z.number() }),
+});
+export type BufferProjection = z.infer<typeof BufferProjectionSchema>;
+
+/**
+ * Project buffer zone boundaries under future ADU assumptions and compare
+ * them with the current stored zones.
+ *
+ * For each buffer zone (excluding min_max classification), recomputes zones
+ * using the projected ADU while keeping DLT, profile, and MOQ unchanged.
+ * Returns both current and projected zone boundaries plus average on-hand
+ * estimates (TOR + half of the green zone).
+ *
+ * DDMRP ref: Ptak & Smith Ch 13 — DDS&OP buffer projections.
+ */
+export function projectBufferZones(
+    bufferZoneStore: BufferZoneStore,
+    projectedADUs: Map<string, number>,
+    profiles: Map<string, BufferProfile>,
+): BufferProjection[] {
+    const projections: BufferProjection[] = [];
+
+    for (const zone of bufferZoneStore.allBufferZones()) {
+        if (zone.bufferClassification === 'min_max') continue;
+
+        const profile = profiles.get(zone.profileId);
+        const projectedADU = projectedADUs.get(zone.specId);
+        if (!profile || projectedADU == null) continue;
+
+        const currentAvgOnHand = zone.tor + (zone.tog - zone.toy) / 2;
+
+        const proj = computeBufferZone(
+            profile,
+            projectedADU,
+            zone.aduUnit,
+            zone.dltDays,
+            zone.moq,
+            zone.moqUnit,
+            { docDays: zone.orderCycleDays },
+        );
+
+        const projectedAvgOnHand = proj.tor + (proj.tog - proj.toy) / 2;
+
+        projections.push({
+            specId: zone.specId,
+            currentADU: zone.adu,
+            projectedADU,
+            current: {
+                tor: zone.tor,
+                toy: zone.toy,
+                tog: zone.tog,
+                avgOnHand: currentAvgOnHand,
+            },
+            projected: {
+                tor: proj.tor,
+                toy: proj.toy,
+                tog: proj.tog,
+                avgOnHand: projectedAvgOnHand,
+            },
+        });
+    }
+
+    return projections;
+}
+
+// =============================================================================
+// 35. Time Buffer Sizing — Ch 11 control point protection
+// =============================================================================
+
+export const TimeBufferResultSchema = z.object({
+    routingTimeDays: z.number(),
+    variabilityFactor: z.number(),
+    coverageFactor: z.number(),
+    timeBufferDays: z.number(),
+    alertHorizon: z.object({
+        greenDays: z.number(),
+        yellowDays: z.number(),
+        redDays: z.number(),
+    }),
+});
+export type TimeBufferResult = z.infer<typeof TimeBufferResultSchema>;
+
+/**
+ * Compute a time buffer for control-point scheduling protection.
+ *
+ * Time buffer = routingTimeDays × variabilityFactor × coverageFactor.
+ * The buffer is divided into three equal alert-horizon zones (green/yellow/red).
+ *
+ * DDMRP ref: Ptak & Smith Ch 11 §"Time Buffer".
+ *
+ * @param routingTimeDays    Total routing/processing time in calendar days
+ * @param variabilityFactor  Fraction reflecting process variability (0–1 typical)
+ * @param coverageFactor     Proportion of variability to cover (default 0.5 = 50%)
+ */
+export function computeTimeBuffer(
+    routingTimeDays: number,
+    variabilityFactor: number,
+    coverageFactor = 0.5,
+): TimeBufferResult {
+    const timeBufferDays = routingTimeDays * variabilityFactor * coverageFactor;
+    const zoneDays = timeBufferDays / 3;
+
+    return {
+        routingTimeDays,
+        variabilityFactor,
+        coverageFactor,
+        timeBufferDays,
+        alertHorizon: {
+            greenDays: zoneDays,
+            yellowDays: zoneDays,
+            redDays: zoneDays,
+        },
+    };
+}
+
+// =============================================================================
+// 36. Batch Recalibration Cycle — selective recalibration of due zones
+// =============================================================================
+
+/**
+ * Selectively recalibrate only those BufferZones whose recalculation cadence
+ * indicates they are due, leaving all other zones unchanged.
+ *
+ * Returns the specIds of recalibrated vs skipped zones so callers can log
+ * or display what happened in each planning cycle.
+ *
+ * Workflow:
+ *   1. Query zonesDueForRecalibration() to find due zones
+ *   2. For each due zone: computeADU → recalibrateBufferZone → replaceZone
+ *   3. Collect specIds into recalibrated / skipped lists
+ *
+ * DDMRP ref: Ptak & Smith Ch 10 — DDS&OP recalibration cadence.
+ *
+ * @param bufferZoneStore  Store of all active buffer zones
+ * @param profiles         profileId → BufferProfile mapping
+ * @param events           Historical EconomicEvents for ADU computation
+ * @param adjustments      Active DemandAdjustmentFactors for the period
+ * @param recipeStore      RecipeStore for dynamic DLT computation (unused in selective path)
+ * @param asOf             Reference date (today)
+ */
+export function runRecalibrationCycle(
+    bufferZoneStore: BufferZoneStore,
+    profiles: Map<string, BufferProfile>,
+    events: EconomicEvent[],
+    adjustments: DemandAdjustmentFactor[],
+    recipeStore: RecipeStore,
+    asOf: Date,
+): { recalibrated: string[]; skipped: string[] } {
+    const dueZones = bufferZoneStore.zonesDueForRecalibration(asOf, profiles);
+    const dueIds = new Set(dueZones.map(z => z.id));
+    const allZones = bufferZoneStore.allBufferZones();
+
+    const recalibrated: string[] = [];
+    const skipped: string[] = [];
+
+    for (const zone of allZones) {
+        if (!dueIds.has(zone.id)) {
+            skipped.push(zone.specId);
+            continue;
+        }
+
+        const profile = profiles.get(zone.profileId);
+        if (!profile) {
+            skipped.push(zone.specId);
+            continue;
+        }
+
+        const windowDays = zone.aduWindowDays ?? 90;
+        const { adu } = computeADU(events, zone.specId, windowDays, asOf);
+        const updated = recalibrateBufferZone(zone, adu, zone.dltDays, profile, adjustments, asOf);
+        bufferZoneStore.replaceZone(updated);
+        recalibrated.push(zone.specId);
+    }
+
+    return { recalibrated, skipped };
 }

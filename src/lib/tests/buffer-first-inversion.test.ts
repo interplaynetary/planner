@@ -50,7 +50,7 @@ describe('buffer-first inversion', () => {
     it('does not activate buffer-first without bufferProfiles', () => {
         recipeStore.addResourceSpec({
             id: 'wheat', name: 'Wheat',
-            resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED],
+            resourceClassifiedAs: [],
             defaultUnitOfResource: 'kg',
         });
         observer.seedResource({
@@ -94,7 +94,7 @@ describe('buffer-first inversion', () => {
     it('Pass 0 reserves capacity for red buffer before independent demands', () => {
         recipeStore.addResourceSpec({
             id: 'flour', name: 'Flour',
-            resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED],
+            resourceClassifiedAs: [],
             defaultUnitOfResource: 'kg',
         });
         // Only 20 kg on hand, buffer needs tog=100, demand wants 20
@@ -145,7 +145,7 @@ describe('buffer-first inversion', () => {
         // Strategic buffer in red zone
         recipeStore.addResourceSpec({
             id: 'seed-stock', name: 'Seed Stock',
-            resourceClassifiedAs: ['tag:buffer:strategic', PLAN_TAGS.REPLENISHMENT_REQUIRED],
+            resourceClassifiedAs: ['tag:buffer:strategic'],
             defaultUnitOfResource: 'kg',
         });
         observer.seedResource({
@@ -164,7 +164,7 @@ describe('buffer-first inversion', () => {
         // Metabolic buffer in red zone
         recipeStore.addResourceSpec({
             id: 'rice', name: 'Rice',
-            resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED],
+            resourceClassifiedAs: [],
             defaultUnitOfResource: 'kg',
         });
         observer.seedResource({
@@ -205,7 +205,7 @@ describe('buffer-first inversion', () => {
     it('buffer guard defers demand that would breach TOY, retries after replenishment', () => {
         recipeStore.addResourceSpec({
             id: 'beans', name: 'Beans',
-            resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED],
+            resourceClassifiedAs: [],
             defaultUnitOfResource: 'kg',
         });
         // 50 kg on hand, toy=60 — consuming 50 would put us at 0 < toy
@@ -246,7 +246,7 @@ describe('buffer-first inversion', () => {
     it('Pass 0 handled specs are not double-replenished in Pass 2', () => {
         recipeStore.addResourceSpec({
             id: 'oil', name: 'Cooking Oil',
-            resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED],
+            resourceClassifiedAs: [],
             defaultUnitOfResource: 'L',
         });
         observer.seedResource({
@@ -284,7 +284,7 @@ describe('buffer-first inversion', () => {
         // Two buffers: one handled by Pass 0, one by Pass 2
         recipeStore.addResourceSpec({
             id: 'sugar', name: 'Sugar',
-            resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED],
+            resourceClassifiedAs: [],
             defaultUnitOfResource: 'kg',
         });
         observer.seedResource({
@@ -326,7 +326,7 @@ describe('buffer-first inversion', () => {
     it('ecological buffers are excluded from Pass 0 replenishment', () => {
         recipeStore.addResourceSpec({
             id: 'soil-carbon', name: 'Soil Carbon',
-            resourceClassifiedAs: ['tag:buffer:ecological', PLAN_TAGS.REPLENISHMENT_REQUIRED],
+            resourceClassifiedAs: ['tag:buffer:ecological'],
             defaultUnitOfResource: 'tonne',
         });
         observer.seedResource({

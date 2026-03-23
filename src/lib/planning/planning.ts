@@ -63,7 +63,6 @@ export const PLAN_TAGS = {
     SURPLUS: 'tag:plan:surplus',
     LATERAL_TRANSFER: 'tag:plan:lateral-transfer',
     METABOLIC_DEBT: 'tag:plan:metabolic-debt',
-    REPLENISHMENT_REQUIRED: 'tag:plan:replenishment-required',
     CONSERVATION: 'tag:plan:conservation',
     REPLENISHMENT: 'tag:plan:replenishment',
     SOFT_ALLOCATION: 'tag:plan:soft-allocation',

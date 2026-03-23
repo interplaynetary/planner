@@ -1,6 +1,6 @@
 <script lang="ts">
   import { recipes, refresh } from '$lib/vf-stores.svelte';
-  import { PLAN_TAGS } from '$lib/planning/planning';
+
 
   interface Props {
     open: boolean;
@@ -16,7 +16,6 @@
   let classifiedAs = $state('');
   let substitutable = $state(false);
   let mediumOfExchange = $state(false);
-  let replenishmentRequired = $state(false);
 
   function reset() {
     name = '';
@@ -26,7 +25,6 @@
     classifiedAs = '';
     substitutable = false;
     mediumOfExchange = false;
-    replenishmentRequired = false;
   }
 
   function handleSubmit(e: SubmitEvent) {
@@ -38,10 +36,6 @@
       .map((s) => s.trim())
       .filter(Boolean);
 
-    if (replenishmentRequired) {
-      resourceClassifiedAs.push(PLAN_TAGS.REPLENISHMENT_REQUIRED);
-    }
-
     recipes.addResourceSpec({
       id: crypto.randomUUID(),
       name: name.trim(),
@@ -51,7 +45,6 @@
       resourceClassifiedAs,
       ...(substitutable && { substitutable: true }),
       ...(mediumOfExchange && { mediumOfExchange: true }),
-      ...(replenishmentRequired && { replenishmentRequired: true }),
     });
 
     refresh();
@@ -138,10 +131,6 @@
           <label class="check">
             <input type="checkbox" bind:checked={mediumOfExchange} />
             <span>Medium of Exchange</span>
-          </label>
-          <label class="check replen">
-            <input type="checkbox" bind:checked={replenishmentRequired} />
-            <span>Replenishment Required <span class="hint">(DDMRP Pass 2)</span></span>
           </label>
         </div>
 
@@ -276,15 +265,6 @@
     width: 13px;
     height: 13px;
     flex-shrink: 0;
-  }
-
-  .check.replen span {
-    color: rgba(56, 161, 105, 0.9);
-  }
-
-  .hint {
-    opacity: 0.5;
-    font-size: 0.65rem;
   }
 
   .panel-actions {

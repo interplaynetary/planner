@@ -99,7 +99,7 @@ describe('ecological buffer — tippingPoint + ConservationSignal', () => {
     it('ecological buffer does not trigger replenishment purchase intents (even with tag:plan:replenishment-required)', () => {
         recipeStore.addResourceSpec({
             id: 'soil-n', name: 'Soil Nitrogen',
-            resourceClassifiedAs: ['tag:buffer:ecological', PLAN_TAGS.REPLENISHMENT_REQUIRED],
+            resourceClassifiedAs: ['tag:buffer:ecological'],
             defaultUnitOfResource: 'kg/ha',
         });
         observer.seedResource({

@@ -8,23 +8,19 @@
   let { spec }: Props = $props();
 
   const accentColor = $derived(
-    spec.replenishmentRequired
-      ? 'var(--zone-green)'
-      : spec.mediumOfExchange
-        ? 'var(--zone-yellow)'
-        : spec.substitutable
-          ? 'var(--zone-excess)'
-          : 'rgba(255,255,255,0.12)',
+    spec.mediumOfExchange
+      ? 'var(--zone-yellow)'
+      : spec.substitutable
+        ? 'var(--zone-excess)'
+        : 'rgba(255,255,255,0.12)',
   );
 
   const accentRgb = $derived(
-    spec.replenishmentRequired
-      ? '56,161,105'
-      : spec.mediumOfExchange
-        ? '214,158,46'
-        : spec.substitutable
-          ? '49,130,206'
-          : '255,255,255',
+    spec.mediumOfExchange
+      ? '214,158,46'
+      : spec.substitutable
+        ? '49,130,206'
+        : '255,255,255',
   );
 
   function dotCount(level: 'low' | 'medium' | 'high' | undefined): number {
@@ -37,8 +33,7 @@
   const pa = $derived(spec.positioningAnalysis);
   const classifications = $derived(
     (spec.resourceClassifiedAs ?? [])
-      .map((c) => c.split(':').at(-1) ?? c)
-      .filter((c) => c !== 'replenishment-required'),
+      .map((c) => c.split(':').at(-1) ?? c),
   );
 </script>
 
@@ -69,9 +64,8 @@
     {/if}
 
     <!-- Tag pills -->
-    {#if spec.replenishmentRequired || spec.mediumOfExchange || spec.substitutable}
+    {#if spec.mediumOfExchange || spec.substitutable}
       <div class="pills">
-        {#if spec.replenishmentRequired}<span class="pill green">replen</span>{/if}
         {#if spec.mediumOfExchange}<span class="pill yellow">exchange</span>{/if}
         {#if spec.substitutable}<span class="pill blue">sub</span>{/if}
       </div>
@@ -227,11 +221,6 @@
     border-radius: 2px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-  }
-
-  .pill.green {
-    background: rgba(56, 161, 105, 0.15);
-    color: var(--zone-green);
   }
 
   .pill.yellow {

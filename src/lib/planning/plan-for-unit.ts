@@ -97,6 +97,8 @@ export interface PlanningSession {
     netter: PlanNetter;
     generateId: () => string;
     sneIndex: SNEIndex;
+    /** Spec IDs with active BufferZones — drives decoupling point detection. */
+    bufferedSpecs: ReadonlySet<string>;
 }
 
 // =============================================================================
@@ -485,6 +487,7 @@ function processSingleDemand(
         agents: ctx.agents,
         generateId,
         honorDecouplingPoints: tier.honorDecouplingPoints,
+        bufferedSpecs: session.bufferedSpecs,
     });
 
     return { result, planId };
@@ -517,9 +520,9 @@ function computeDerivedDemands(
     for (const specId of allBufferSpecs) {
         if (handledSpecs.has(specId)) continue;
         const qty = (consumedBySpec.get(specId) ?? 0) + (boundaryBySpec.get(specId) ?? 0);
+        if (!session.bufferedSpecs.has(specId)) continue;
         const spec = ctx.recipeStore.getResourceSpec(specId);
-        if (!spec?.resourceClassifiedAs?.includes(PLAN_TAGS.REPLENISHMENT_REQUIRED)) continue;
-        if (spec.resourceClassifiedAs?.includes('tag:buffer:ecological')) continue;
+        if (spec?.resourceClassifiedAs?.includes('tag:buffer:ecological')) continue;
 
         if (effectiveAlerts) {
             const alert = effectiveAlerts.get(specId);
@@ -695,7 +698,7 @@ function buildStandardTiers(
         name: 'primary',
         priority: 1,
         planPrefix: 'plan',
-        honorDecouplingPoints: true,
+        honorDecouplingPoints: true, bufferedSpecs: session.bufferedSpecs,
         guard: bufferFirstActive
             ? (specId, qty, alerts, netterRef) => {
                 if (!alerts) return false;
@@ -823,7 +826,7 @@ export function formulatePhase(
         name: 'primary-deferred',
         priority: 3,
         planPrefix: 'plan-deferred',
-        honorDecouplingPoints: true,
+        honorDecouplingPoints: true, bufferedSpecs: session.bufferedSpecs,
         demands: () => deferredDemands
             .filter(({ slot }) => !!slot.spec_id)
             .map(({ slot, slotClass }) => ({
@@ -917,7 +920,7 @@ export function formulatePhase(
                         demandSpecId: c.slot.spec_id, demandQuantity: c.slot.remaining_quantity,
                         dueDate: c.slot.due ? new Date(c.slot.due) : horizon.to,
                         netter: trialNetter, atLocation: mode.spatial.locationOf(c.slot),
-                        agents: ctx.agents, generateId, honorDecouplingPoints: true,
+                        agents: ctx.agents, generateId, honorDecouplingPoints: true, bufferedSpecs: session.bufferedSpecs,
                     }) : null;
                     if (trialResult) {
                         const score = mode.sacrifice.scoreCandidate(trialResult, c.slot);
@@ -937,7 +940,7 @@ export function formulatePhase(
                         demandSpecId: best.candidate.slot.spec_id, demandQuantity: best.candidate.slot.remaining_quantity,
                         dueDate: best.candidate.slot.due ? new Date(best.candidate.slot.due) : horizon.to,
                         netter, atLocation: mode.spatial.locationOf(best.candidate.slot),
-                        agents: ctx.agents, generateId, honorDecouplingPoints: true,
+                        agents: ctx.agents, generateId, honorDecouplingPoints: true, bufferedSpecs: session.bufferedSpecs,
                     }) : null;
                     if (reResult && mode.sacrifice.isReExplodeSuccess(reResult)) {
                         const backtrackChildProv = childProvenanceByIntentId.get(best.candidate.slot.intent_id);
@@ -999,7 +1002,7 @@ export function formulatePhase(
                 demandSpecId: candidate.slot.spec_id, demandQuantity: candidate.slot.remaining_quantity,
                 dueDate: candidate.slot.due ? new Date(candidate.slot.due) : horizon.to,
                 netter, atLocation: mode.spatial.locationOf(candidate.slot),
-                agents: ctx.agents, generateId, honorDecouplingPoints: true,
+                agents: ctx.agents, generateId, honorDecouplingPoints: true, bufferedSpecs: session.bufferedSpecs,
             }) : null;
 
             if (reResult && mode.sacrifice.isReExplodeSuccess(reResult)) {
@@ -1218,7 +1221,7 @@ export function collectPhase(
                             ...econ, sneIndex: session.sneIndex, planId: mergeReplanId,
                             demandSpecId: slot.spec_id, demandQuantity: slot.remaining_quantity,
                             dueDate: slot.due ? new Date(slot.due) : horizon.to,
-                            netter, agents: ctx.agents, generateId, honorDecouplingPoints: true,
+                            netter, agents: ctx.agents, generateId, honorDecouplingPoints: true, bufferedSpecs: session.bufferedSpecs,
                         });
                         allPurchaseIntents.push(...reResult.purchaseIntents);
                         const mergeChildProv = childProvenanceByIntentId.get(slot.intent_id);
@@ -1402,7 +1405,10 @@ export function planForUnit(
     const netter = new PlanNetter(planStore, ctx.observer, undefined, conservationFloors);
 
     const sneIndex = ctx.sneIndex ?? buildSNEIndex(ctx.recipeStore);
-    const session: PlanningSession = { mode, canonical, horizon, ctx, planStore, netter, generateId, sneIndex };
+    const bufferedSpecs: ReadonlySet<string> = ctx.bufferZoneStore
+        ? new Set(ctx.bufferZoneStore.allBufferZones().map(bz => bz.specId))
+        : new Set<string>();
+    const session: PlanningSession = { mode, canonical, horizon, ctx, planStore, netter, generateId, sneIndex, bufferedSpecs };
 
     const extracted = extractPhase(session, subStores);
     const classified = classifyPhase(session, extracted.rawDemands);

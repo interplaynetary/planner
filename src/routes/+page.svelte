@@ -488,9 +488,6 @@
               {#if spec.defaultUnitOfResource}
                 <span class="muted">{spec.defaultUnitOfResource}</span>
               {/if}
-              {#if spec.replenishmentRequired}
-                <span class="tag">replen</span>
-              {/if}
             </div>
           {/each}
         {/if}

@@ -43,7 +43,7 @@ import type {
 } from '../schemas';
 import { ACTION_DEFINITIONS } from '../schemas';
 import type { RecipeStore } from '../knowledge/recipes';
-import { PLAN_TAGS, type PlanStore, type EconomicContext } from '../planning/planning';
+import { type EconomicContext } from '../planning/planning';
 import { PlanNetter } from '../planning/netting';
 import type { Observer } from '../observation/observer';
 import type { ProcessRegistry } from '../process-registry';
@@ -166,14 +166,16 @@ export function dependentDemand(params: EconomicContext & {
     /** SpatialThing ID — where the final output is needed. */
     atLocation?: string;
     /**
-     * DDMRP-VF decoupling mode. When true, specs tagged
-     * 'tag:plan:replenishment-required' are treated as buffer boundaries:
+     * DDMRP-VF decoupling mode. When true AND bufferedSpecs is provided,
+     * specs with active BufferZones are treated as buffer boundaries:
      * inventory is allocated as normal, but if remaining > 0 after netting,
      * the BFS stops and records the remainder in result.boundaryStops.
      * Default false (backward-compatible full BFS).
      * Pass 1 sets this true; Pass 2 leaves it false/unset.
      */
     honorDecouplingPoints?: boolean;
+    /** Spec IDs with active BufferZones — derived from bufferZoneStore at session start. */
+    bufferedSpecs?: ReadonlySet<string>;
 }): DependentDemandResult {
     const {
         planId,
@@ -337,16 +339,13 @@ function processDemand(
     if (remaining <= 0) return; // Fully covered by inventory / scheduled Intents
 
     // DDMRP-VF: buffer boundary stop — Pass 2 handles replenishment.
-    // No purchaseIntent: demand is unmet this cycle; Pass 2 fires the recipe chain.
-    if (params.honorDecouplingPoints) {
-        const specMeta = params.recipeStore.getResourceSpec(demand.specId);
-        if (specMeta?.resourceClassifiedAs?.includes(PLAN_TAGS.REPLENISHMENT_REQUIRED)) {
-            result.boundaryStops.set(
-                demand.specId,
-                (result.boundaryStops.get(demand.specId) ?? 0) + remaining,
-            );
-            return;
-        }
+    // Decoupling is derived from BufferZone existence, not a spec-level tag.
+    if (params.honorDecouplingPoints && params.bufferedSpecs?.has(demand.specId)) {
+        result.boundaryStops.set(
+            demand.specId,
+            (result.boundaryStops.get(demand.specId) ?? 0) + remaining,
+        );
+        return;
     }
 
     // --- Step 1.5: location mismatch → try transport before production ---

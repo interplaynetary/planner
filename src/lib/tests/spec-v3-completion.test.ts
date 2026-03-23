@@ -5,7 +5,7 @@ import { BufferZoneStore } from '../knowledge/buffer-zones';
 import { planForScope } from '../planning/plan-for-scope';
 import { planFederation } from '../planning/plan-federation';
 import { detectConflicts } from '../planning/plan-for-unit';
-import { PlanStore, PLAN_TAGS } from '../planning/planning';
+import { PlanStore } from '../planning/planning';
 import { ProcessRegistry } from '../process-registry';
 import { buildIndependentDemandIndex } from '../indexes/independent-demand';
 import { buildIndependentSupplyIndex } from '../indexes/independent-supply';
@@ -245,7 +245,7 @@ describe('Phase B supply routing to buffers', () => {
     it('surplus routed to red buffer instead of becoming SurplusSignal', () => {
         recipeStore.addResourceSpec({
             id: 'steel', name: 'Steel',
-            resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED],
+            resourceClassifiedAs: [],
             defaultUnitOfResource: 'kg',
         });
 
@@ -291,7 +291,7 @@ describe('Phase B supply routing to buffers', () => {
     it('surplus not routed when buffer is green', () => {
         recipeStore.addResourceSpec({
             id: 'copper', name: 'Copper',
-            resourceClassifiedAs: [PLAN_TAGS.REPLENISHMENT_REQUIRED],
+            resourceClassifiedAs: [],
             defaultUnitOfResource: 'kg',
         });
 

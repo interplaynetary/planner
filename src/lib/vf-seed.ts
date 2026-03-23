@@ -44,7 +44,7 @@ export function seedExample(): void {
     recipes.addResourceSpec({ id: 'rs-wheel',     name: 'Wheel Assembly',  defaultUnitOfResource: 'units', resourceClassifiedAs: ['communal'] });
     // Intermediate assemblies (decoupling points — DDMRP buffers)
     recipes.addResourceSpec({
-        id: 'rs-frame', name: 'Welded Frame', defaultUnitOfResource: 'units', replenishmentRequired: true, resourceClassifiedAs: ['communal'],
+        id: 'rs-frame', name: 'Welded Frame', defaultUnitOfResource: 'units', resourceClassifiedAs: ['communal'],
         positioningAnalysis: {
             customerToleranceTimeDays: 1,      // customer expects same-day frame availability
             salesOrderVisibilityHorizonDays: 3,
@@ -54,11 +54,11 @@ export function seedExample(): void {
             note: 'Decoupling point: isolates frame fabrication from final assembly variability.',
         },
     });
-    recipes.addResourceSpec({ id: 'rs-pu',        name: 'Power Unit',      defaultUnitOfResource: 'units', replenishmentRequired: true, resourceClassifiedAs: ['communal'] });
+    recipes.addResourceSpec({ id: 'rs-pu',        name: 'Power Unit',      defaultUnitOfResource: 'units', resourceClassifiedAs: ['communal'] });
     recipes.addResourceSpec({ id: 'rs-hyd-assy',  name: 'Hyd Assembly',    defaultUnitOfResource: 'units', resourceClassifiedAs: ['communal'] });
     // Finished goods
     recipes.addResourceSpec({
-        id: 'rs-lifetrac', name: 'LifeTrac', defaultUnitOfResource: 'units', replenishmentRequired: true, resourceClassifiedAs: ['communal'],
+        id: 'rs-lifetrac', name: 'LifeTrac', defaultUnitOfResource: 'units', resourceClassifiedAs: ['communal'],
         positioningAnalysis: {
             customerToleranceTimeDays: 7,      // customer will wait up to one week
             marketPotentialLeadTimeDays: 14,   // competitor lead time (benchmark)
