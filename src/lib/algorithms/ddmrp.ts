@@ -3700,3 +3700,90 @@ export function runRecalibrationCycle(
 
     return { recalibrated, skipped };
 }
+
+// =============================================================================
+// 37. Zone Distribution Analytics — Ch 12 Taguchi-style performance analysis
+// =============================================================================
+
+/**
+ * Count occurrences of each zone in a series of snapshots.
+ * `total` = snapshots.length. Returns raw counts (caller divides if percentages needed).
+ */
+export function zoneDistribution(
+    snapshots: ReadonlyArray<{ zone: 'red' | 'yellow' | 'green' | 'excess' }>,
+): { red: number; yellow: number; green: number; excess: number; total: number } {
+    let red = 0, yellow = 0, green = 0, excess = 0;
+    for (const s of snapshots) {
+        switch (s.zone) {
+            case 'red': red++; break;
+            case 'yellow': yellow++; break;
+            case 'green': green++; break;
+            case 'excess': excess++; break;
+        }
+    }
+    return { red, yellow, green, excess, total: snapshots.length };
+}
+
+/**
+ * Count days (snapshots) spent in each zone — same shape as zoneDistribution
+ * but without `total`, optimised for the "days in zone" use case.
+ */
+export function timeInZone(
+    snapshots: ReadonlyArray<{ zone: 'red' | 'yellow' | 'green' | 'excess' }>,
+): { red: number; yellow: number; green: number; excess: number } {
+    let red = 0, yellow = 0, green = 0, excess = 0;
+    for (const s of snapshots) {
+        switch (s.zone) {
+            case 'red': red++; break;
+            case 'yellow': yellow++; break;
+            case 'green': green++; break;
+            case 'excess': excess++; break;
+        }
+    }
+    return { red, yellow, green, excess };
+}
+
+/**
+ * Count the number of zone transitions across a date-sorted series of snapshots.
+ * Sorts by date first. Consecutive identical zones contribute 0 transitions.
+ */
+export function zoneTransitions(
+    snapshots: ReadonlyArray<{ date: string; zone: 'red' | 'yellow' | 'green' | 'excess' }>,
+): number {
+    if (snapshots.length < 2) return 0;
+    const sorted = [...snapshots].sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+    let count = 0;
+    for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i].zone !== sorted[i - 1].zone) count++;
+    }
+    return count;
+}
+
+/**
+ * 7-zone analytics classification per Ch 12 Fig 12-7.
+ *
+ * Maps on-hand position to a finer-grained zone than the 4-zone planning model:
+ * - dark-red-low: stockout (onhand <= 0)
+ * - red-low: deep in red (0 < onhand <= TOR * 0.5)
+ * - yellow-low: upper red (TOR * 0.5 < onhand <= TOR)
+ * - optimal: within rebuild zone (TOR < onhand <= TOY)
+ * - yellow-high: above rebuild zone (TOY < onhand <= TOG)
+ * - red-high: mild excess (TOG < onhand <= TOG * 1.5)
+ * - dark-red-high: severe excess (onhand > TOG * 1.5)
+ */
+export type AnalyticsZone = 'dark-red-low' | 'red-low' | 'yellow-low' | 'optimal' | 'yellow-high' | 'red-high' | 'dark-red-high';
+
+export function classifyAnalyticsZone(
+    onhand: number,
+    tor: number,
+    toy: number,
+    tog: number,
+): AnalyticsZone {
+    if (onhand <= 0) return 'dark-red-low';
+    if (onhand <= tor * 0.5) return 'red-low';
+    if (onhand <= tor) return 'yellow-low';
+    if (onhand <= toy) return 'optimal';
+    if (onhand <= tog) return 'yellow-high';
+    if (onhand <= tog * 1.5) return 'red-high';
+    return 'dark-red-high';
+}

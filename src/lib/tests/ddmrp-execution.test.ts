@@ -10,6 +10,9 @@ import {
     projectBufferZones,
     computeTimeBuffer,
     runRecalibrationCycle,
+    zoneDistribution,
+    zoneTransitions,
+    classifyAnalyticsZone,
 } from '../algorithms/ddmrp';
 import { PlanStore, PLAN_TAGS } from '../planning/planning';
 import { Observer } from '../observation/observer';
@@ -956,5 +959,64 @@ describe('runRecalibrationCycle', () => {
 
         expect(result.recalibrated).toEqual(['spec-OLD']);
         expect(result.skipped).toEqual(['spec-FRESH']);
+    });
+});
+
+// ─── zoneDistribution ───────────────────────────────────────────────────────
+
+describe('zoneDistribution', () => {
+    it('counts zones correctly', () => {
+        const snaps: { zone: 'red' | 'yellow' | 'green' | 'excess' }[] = [
+            { zone: 'green' }, { zone: 'green' }, { zone: 'yellow' },
+            { zone: 'red' }, { zone: 'green' },
+        ];
+        const dist = zoneDistribution(snaps);
+        expect(dist.green).toBe(3);
+        expect(dist.yellow).toBe(1);
+        expect(dist.red).toBe(1);
+        expect(dist.excess).toBe(0);
+        expect(dist.total).toBe(5);
+    });
+    it('returns zeros for empty array', () => {
+        const dist = zoneDistribution([]);
+        expect(dist.total).toBe(0);
+    });
+});
+
+// ─── zoneTransitions ────────────────────────────────────────────────────────
+
+describe('zoneTransitions', () => {
+    it('counts zero for stable zone', () => {
+        const snaps: { date: string; zone: 'red' | 'yellow' | 'green' | 'excess' }[] = [
+            { date: '2026-03-01', zone: 'green' },
+            { date: '2026-03-02', zone: 'green' },
+            { date: '2026-03-03', zone: 'green' },
+        ];
+        expect(zoneTransitions(snaps)).toBe(0);
+    });
+    it('counts transitions correctly', () => {
+        const snaps: { date: string; zone: 'red' | 'yellow' | 'green' | 'excess' }[] = [
+            { date: '2026-03-01', zone: 'green' },
+            { date: '2026-03-02', zone: 'yellow' },
+            { date: '2026-03-03', zone: 'red' },
+            { date: '2026-03-04', zone: 'red' },
+            { date: '2026-03-05', zone: 'green' },
+        ];
+        expect(zoneTransitions(snaps)).toBe(3); // green→yellow, yellow→red, red→green
+    });
+});
+
+// ─── classifyAnalyticsZone ──────────────────────────────────────────────────
+
+describe('classifyAnalyticsZone', () => {
+    it('classifies all 7 zones', () => {
+        // tor=20, toy=50, tog=80
+        expect(classifyAnalyticsZone(0, 20, 50, 80)).toBe('dark-red-low');
+        expect(classifyAnalyticsZone(5, 20, 50, 80)).toBe('red-low');
+        expect(classifyAnalyticsZone(15, 20, 50, 80)).toBe('yellow-low');
+        expect(classifyAnalyticsZone(35, 20, 50, 80)).toBe('optimal');
+        expect(classifyAnalyticsZone(65, 20, 50, 80)).toBe('yellow-high');
+        expect(classifyAnalyticsZone(100, 20, 50, 80)).toBe('red-high');
+        expect(classifyAnalyticsZone(150, 20, 50, 80)).toBe('dark-red-high');
     });
 });

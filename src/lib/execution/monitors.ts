@@ -9,8 +9,10 @@
  */
 
 import type { ObserverEvent } from '../observation/observer';
-import { bufferStatus } from '../algorithms/ddmrp';
+import { bufferStatus, computeADU, recalibrateBufferZone } from '../algorithms/ddmrp';
 import type { ExecutionAlert, ExecutionContext, Monitor, Sink } from './alerts';
+import type { BufferProfile, EconomicEvent, DemandAdjustmentFactor } from '../schemas';
+import type { RecipeStore } from '../knowledge/recipes';
 
 const NON_CONSUMING_ACTIONS = new Set(['use', 'work', 'cite', 'deliverService']);
 
@@ -186,6 +188,48 @@ export function createSnapshotSink(): Sink {
             tor: bz.tor, toy: bz.toy, tog: bz.tog,
             zone: status.zone,
         });
+    };
+}
+
+/**
+ * Recalibration sink: recalibrates overdue buffer zones on inventory changes.
+ * Event-driven alternative to cron — fires at the first Observer event after
+ * the cadence threshold is crossed.
+ */
+export function createRecalibrationSink(
+    profiles: Map<string, BufferProfile>,
+    events: EconomicEvent[],
+    recipeStore: RecipeStore,
+): Sink {
+    return (event, ctx) => {
+        if (event.type !== 'resource_updated' && event.type !== 'recorded') return;
+
+        const specId = event.type === 'resource_updated'
+            ? event.resource.conformsTo
+            : event.event.resourceConformsTo;
+        if (!specId) return;
+
+        const zone = ctx.bufferZoneStore.findZone(specId);
+        if (!zone) return;
+
+        const profile = profiles.get(zone.profileId);
+        if (!profile?.recalculationCadence) return;
+
+        const ageMs = new Date().getTime() - new Date(zone.lastComputedAt).getTime();
+        const thresholds: Record<string, number> = {
+            daily: 86_400_000,
+            weekly: 604_800_000,
+            monthly: 2_592_000_000,
+        };
+        const threshold = thresholds[profile.recalculationCadence];
+        if (!threshold || ageMs < threshold) return;
+
+        // Overdue — recalibrate
+        const windowDays = zone.aduWindowDays ?? 90;
+        const asOf = new Date();
+        const { adu } = computeADU(events, specId, windowDays, asOf);
+        const updated = recalibrateBufferZone(zone, adu, zone.dltDays, profile, [], asOf);
+        ctx.bufferZoneStore.replaceZone(updated);
     };
 }
 

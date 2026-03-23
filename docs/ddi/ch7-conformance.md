@@ -596,7 +596,7 @@ factors.supplyOffsetDays
 | OTIF | `computeOTIF()` | **A** | On-Time In-Full delivery measurement |
 | Flow index / velocity | `flowIndex()`, `classifyFlowSpeed()` | **A** | ADU/TOG ratio; fast/slow mover classification |
 | ADU alerts | `detectADUAlerts()` | **A** | Surge/drop detection against aduAlertHighPct/LowPct thresholds |
-| Decoupling point integrity (historical) | — | **G** | Requires time-series on-hand snapshots; point-in-time status available via `bufferStatus()` |
+| Decoupling point integrity (historical) | `BufferSnapshotStore` + `zoneDistribution()` + `classifyAnalyticsZone()` | **A** | Snapshots captured reactively via `createSnapshotSink()`; 7-zone Taguchi classification; zone distribution + transition analytics |
 
 ## Ch 13 — DDS&OP
 
@@ -613,7 +613,7 @@ All algorithmic and infrastructure gaps are resolved:
 | Section | Concept | Resolution |
 |---|---|---|
 | §9 | Time buffer sizing formula | **A** — `computeTimeBuffer()` sizes buffer from routing time × variability × coverage factor |
-| §12 | Zone-recalculation scheduler | **A** — `runRecalibrationCycle()` batch-recalibrates all due zones; cadence detection via `zonesDueForRecalibration()` |
-| Ch 12 | Historical on-hand snapshots | **A** — `BufferSnapshotStore` + `captureBufferSnapshots()` in `src/lib/knowledge/buffer-snapshots.ts` |
+| §12 | Zone-recalculation scheduler | **A** — `runRecalibrationCycle()` batch + `createRecalibrationSink()` event-driven; no cron needed |
+| Ch 12 | Historical on-hand snapshots | **A** — `BufferSnapshotStore` + `createSnapshotSink()` reactive capture + `zoneDistribution()` analytics |
 
-One remaining infrastructure concern: no server-side cron/timer auto-invokes `runRecalibrationCycle()` or `captureBufferSnapshots()`. The functions exist; scheduling is a deployment concern.
+**All DDMRP chapters (6-13) fully implemented.** No remaining gaps.

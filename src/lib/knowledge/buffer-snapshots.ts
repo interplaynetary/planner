@@ -56,6 +56,18 @@ export class BufferSnapshotStore {
     trackedSpecs(): string[] {
         return [...new Set(this.snapshots.map(s => s.specId))];
     }
+
+    /** Serialize all snapshots for persistence. */
+    serialize(): BufferSnapshot[] {
+        return [...this.snapshots];
+    }
+
+    /** Hydrate a store from serialized data. */
+    static hydrate(data: BufferSnapshot[]): BufferSnapshotStore {
+        const store = new BufferSnapshotStore();
+        store.recordAll(data);
+        return store;
+    }
 }
 
 /**

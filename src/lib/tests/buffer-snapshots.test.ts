@@ -111,3 +111,18 @@ describe('captureBufferSnapshots', () => {
         expect(snapshots.find(s => s.specId === 'b')?.zone).toBe('excess');
     });
 });
+
+describe('serialize / hydrate', () => {
+    it('round-trips correctly', () => {
+        const store = new BufferSnapshotStore();
+        store.record({ specId: 'wheat', date: '2026-03-01', onhand: 50, tor: 20, toy: 40, tog: 60, zone: 'green' });
+        store.record({ specId: 'flour', date: '2026-03-01', onhand: 10, tor: 20, toy: 40, tog: 60, zone: 'red' });
+
+        const serialized = store.serialize();
+        const hydrated = BufferSnapshotStore.hydrate(serialized);
+
+        expect(hydrated.all()).toHaveLength(2);
+        expect(hydrated.forSpec('wheat')).toHaveLength(1);
+        expect(hydrated.forSpec('flour')[0].zone).toBe('red');
+    });
+});
