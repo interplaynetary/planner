@@ -278,6 +278,8 @@ function processSupply(
             // --- Inputs ---
             for (const flow of inputs) {
                 if (!flow.resourceConformsTo) continue;
+                // Container-mediated flows are resolved on the demand side only
+                if (flow.resolveFromFlow) continue;
 
                 const actionDef = ACTION_DEFINITIONS[flow.action];
                 const isDurable = actionDef?.accountingEffect === 'noEffect';
@@ -423,6 +425,8 @@ function computeMaxByOtherMaterials(
             if (!flow.resourceConformsTo) continue;
             if (flow.resourceConformsTo === supplySpecId) continue;
             if (flow.action === 'work') continue;
+            // Container-mediated flows are resolved on the demand side only
+            if (flow.resolveFromFlow) continue;
 
             const actionDef = ACTION_DEFINITIONS[flow.action];
             const isDurable = actionDef?.accountingEffect === 'noEffect';

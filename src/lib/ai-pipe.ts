@@ -21,6 +21,8 @@ export interface GenerateOptions<T extends z.ZodType> {
   retries?: number
   /** Custom healing prompt template. Use {error} for validation errors, {raw} for the failed output */
   healingPrompt?: string
+  /** Base64-encoded images to include in the message (vision support) */
+  images?: { base64: string; mediaType: string }[]
 }
 
 export type AIResult<T> =
@@ -52,6 +54,8 @@ export interface LLMProvider {
       temperature?: number
       maxTokens?: number
       schema?: z.ZodType
+      /** Base64-encoded images to include in the message (vision support) */
+      images?: { base64: string; mediaType: string }[]
     }
   ): Promise<unknown>
 }
@@ -104,6 +108,7 @@ export class AIPipe {
             temperature: options.temperature,
             maxTokens: options.maxTokens,
             schema: options.schema,
+            images: options.images,
           }
         )
 
@@ -323,8 +328,26 @@ export class AnthropicProvider implements LLMProvider {
       temperature?: number
       maxTokens?: number
       schema?: z.ZodType
+      images?: { base64: string; mediaType: string }[]
     }
   ): Promise<unknown> {
+    // Build message content: text-only or multi-part with images
+    const content: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> =
+      options?.images?.length
+        ? [
+            // Images first, then prompt text
+            ...options.images.map((img) => ({
+              type: 'image' as const,
+              source: {
+                type: 'base64' as const,
+                media_type: img.mediaType,
+                data: img.base64,
+              },
+            })),
+            { type: 'text' as const, text: prompt },
+          ]
+        : [{ type: 'text' as const, text: prompt }]
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -342,7 +365,7 @@ export class AnthropicProvider implements LLMProvider {
         messages: [
           {
             role: 'user',
-            content: prompt,
+            content,
           },
         ],
       }),
@@ -379,6 +402,99 @@ export class AnthropicProvider implements LLMProvider {
   }
 }
 
+/**
+ * OpenRouter provider — routes to any model via openrouter.ai.
+ * Uses the OpenAI-compatible chat completions API with vision support.
+ */
+export class OpenRouterProvider implements LLMProvider {
+  private apiKey: string
+  private model: string
+
+  constructor(config?: { apiKey?: string; model?: string }) {
+    this.apiKey = config?.apiKey ?? process.env.OPENROUTER_API_KEY ?? ''
+    this.model = config?.model ?? 'anthropic/claude-sonnet-4'
+    if (!this.apiKey) {
+      throw new Error('OPENROUTER_API_KEY is required')
+    }
+  }
+
+  async call(
+    prompt: string,
+    systemPrompt?: string,
+    options?: {
+      temperature?: number
+      maxTokens?: number
+      schema?: z.ZodType
+      images?: { base64: string; mediaType: string }[]
+    }
+  ): Promise<unknown> {
+    // Build message content: text-only or multi-part with images
+    type ContentPart =
+      | { type: 'text'; text: string }
+      | { type: 'image_url'; image_url: { url: string } }
+
+    const content: ContentPart[] = options?.images?.length
+      ? [
+          ...options.images.map((img): ContentPart => ({
+            type: 'image_url',
+            image_url: { url: `data:${img.mediaType};base64,${img.base64}` },
+          })),
+          { type: 'text', text: prompt },
+        ]
+      : [{ type: 'text', text: prompt }]
+
+    const messages = [
+      ...(systemPrompt
+        ? [{ role: 'system' as const, content: `${systemPrompt}\n\nRespond with valid JSON only.` }]
+        : [{ role: 'system' as const, content: 'Respond with valid JSON only.' }]),
+      { role: 'user' as const, content },
+    ]
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://planner.local',
+      },
+      body: JSON.stringify({
+        model: this.model,
+        messages,
+        max_tokens: options?.maxTokens ?? 4096,
+        temperature: options?.temperature ?? 0.7,
+        response_format: { type: 'json_object' },
+      }),
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`OpenRouter API error: ${response.status} ${error}`)
+    }
+
+    const data = (await response.json()) as {
+      choices: Array<{
+        message: { content: string }
+      }>
+    }
+
+    const text = data.choices[0]?.message?.content
+    if (!text) {
+      throw new Error('No content in OpenRouter response')
+    }
+
+    // Extract JSON (handles markdown code blocks)
+    const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/)
+      || text.match(/\[[\s\S]*\]/)
+      || text.match(/\{[\s\S]*\}/)
+
+    if (!jsonMatch) {
+      return JSON.parse(text)
+    }
+
+    return JSON.parse(jsonMatch[1] || jsonMatch[0])
+  }
+}
+
 // =============================================================================
 // CONVENIENCE FUNCTIONS
 // =============================================================================
@@ -404,6 +520,16 @@ export function createAnthropicPipe(config?: {
 }
 
 /**
+ * Create a pipe with OpenRouter
+ */
+export function createOpenRouterPipe(config?: {
+  apiKey?: string
+  model?: string
+}): AIPipe {
+  return new AIPipe(new OpenRouterProvider(config))
+}
+
+/**
  * One-shot generation with OpenAI
  */
 export async function generateWithOpenAI<T extends z.ZodType>(
@@ -424,5 +550,17 @@ export async function generateWithAnthropic<T extends z.ZodType>(
   systemPrompt?: string
 ): Promise<AIResult<z.infer<T>>> {
   const pipe = createAnthropicPipe()
+  return pipe.generate({ schema, prompt, systemPrompt })
+}
+
+/**
+ * One-shot generation with OpenRouter
+ */
+export async function generateWithOpenRouter<T extends z.ZodType>(
+  schema: T,
+  prompt: string,
+  systemPrompt?: string
+): Promise<AIResult<z.infer<T>>> {
+  const pipe = createOpenRouterPipe()
   return pipe.generate({ schema, prompt, systemPrompt })
 }

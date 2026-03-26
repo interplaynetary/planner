@@ -756,7 +756,7 @@ export function formulatePhase(
         recipeStore: ctx.recipeStore, planStore, processes, observer: ctx.observer,
     };
 
-    const seededIntentIds = mode.scope.injectFederationSeeds(planStore, ctx.supplyIndex);
+    const seededIntentIds = mode.scope.injectFederationSeeds(planStore, ctx.supplyIndex, session.canonical);
 
     const pass1Records: SlotRecord[] = [];
     const allPurchaseIntents: Intent[] = [];

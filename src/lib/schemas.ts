@@ -668,6 +668,17 @@ export const RecipeFlowSchema = z.object({
     // When false: commitment goes into Agreement.stipulatesReciprocal.
     // When absent: falls back to first-flow-is-primary heuristic.
     isPrimary: z.boolean().optional(),
+    /**
+     * RecipeFlow ID of a sibling flow (same process) whose resolved container
+     * instance scopes this flow's resource resolution. The anchor must be a
+     * `use` action (durable, books a specific resource instance).
+     *
+     * Example: a harvesting process `use`s soil and `consume`s nitrogen
+     * contained within it. The consume flow sets resolveFromFlow to the
+     * use-soil flow's ID so the planner resolves nitrogen from inside the
+     * specific soil instance that the use flow booked.
+     */
+    resolveFromFlow: z.string().optional(),
 });
 export type RecipeFlow = z.infer<typeof RecipeFlowSchema>;
 

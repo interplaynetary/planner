@@ -54,6 +54,12 @@ import {
     createFlowRecord,
 } from './propagation';
 
+/**
+ * Tag applied to produce Intents/Commitments that target a container.
+ * The netter skips these for non-container-mediated demands.
+ */
+export const CONTAINER_BOUND_TAG = 'tag:plan:container-bound';
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -129,6 +135,13 @@ interface DemandTask {
     state?: string;
     /** SpatialThing ID — where this input is needed. */
     atLocation?: string;
+    /**
+     * When set, resolve this demand from resources containedIn this specific
+     * container resource instance. Bypasses the normal containment guard and
+     * instead restricts netting to only resources inside the container.
+     * Set by the input loop when a RecipeFlow has resolveFromFlow.
+     */
+    resolvedContainerId?: string;
 }
 
 // =============================================================================
@@ -230,6 +243,11 @@ export function dependentDemand(params: EconomicContext & {
 // INTERNAL
 // =============================================================================
 
+/**
+ * Process a single demand task. Returns the resolved resource instance ID
+ * when the demand was for a `use` action (needed by resolveFromFlow to
+ * scope dependent flows to that container). All other paths return undefined.
+ */
 function processDemand(
     demand: DemandTask,
     visited: Set<string>,
@@ -237,8 +255,45 @@ function processDemand(
     result: DependentDemandResult,
     params: Parameters<typeof dependentDemand>[0],
     netter: PlanNetter,
-): void {
+): string | undefined {
     const { recipeStore, planStore, processes, observer, agents, planId } = params;
+
+    // --- Container-resolved demands (resolveFromFlow) ---
+    // When resolvedContainerId is set, bypass the normal durable-action and
+    // netting paths: instead net against resources inside the specific container.
+    if (demand.resolvedContainerId) {
+        const { remaining: afterNetting, inventoryAllocated } = netter.netDemand(
+            demand.specId,
+            demand.quantity,
+            { stage: demand.stage, state: demand.state, neededBy: demand.neededBy,
+              atLocation: demand.atLocation, containedIn: demand.resolvedContainerId },
+            planId,
+        );
+        for (const alloc of inventoryAllocated) {
+            result.allocated.push({ specId: demand.specId, resourceId: alloc.resourceId, quantity: alloc.quantity });
+        }
+        if (afterNetting > 0) {
+            // Insufficient contained quantity — create purchase intent for the gap.
+            // NOTE: We intentionally skip recipe explosion here. Container-mediated
+            // demands resolve only against actual contained inventory, not via
+            // production recipes. Recipe-based replenishment of contained resources
+            // (e.g., produce-into-container) is a Phase 2 concern.
+            const intent = planStore.addIntent({
+                action: 'transfer',
+                receiver: agents?.receiver,
+                resourceConformsTo: demand.specId,
+                resourceQuantity: { hasNumericalValue: afterNetting, hasUnit: demand.unit },
+                due: demand.neededBy.toISOString(),
+                plannedWithin: planId,
+                inputOf: demand.forProcessId,
+                atLocation: demand.atLocation,
+                note: `Contained resource shortfall: ${afterNetting} ${demand.unit} of ${demand.specId} missing from container ${demand.resolvedContainerId}`,
+                finished: false,
+            });
+            result.purchaseIntents.push(intent);
+        }
+        return undefined;
+    }
 
     // --- Durable inputs (use / cite) ---
     if (demand.durableAction) {
@@ -272,7 +327,7 @@ function processDemand(
                             finished: false,
                         });
                         result.intents.push(intent);
-                        return;
+                        return r.id; // Return resolved instance for resolveFromFlow dependents
                     }
                 }
             }
@@ -290,7 +345,7 @@ function processDemand(
                 finished: false,
             });
             result.purchaseIntents.push(intent);
-            return;
+            return undefined;
         }
 
         // 'cite' and any other durable actions: existence gate only.
@@ -302,7 +357,7 @@ function processDemand(
                     if (demand.state && r.state !== demand.state) return false;
                     return true;
                 });
-            if (exists) return;
+            if (exists) return undefined;
         }
         const intent = planStore.addIntent({
             action: 'transfer',
@@ -317,7 +372,7 @@ function processDemand(
             finished: false,
         });
         result.purchaseIntents.push(intent);
-        return;
+        return undefined;
     }
 
     // --- Net against inventory + scheduled outputs via PlanNetter ---
@@ -336,7 +391,7 @@ function processDemand(
 
     let remaining = afterNetting;
 
-    if (remaining <= 0) return; // Fully covered by inventory / scheduled Intents
+    if (remaining <= 0) return undefined; // Fully covered by inventory / scheduled Intents
 
     // DDMRP-VF: buffer boundary stop — Pass 2 handles replenishment.
     // Decoupling is derived from BufferZone existence, not a spec-level tag.
@@ -345,7 +400,7 @@ function processDemand(
             demand.specId,
             (result.boundaryStops.get(demand.specId) ?? 0) + remaining,
         );
-        return;
+        return undefined;
     }
 
     // --- Step 1.5: location mismatch → try transport before production ---
@@ -408,16 +463,16 @@ function processDemand(
             finished: false,
         });
         result.purchaseIntents.push(intent);
-        return;
+        return undefined;
     }
 
     // Avoid re-exploding the same recipe (cycle protection)
-    if (visited.has(recipe.id)) return;
+    if (visited.has(recipe.id)) return undefined;
     visited.add(recipe.id);
 
     // --- Step 3: Scale recipe to demanded quantity ---
     const chain = recipeStore.getProcessChain(recipe.id);
-    if (chain.length === 0) return;
+    if (chain.length === 0) return undefined;
 
     const lastProcess = chain[chain.length - 1];
     const { outputs: lastOutputs } = recipeStore.flowsForProcess(lastProcess.id);
@@ -480,8 +535,59 @@ function processDemand(
 
         const { inputs, outputs } = recipeStore.flowsForProcess(rp.id);
 
+        // --- Phase 0: Resolve use-anchor flows that have dependents ---
+        // Both input and output flows can have resolveFromFlow, so we must
+        // resolve anchors before processing either loop.
+        const allFlows = [...inputs, ...outputs];
+        const dependentFlowIds = new Set(
+            allFlows.filter(f => f.resolveFromFlow).map(f => f.resolveFromFlow!),
+        );
+        const anchorResolved = new Map<string, string | undefined>();
+
+        for (const flow of inputs) {
+            if (flow.resolveFromFlow) continue;
+            if (!flow.resourceConformsTo) continue;
+
+            const actionDef = ACTION_DEFINITIONS[flow.action];
+            const isDurable = actionDef?.accountingEffect === 'noEffect';
+
+            if (isDurable && flow.action === 'use' && dependentFlowIds.has(flow.id)) {
+                const inputQty = (flow.resourceQuantity?.hasNumericalValue ?? 0) * scaleFactor;
+                const useDemand: DemandTask = {
+                    specId: flow.resourceConformsTo,
+                    quantity: inputQty,
+                    neededBy: processBegin,
+                    forProcessId: process.id,
+                    unit: flow.resourceQuantity?.hasUnit ?? 'each',
+                    durableAction: 'use',
+                    processEnd: processEnd,
+                    useEffortQuantity: flow.effortQuantity,
+                    stage: flow.stage,
+                    state: flow.state,
+                    atLocation: transportLocations?.from ?? demand.atLocation,
+                };
+                const resolvedId = processDemand(useDemand, visited, queue, result, params, netter);
+                anchorResolved.set(flow.id, resolvedId);
+            }
+        }
+
+        // --- Outputs ---
         for (const flow of outputs) {
             const record = createFlowRecord(flow, process.id, 'output', scaleFactor, processEnd, planId, agents, planStore, demand.atLocation, transportLocations);
+
+            // Produce-into-container: tag the record so the netter knows it's
+            // container-bound and won't offer it as free-standing supply.
+            if (flow.resolveFromFlow) {
+                const containerId = anchorResolved.get(flow.resolveFromFlow);
+                if (containerId) {
+                    record.resourceClassifiedAs = [
+                        ...(record.resourceClassifiedAs ?? []),
+                        CONTAINER_BOUND_TAG,
+                    ];
+                    record.note = `${record.note ? record.note + '; ' : ''}Produces into container ${containerId}`;
+                }
+            }
+
             if (hasAgents) {
                 result.commitments.push(record as Commitment);
             } else {
@@ -489,7 +595,54 @@ function processDemand(
             }
         }
 
+        // --- Inputs Phase A: anchor flows (those without resolveFromFlow) ---
         for (const flow of inputs) {
+            if (flow.resolveFromFlow) continue; // handled in Phase B
+
+            const actionDef = ACTION_DEFINITIONS[flow.action];
+            const isDurable = actionDef?.accountingEffect === 'noEffect';
+            const isResolvedAnchor = anchorResolved.has(flow.id);
+
+            // Skip createFlowRecord for use-anchors resolved in Phase 0 —
+            // processDemand already created the specific use-Intent with resourceInventoriedAs.
+            if (!isResolvedAnchor) {
+                const record = createFlowRecord(flow, process.id, 'input', scaleFactor, processBegin, planId, agents, planStore, demand.atLocation, transportLocations);
+                if (hasAgents) {
+                    result.commitments.push(record as Commitment);
+                } else {
+                    result.intents.push(record as Intent);
+                }
+            }
+
+            if (!flow.resourceConformsTo || internallyProduced.has(`${flow.resourceConformsTo}|${flow.stage ?? ''}`)) continue;
+            if (flow.action === 'work') continue;
+            if (isResolvedAnchor) continue; // already resolved in Phase 0
+
+            const inputQty = (flow.resourceQuantity?.hasNumericalValue ?? 0) * scaleFactor;
+
+            // Normal enqueue for all other anchor flows
+            if (inputQty > 0 || isDurable) {
+                queue.push({
+                    specId: flow.resourceConformsTo,
+                    quantity: inputQty,
+                    neededBy: processBegin,
+                    forProcessId: process.id,
+                    unit: flow.resourceQuantity?.hasUnit ?? 'each',
+                    durableAction: isDurable ? flow.action : undefined,
+                    processEnd: flow.action === 'use' ? processEnd : undefined,
+                    useEffortQuantity: flow.action === 'use' ? flow.effortQuantity : undefined,
+                    stage: flow.stage,
+                    state: flow.state,
+                    atLocation: transportLocations?.from ?? demand.atLocation,
+                });
+            }
+        }
+
+        // --- Inputs Phase B: dependent flows (those with resolveFromFlow) ---
+        for (const flow of inputs) {
+            if (!flow.resolveFromFlow) continue;
+
+            // Create the plan record
             const record = createFlowRecord(flow, process.id, 'input', scaleFactor, processBegin, planId, agents, planStore, demand.atLocation, transportLocations);
             if (hasAgents) {
                 result.commitments.push(record as Commitment);
@@ -497,42 +650,50 @@ function processDemand(
                 result.intents.push(record as Intent);
             }
 
-            if (flow.resourceConformsTo && !internallyProduced.has(`${flow.resourceConformsTo}|${flow.stage ?? ''}`)) {
-                // Work flows are labour commitments tracked via SNLT/capacity;
-                // they are not material sub-demands and must not recurse.
-                if (flow.action === 'work') continue;
+            if (!flow.resourceConformsTo || internallyProduced.has(`${flow.resourceConformsTo}|${flow.stage ?? ''}`)) continue;
+            if (flow.action === 'work') continue;
 
-                // Durable inputs (use/cite) are existence gates only.
-                const actionDef = ACTION_DEFINITIONS[flow.action];
-                const isDurable = actionDef?.accountingEffect === 'noEffect';
+            const containerId = anchorResolved.get(flow.resolveFromFlow);
+            const inputQty = (flow.resourceQuantity?.hasNumericalValue ?? 0) * scaleFactor;
 
-                const inputQty = (flow.resourceQuantity?.hasNumericalValue ?? 0) * scaleFactor;
-
-                if (inputQty > 0 || isDurable) {
-                    queue.push({
-                        specId: flow.resourceConformsTo,
-                        quantity: inputQty,
-                        neededBy: processBegin,
-                        forProcessId: process.id,
-                        unit: flow.resourceQuantity?.hasUnit ?? 'each',
-                        durableAction: isDurable ? flow.action : undefined,
-                        processEnd: flow.action === 'use' ? processEnd : undefined,
-                        useEffortQuantity: flow.action === 'use' ? flow.effortQuantity : undefined,
-                        // Propagate stage/state requirements from the recipe flow so that
-                        // inventory netting selects only correctly-staged resources.
-                        // VF spec: resources.md §Stage and state.
-                        stage: flow.stage,
-                        state: flow.state,
-                        // Propagate location: for transport recipes, inputs are at the
-                        // origin (from); for production recipes, same as parent demand.
+            if (!containerId) {
+                // Anchor failed to resolve — emit purchase intent for the dependent
+                if (inputQty > 0) {
+                    const intent = planStore.addIntent({
+                        action: 'transfer',
+                        receiver: agents?.receiver,
+                        resourceConformsTo: flow.resourceConformsTo,
+                        resourceQuantity: { hasNumericalValue: inputQty, hasUnit: flow.resourceQuantity?.hasUnit ?? 'each' },
+                        due: processBegin.toISOString(),
+                        plannedWithin: planId,
+                        inputOf: process.id,
                         atLocation: transportLocations?.from ?? demand.atLocation,
+                        note: `Container-mediated resource unavailable: anchor flow ${flow.resolveFromFlow} did not resolve`,
+                        finished: false,
                     });
+                    result.purchaseIntents.push(intent);
                 }
+                continue;
+            }
+
+            if (inputQty > 0) {
+                queue.push({
+                    specId: flow.resourceConformsTo,
+                    quantity: inputQty,
+                    neededBy: processBegin,
+                    forProcessId: process.id,
+                    unit: flow.resourceQuantity?.hasUnit ?? 'each',
+                    stage: flow.stage,
+                    state: flow.state,
+                    atLocation: transportLocations?.from ?? demand.atLocation,
+                    resolvedContainerId: containerId,
+                });
             }
         }
     }
 
     // Allow this recipe to be used again for different demand items
     visited.delete(recipe.id);
+    return undefined;
 }
 

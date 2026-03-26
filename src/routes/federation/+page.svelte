@@ -29,48 +29,9 @@
   import { BufferSnapshotStore } from "$lib/knowledge/buffer-snapshots";
   import { startExecution } from "$lib/execution/scope-execution";
   import type { ExecutionAlert } from "$lib/execution/alerts";
+  import { SPEC_NAMES, buildFederationInventory } from "$lib/knowledge/federation-recipes";
 
-  // ---------------------------------------------------------------------------
-  // specNames
-  // ---------------------------------------------------------------------------
-
-  const specNames: Record<string, string> = {
-    wheat: "Wheat",
-    dairy: "Dairy",
-    tools: "Tools",
-    goods: "Goods",
-    "olive-oil": "Olive Oil",
-    citrus: "Citrus",
-    flour: "Flour",
-    bread: "Bread",
-    fish: "Fish",
-    salt: "Salt",
-    "raw-flour": "Raw Flour",
-    metal: "Iron Metal",
-    ore: "Iron Ore",
-    dough: "Dough",
-    brine: "Brine",
-    // Frontier Tower
-    compute: "GPU Compute",
-    electronics: "Electronics",
-    "3d-filament": "3D Filament",
-    "fabricated-parts": "Fabricated Parts",
-    prototypes: "Prototypes",
-    "lab-reagents": "Lab Reagents",
-    "bio-samples": "Bio Samples",
-    supplements: "Supplements",
-    "media-content": "Media Content",
-    meals: "Meals",
-    "fitness-sessions": "Fitness Sessions",
-    "ai-models": "AI Models",
-    "node-infra": "Node Infra",
-    "wellness-pgm": "Wellness Programs",
-    "coffee-beans": "Coffee Beans",
-    coffee: "Coffee",
-    "event-tickets": "Event Tickets",
-    consulting: "Consulting",
-    ventures: "Ventures",
-  };
+  const specNames = SPEC_NAMES;
 
   // ---------------------------------------------------------------------------
   // RecipeStore — commune production templates
@@ -905,99 +866,7 @@
   // ---------------------------------------------------------------------------
 
   // Safety-stock levels only — kept low so demand exceeds on-hand and recipes fire
-  const mockResources = new Map<string, EconomicResource[]>([
-    ["commune-grain", [{ id: "res-grain-wheat", name: "Wheat Reserve", conformsTo: "wheat",
-      accountingQuantity: { hasNumericalValue: 80, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 80, hasUnit: "kg" },
-      primaryAccountable: "commune-grain", custodianScope: "commune-grain" }]],
-    ["commune-dairy", [{ id: "res-dairy-dairy", name: "Dairy Stock", conformsTo: "dairy",
-      accountingQuantity: { hasNumericalValue: 30, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 30, hasUnit: "kg" },
-      primaryAccountable: "commune-dairy", custodianScope: "commune-dairy" }]],
-    ["commune-forge", [
-      { id: "res-forge-tools", name: "Tool Stock", conformsTo: "tools",
-        accountingQuantity: { hasNumericalValue: 20, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 20, hasUnit: "unit" },
-        primaryAccountable: "commune-forge", classifiedAs: ["individual-claimable"], custodianScope: "commune-forge" },
-      { id: "res-forge-ore", name: "Iron Ore", conformsTo: "ore",
-        accountingQuantity: { hasNumericalValue: 400, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 400, hasUnit: "kg" },
-        primaryAccountable: "commune-forge", custodianScope: "commune-forge" },
-    ]],
-    ["commune-workshop", [{ id: "res-workshop-goods", name: "Goods Stock", conformsTo: "goods",
-      accountingQuantity: { hasNumericalValue: 16, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 16, hasUnit: "unit" },
-      primaryAccountable: "commune-workshop", custodianScope: "commune-workshop" }]],
-    ["commune-olive", [{ id: "res-olive-oil", name: "Olive Oil", conformsTo: "olive-oil",
-      accountingQuantity: { hasNumericalValue: 36, hasUnit: "liter" }, onhandQuantity: { hasNumericalValue: 36, hasUnit: "liter" },
-      primaryAccountable: "commune-olive", custodianScope: "commune-olive" }]],
-    ["commune-citrus", [{ id: "res-citrus-fruit", name: "Citrus Fruits", conformsTo: "citrus",
-      accountingQuantity: { hasNumericalValue: 60, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 60, hasUnit: "kg" },
-      primaryAccountable: "commune-citrus", classifiedAs: ["individual-claimable"], custodianScope: "commune-citrus" }]],
-    ["commune-mill", [{ id: "res-mill-flour", name: "Flour Reserve", conformsTo: "flour",
-      accountingQuantity: { hasNumericalValue: 24, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 24, hasUnit: "kg" },
-      primaryAccountable: "commune-mill", custodianScope: "commune-mill" }]],
-    ["commune-bakery", [{ id: "res-bakery-bread", name: "Bread Stock", conformsTo: "bread",
-      accountingQuantity: { hasNumericalValue: 50, hasUnit: "loaf" }, onhandQuantity: { hasNumericalValue: 50, hasUnit: "loaf" },
-      primaryAccountable: "commune-bakery", classifiedAs: ["individual-claimable"], custodianScope: "commune-bakery" }]],
-    ["commune-fisher", [{ id: "res-fisher-fish", name: "Fish Stock", conformsTo: "fish",
-      accountingQuantity: { hasNumericalValue: 40, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 40, hasUnit: "kg" },
-      primaryAccountable: "commune-fisher", custodianScope: "commune-fisher" }]],
-    ["commune-salter", [{ id: "res-salter-salt", name: "Salt Reserve", conformsTo: "salt",
-      accountingQuantity: { hasNumericalValue: 70, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 70, hasUnit: "kg" },
-      primaryAccountable: "commune-salter", classifiedAs: ["individual-claimable"], custodianScope: "commune-salter" }]],
-    // ── Frontier Tower inventory ──────────────────────────────────────────────
-    ["ft-lounge", [
-      { id: "res-ft-meals", name: "Meals Stock", conformsTo: "meals",
-        accountingQuantity: { hasNumericalValue: 30, hasUnit: "serving" }, onhandQuantity: { hasNumericalValue: 30, hasUnit: "serving" },
-        primaryAccountable: "ft-lounge", custodianScope: "ft-lounge" },
-      { id: "res-ft-beans", name: "Coffee Bean Reserve", conformsTo: "coffee-beans",
-        accountingQuantity: { hasNumericalValue: 5, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 5, hasUnit: "kg" },
-        primaryAccountable: "ft-lounge", custodianScope: "ft-lounge" },
-    ]],
-    ["ft-coliving", [{ id: "res-ft-coffee", name: "Brewed Coffee", conformsTo: "coffee",
-      accountingQuantity: { hasNumericalValue: 20, hasUnit: "cup" }, onhandQuantity: { hasNumericalValue: 20, hasUnit: "cup" },
-      primaryAccountable: "ft-coliving", custodianScope: "ft-coliving" }]],
-    ["ft-maker", [
-      { id: "res-ft-filament", name: "Filament Stock", conformsTo: "3d-filament",
-        accountingQuantity: { hasNumericalValue: 10, hasUnit: "kg" }, onhandQuantity: { hasNumericalValue: 10, hasUnit: "kg" },
-        primaryAccountable: "ft-maker", custodianScope: "ft-maker" },
-      { id: "res-ft-maker-elec", name: "Electronics Stock", conformsTo: "electronics",
-        accountingQuantity: { hasNumericalValue: 8, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 8, hasUnit: "unit" },
-        primaryAccountable: "ft-maker", custodianScope: "ft-maker" },
-    ]],
-    ["ft-robotics", [{ id: "res-ft-prototypes", name: "Prototype Stock", conformsTo: "prototypes",
-      accountingQuantity: { hasNumericalValue: 2, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 2, hasUnit: "unit" },
-      primaryAccountable: "ft-robotics", custodianScope: "ft-robotics" }]],
-    ["ft-arts", [{ id: "res-ft-media", name: "Media Archive", conformsTo: "media-content",
-      accountingQuantity: { hasNumericalValue: 4, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 4, hasUnit: "unit" },
-      primaryAccountable: "ft-arts", custodianScope: "ft-arts" }]],
-    ["ft-neuro", [{ id: "res-ft-reagents", name: "Reagent Supply", conformsTo: "lab-reagents",
-      accountingQuantity: { hasNumericalValue: 4, hasUnit: "kit" }, onhandQuantity: { hasNumericalValue: 4, hasUnit: "kit" },
-      primaryAccountable: "ft-neuro", custodianScope: "ft-neuro" }]],
-    ["ft-ai", [{ id: "res-ft-ai-models", name: "Trained Models", conformsTo: "ai-models",
-      accountingQuantity: { hasNumericalValue: 1, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 1, hasUnit: "unit" },
-      primaryAccountable: "ft-ai", custodianScope: "ft-ai" }]],
-    ["ft-longevity", [{ id: "res-ft-supplements", name: "Supplement Stock", conformsTo: "supplements",
-      accountingQuantity: { hasNumericalValue: 8, hasUnit: "dose" }, onhandQuantity: { hasNumericalValue: 8, hasUnit: "dose" },
-      primaryAccountable: "ft-longevity", custodianScope: "ft-longevity" }]],
-    ["ft-decentral", [{ id: "res-ft-nodes", name: "Node Infrastructure", conformsTo: "node-infra",
-      accountingQuantity: { hasNumericalValue: 2, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 2, hasUnit: "unit" },
-      primaryAccountable: "ft-decentral", custodianScope: "ft-decentral" }]],
-    ["ft-movement", [{ id: "res-ft-fitness", name: "Fitness Sessions", conformsTo: "fitness-sessions",
-      accountingQuantity: { hasNumericalValue: 10, hasUnit: "session" }, onhandQuantity: { hasNumericalValue: 10, hasUnit: "session" },
-      primaryAccountable: "ft-movement", custodianScope: "ft-movement" }]],
-    ["ft-flourishing", [{ id: "res-ft-wellness", name: "Wellness Programs", conformsTo: "wellness-pgm",
-      accountingQuantity: { hasNumericalValue: 5, hasUnit: "session" }, onhandQuantity: { hasNumericalValue: 5, hasUnit: "session" },
-      primaryAccountable: "ft-flourishing", custodianScope: "ft-flourishing" }]],
-    ["ft-coworking", [{ id: "res-ft-compute", name: "GPU Compute Pool", conformsTo: "compute",
-      accountingQuantity: { hasNumericalValue: 25, hasUnit: "hr" }, onhandQuantity: { hasNumericalValue: 25, hasUnit: "hr" },
-      primaryAccountable: "ft-coworking", custodianScope: "ft-coworking" }]],
-    ["ft-events", [{ id: "res-ft-tickets", name: "Event Tickets", conformsTo: "event-tickets",
-      accountingQuantity: { hasNumericalValue: 5, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 5, hasUnit: "unit" },
-      primaryAccountable: "ft-events", custodianScope: "ft-events" }]],
-    ["ft-offices", [{ id: "res-ft-consulting", name: "Consulting Hours", conformsTo: "consulting",
-      accountingQuantity: { hasNumericalValue: 10, hasUnit: "hr" }, onhandQuantity: { hasNumericalValue: 10, hasUnit: "hr" },
-      primaryAccountable: "ft-offices", custodianScope: "ft-offices" }]],
-    ["ft-accelerate", [{ id: "res-ft-ventures", name: "Venture Projects", conformsTo: "ventures",
-      accountingQuantity: { hasNumericalValue: 1, hasUnit: "unit" }, onhandQuantity: { hasNumericalValue: 1, hasUnit: "unit" },
-      primaryAccountable: "ft-accelerate", custodianScope: "ft-accelerate" }]],
-  ]);
+  const mockResources = buildFederationInventory();
 
   // ---- Buffer zones per scope (spec-based, unchanged) -----------------------
   const mockBufferZones = new Map([
@@ -1251,67 +1120,10 @@
     // ══════════════════════════════════════════════════════════════════════════
     // Frontier Tower demands
     // ══════════════════════════════════════════════════════════════════════════
-
-    // ── Lounge needs raw ingredients (from external communes) ────────────────
-    { id: "di-ft-lounge-wheat",  action: "transfer", resourceConformsTo: "wheat",       resourceQuantity: { hasNumericalValue: 50, hasUnit: "kg" }, inScopeOf: ["ft-lounge"], due: "2026-04-01" },
-    { id: "di-ft-lounge-dairy",  action: "transfer", resourceConformsTo: "dairy",       resourceQuantity: { hasNumericalValue: 20, hasUnit: "kg" }, inScopeOf: ["ft-lounge"], due: "2026-04-01" },
-    { id: "di-ft-lounge-beans",  action: "transfer", resourceConformsTo: "coffee-beans", resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg" }, inScopeOf: ["ft-lounge"], due: "2026-04-01" },
-
-    // ── Co-Living needs coffee beans ─────────────────────────────────────────
-    { id: "di-ft-coliving-beans", action: "transfer", resourceConformsTo: "coffee-beans", resourceQuantity: { hasNumericalValue: 8, hasUnit: "kg" }, inScopeOf: ["ft-coliving"], due: "2026-04-01" },
-
-    // ── Events needs media + meals (inter-floor) ────────────────────────────
-    { id: "di-ft-events-media",  action: "transfer", resourceConformsTo: "media-content", resourceQuantity: { hasNumericalValue: 8,  hasUnit: "unit"    }, inScopeOf: ["ft-events"], due: "2026-04-01" },
-    { id: "di-ft-events-meals",  action: "transfer", resourceConformsTo: "meals",         resourceQuantity: { hasNumericalValue: 40, hasUnit: "serving" }, inScopeOf: ["ft-events"], due: "2026-04-01" },
-
-    // ── Offices needs compute + coffee (inter-floor) ────────────────────────
-    { id: "di-ft-offices-comp",  action: "transfer", resourceConformsTo: "compute", resourceQuantity: { hasNumericalValue: 20, hasUnit: "hr"  }, inScopeOf: ["ft-offices"], due: "2026-04-01" },
-    { id: "di-ft-offices-coffee",action: "transfer", resourceConformsTo: "coffee",  resourceQuantity: { hasNumericalValue: 30, hasUnit: "cup" }, inScopeOf: ["ft-offices"], due: "2026-04-01" },
-
-    // ── Robotics needs parts + electronics + compute ────────────────────────
-    { id: "di-ft-robo-parts",    action: "transfer", resourceConformsTo: "fabricated-parts", resourceQuantity: { hasNumericalValue: 10, hasUnit: "unit" }, inScopeOf: ["ft-robotics"], due: "2026-04-01" },
-    { id: "di-ft-robo-elec",     action: "transfer", resourceConformsTo: "electronics",     resourceQuantity: { hasNumericalValue: 25, hasUnit: "unit" }, inScopeOf: ["ft-robotics"], due: "2026-04-01" },
-    { id: "di-ft-robo-comp",     action: "transfer", resourceConformsTo: "compute",         resourceQuantity: { hasNumericalValue: 30, hasUnit: "hr"   }, inScopeOf: ["ft-robotics"], due: "2026-04-01" },
-
-    // ── Movement needs meals ────────────────────────────────────────────────
-    { id: "di-ft-move-meals",    action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 15, hasUnit: "serving" }, inScopeOf: ["ft-movement"], due: "2026-04-01" },
-
-    // ── Arts needs filament + compute ───────────────────────────────────────
-    { id: "di-ft-arts-filament", action: "transfer", resourceConformsTo: "3d-filament", resourceQuantity: { hasNumericalValue: 5, hasUnit: "kg" }, inScopeOf: ["ft-arts"], due: "2026-04-01" },
-    { id: "di-ft-arts-comp",     action: "transfer", resourceConformsTo: "compute",     resourceQuantity: { hasNumericalValue: 8, hasUnit: "hr" }, inScopeOf: ["ft-arts"], due: "2026-04-01" },
-
-    // ── Maker needs filament + electronics ──────────────────────────────────
-    { id: "di-ft-maker-filament",action: "transfer", resourceConformsTo: "3d-filament", resourceQuantity: { hasNumericalValue: 15, hasUnit: "kg"   }, inScopeOf: ["ft-maker"], due: "2026-04-01" },
-    { id: "di-ft-maker-elec",    action: "transfer", resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 20, hasUnit: "unit" }, inScopeOf: ["ft-maker"], due: "2026-04-01" },
-
-    // ── Neuro needs reagents + compute ──────────────────────────────────────
-    { id: "di-ft-neuro-reagents",action: "transfer", resourceConformsTo: "lab-reagents", resourceQuantity: { hasNumericalValue: 10, hasUnit: "kit" }, inScopeOf: ["ft-neuro"], due: "2026-04-01" },
-    { id: "di-ft-neuro-comp",    action: "transfer", resourceConformsTo: "compute",      resourceQuantity: { hasNumericalValue: 25, hasUnit: "hr"  }, inScopeOf: ["ft-neuro"], due: "2026-04-01" },
-
-    // ── AI needs compute (heavy!) + electronics ─────────────────────────────
-    { id: "di-ft-ai-comp",       action: "transfer", resourceConformsTo: "compute",     resourceQuantity: { hasNumericalValue: 80, hasUnit: "hr"   }, inScopeOf: ["ft-ai"], due: "2026-04-01" },
-    { id: "di-ft-ai-elec",       action: "transfer", resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 5,  hasUnit: "unit" }, inScopeOf: ["ft-ai"], due: "2026-04-01" },
-
-    // ── Accelerate needs prototypes + media + consulting ────────────────────
-    { id: "di-ft-accel-proto",   action: "transfer", resourceConformsTo: "prototypes",    resourceQuantity: { hasNumericalValue: 3,  hasUnit: "unit" }, inScopeOf: ["ft-accelerate"], due: "2026-04-01" },
-    { id: "di-ft-accel-media",   action: "transfer", resourceConformsTo: "media-content", resourceQuantity: { hasNumericalValue: 5,  hasUnit: "unit" }, inScopeOf: ["ft-accelerate"], due: "2026-04-01" },
-    { id: "di-ft-accel-consult", action: "transfer", resourceConformsTo: "consulting",    resourceQuantity: { hasNumericalValue: 15, hasUnit: "hr"   }, inScopeOf: ["ft-accelerate"], due: "2026-04-01" },
-
-    // ── Longevity needs bio-samples + reagents ──────────────────────────────
-    { id: "di-ft-long-bio",      action: "transfer", resourceConformsTo: "bio-samples",  resourceQuantity: { hasNumericalValue: 6, hasUnit: "unit" }, inScopeOf: ["ft-longevity"], due: "2026-04-01" },
-    { id: "di-ft-long-reagents", action: "transfer", resourceConformsTo: "lab-reagents", resourceQuantity: { hasNumericalValue: 8, hasUnit: "kit"  }, inScopeOf: ["ft-longevity"], due: "2026-04-01" },
-
-    // ── Decentral needs compute + electronics ───────────────────────────────
-    { id: "di-ft-dec-comp",      action: "transfer", resourceConformsTo: "compute",     resourceQuantity: { hasNumericalValue: 40, hasUnit: "hr"   }, inScopeOf: ["ft-decentral"], due: "2026-04-01" },
-    { id: "di-ft-dec-elec",      action: "transfer", resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 12, hasUnit: "unit" }, inScopeOf: ["ft-decentral"], due: "2026-04-01" },
-
-    // ── Flourishing needs fitness + supplements + meals ─────────────────────
-    { id: "di-ft-flour-fitness", action: "transfer", resourceConformsTo: "fitness-sessions", resourceQuantity: { hasNumericalValue: 15, hasUnit: "session" }, inScopeOf: ["ft-flourishing"], due: "2026-04-01" },
-    { id: "di-ft-flour-suppl",   action: "transfer", resourceConformsTo: "supplements",      resourceQuantity: { hasNumericalValue: 10, hasUnit: "dose"    }, inScopeOf: ["ft-flourishing"], due: "2026-04-01" },
-    { id: "di-ft-flour-meals",   action: "transfer", resourceConformsTo: "meals",             resourceQuantity: { hasNumericalValue: 20, hasUnit: "serving" }, inScopeOf: ["ft-flourishing"], due: "2026-04-01" },
-
-    // ── Co-Working needs electronics (for compute infra) ────────────────────
-    { id: "di-ft-cowk-elec",     action: "transfer", resourceConformsTo: "electronics", resourceQuantity: { hasNumericalValue: 8, hasUnit: "unit" }, inScopeOf: ["ft-coworking"], due: "2026-04-01" },
+    // Raw material / recipe-input demands (wheat, coffee-beans, electronics, etc.)
+    // are NOT listed here — they are derived automatically from recipe expansion
+    // via produce intents + handleScheduledReceipt. Only CONSUMPTION demands
+    // (floors consuming outputs produced by other floors) are listed as CLAIMs.
 
     // ── Claimable: meals (tower residents eat!) ─────────────────────────────
     { id: "ci-ft-coliving-meals",   action: "transfer", resourceConformsTo: "meals", resourceQuantity: { hasNumericalValue: 40, hasUnit: "serving" }, inScopeOf: ["ft-coliving"],   due: "2026-04-01", resourceClassifiedAs: CLAIM },
@@ -1632,6 +1444,55 @@
   const selectedResult = $derived(
     selectedScope ? federationResult.byScope.get(selectedScope) : undefined,
   );
+
+  // Build a clean recipe-only plan store for the selected scope.
+  // This bypasses the complex planning pipeline and shows ONLY the scope's
+  // own recipe-expanded production — no cross-scope contamination.
+  const scopeRecipeStore = $derived.by(() => {
+    if (!selectedScope) return undefined;
+    const scopePI = produceIntents.filter(i => i.inScopeOf?.includes(selectedScope));
+    if (scopePI.length === 0) return undefined;
+    const ps = new PlanStore(new ProcessRegistry());
+    for (const pi of scopePI) {
+      const specId = pi.resourceConformsTo;
+      if (!specId) continue;
+      const recipes = recipeStore.recipesForOutput(specId);
+      if (recipes.length === 0) continue;
+      const recipe = recipes[0];
+      const qty = pi.resourceQuantity?.hasNumericalValue ?? 0;
+      for (const rpId of recipe.recipeProcesses ?? []) {
+        const rp = recipeStore.getRecipeProcess(rpId);
+        const proc = ps.processes.register({ name: rp?.name ?? rpId });
+        const { inputs, outputs } = recipeStore.flowsForProcess(rpId);
+        const primaryOut = outputs.find(o => o.resourceConformsTo === specId);
+        const recipeQty = primaryOut?.resourceQuantity?.hasNumericalValue ?? qty;
+        const scale = recipeQty > 0 ? qty / recipeQty : 1;
+        for (const flow of outputs) {
+          ps.addIntent({
+            action: flow.action, outputOf: proc.id,
+            resourceConformsTo: flow.resourceConformsTo,
+            resourceQuantity: flow.resourceQuantity
+              ? { hasNumericalValue: flow.resourceQuantity.hasNumericalValue * scale, hasUnit: flow.resourceQuantity.hasUnit }
+              : undefined,
+          });
+        }
+        for (const flow of inputs) {
+          ps.addIntent({
+            action: flow.action, inputOf: proc.id,
+            resourceConformsTo: flow.resourceConformsTo,
+            resourceQuantity: flow.resourceQuantity
+              ? { hasNumericalValue: flow.resourceQuantity.hasNumericalValue * scale, hasUnit: flow.resourceQuantity.hasUnit }
+              : undefined,
+            effortQuantity: flow.effortQuantity
+              ? { hasNumericalValue: flow.effortQuantity.hasNumericalValue * scale, hasUnit: flow.effortQuantity.hasUnit }
+              : undefined,
+          });
+        }
+      }
+    }
+    return ps;
+  });
+
   const selectedIsHub = $derived(isHub(selectedScope));
   const hubLeaves = $derived(selectedIsHub ? getLeaves(selectedScope) : []);
   const hubCoherence = $derived(selectedIsHub ? computeCoherence(selectedScope) : 0);
@@ -1640,6 +1501,12 @@
   const hubFlows = $derived(selectedIsHub ? computeNetFlows(selectedScope) : { exports: [], imports: [] });
   const hubMemberHealth = $derived(selectedIsHub ? computeMemberHealth(selectedScope) : []);
   const hubFedHealth = $derived(selectedScope === "universal-commune" ? computeFederationHealth() : []);
+
+  const scopeOutputSpecs = $derived(
+    produceIntents
+      .filter(i => i.inScopeOf?.includes(selectedScope) && i.resourceConformsTo)
+      .map(i => i.resourceConformsTo!),
+  );
 
   const outgoingTrades = $derived(
     activeProposals.filter((t) => (t.provider ?? '') === selectedScope),
@@ -2034,7 +1901,7 @@
       <div class="network-body">
         <div class="network-diagram-wrap">
           <ScopeNetworkDiagram
-            planStore={selectedResult.planStore}
+            planStore={scopeRecipeStore ?? selectedResult.planStore}
             observer={combinedObserver}
             {specNames}
             {mode}
@@ -2050,6 +1917,7 @@
             {recipeStore}
             {specNames}
             resources={mockResources.get(selectedScope) ?? []}
+            outputSpecs={scopeOutputSpecs}
           />
         </div>
         {#if selectedFlow}

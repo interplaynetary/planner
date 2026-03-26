@@ -130,7 +130,7 @@ export class PlanNetter {
     netDemand(
         specId: string,
         qty: number,
-        opts?: { stage?: string; state?: string; neededBy?: Date; atLocation?: string },
+        opts?: { stage?: string; state?: string; neededBy?: Date; atLocation?: string; containedIn?: string },
         planId?: string,
         tx?: NettingTransaction,
     ): NetDemandResult {
@@ -144,8 +144,14 @@ export class PlanNetter {
                     if ((r.accountingQuantity?.hasNumericalValue ?? 0) <= 0) return false;
                     if (opts?.stage && r.stage !== opts.stage) return false;
                     if (opts?.state && r.state !== opts.state) return false;
-                    // Containment guard: contained resources are physically unavailable until separated
-                    if (r.containedIn !== undefined) return false;
+                    // Containment guard: when containedIn is specified, only match
+                    // resources inside that container (use-mediated resolution).
+                    // Otherwise, contained resources are physically unavailable.
+                    if (opts?.containedIn) {
+                        if (r.containedIn !== opts.containedIn) return false;
+                    } else {
+                        if (r.containedIn !== undefined) return false;
+                    }
                     // Location guard: only absorb inventory at the demand location
                     if (opts?.atLocation && r.currentLocation && r.currentLocation !== opts.atLocation) return false;
                     return true;
@@ -164,7 +170,9 @@ export class PlanNetter {
         }
 
         // --- Step 2: Scheduled output Intents (outputOf set) ---
-        if (remaining > 0) {
+        // Skip when resolving from a container: scheduled outputs are free-standing
+        // production, not targeted into a specific container instance.
+        if (remaining > 0 && !opts?.containedIn) {
             for (const intent of this.planStore.intentsForSpec(specId)) {
                 if (remaining <= 0) break;
                 if (
@@ -202,7 +210,8 @@ export class PlanNetter {
         }
 
         // --- Step 3: Scheduled output Commitments (outputOf set) ---
-        if (remaining > 0) {
+        // Same containedIn guard as Step 2.
+        if (remaining > 0 && !opts?.containedIn) {
             for (const commitment of this.planStore.commitmentsForSpec(specId)) {
                 if (remaining <= 0) break;
                 if (
@@ -431,7 +440,7 @@ export class PlanNetter {
      *   - scheduled consumptions (not yet allocated)
      * Does NOT mutate state. Used for capacity ceiling in computeMaxByOtherMaterials.
      */
-    netAvailableQty(specId: string, opts?: { stage?: string; state?: string; asOf?: Date; atLocation?: string }): number {
+    netAvailableQty(specId: string, opts?: { stage?: string; state?: string; asOf?: Date; atLocation?: string; containedIn?: string }): number {
         let total = 0;
 
         // Inventory
@@ -440,8 +449,12 @@ export class PlanNetter {
                 if ((r.accountingQuantity?.hasNumericalValue ?? 0) <= 0) continue;
                 if (opts?.stage && r.stage !== opts.stage) continue;
                 if (opts?.state && r.state !== opts.state) continue;
-                // Containment guard: contained resources are physically unavailable until separated
-                if (r.containedIn !== undefined) continue;
+                // Containment guard: when containedIn specified, only match inside that container.
+                if (opts?.containedIn) {
+                    if (r.containedIn !== opts.containedIn) continue;
+                } else {
+                    if (r.containedIn !== undefined) continue;
+                }
                 // Location guard: only count inventory at the queried location
                 if (opts?.atLocation && r.currentLocation && r.currentLocation !== opts.atLocation) continue;
                 // Availability guard: delegate to scheduleBook when available, else inline check
@@ -456,7 +469,11 @@ export class PlanNetter {
             }
         }
 
-        // Scheduled outputs (not yet allocated)
+        // Scheduled outputs (not yet allocated).
+        // Skip when resolving from a container: scheduled outputs are free-standing
+        // production, not targeted into a specific container instance.
+        if (opts?.containedIn) return Math.max(0, total - (this.conservationFloors?.get(specId) ?? 0));
+
         for (const intent of this.planStore.intentsForSpec(specId)) {
             if (
                 intent.outputOf !== undefined &&

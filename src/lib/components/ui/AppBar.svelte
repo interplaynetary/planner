@@ -8,6 +8,7 @@
 		{ href: `${base}/federation`, label: 'FEDERATION' },
 		{ href: `${base}/inventory`,  label: 'INVENTORY' },
 		{ href: `${base}/recipes`,    label: 'RECIPES' },
+		{ href: `${base}/workshop`,   label: 'WORKSHOP' },
 		{ href: `${base}/settings`,   label: 'SETTINGS' },
 	];
 

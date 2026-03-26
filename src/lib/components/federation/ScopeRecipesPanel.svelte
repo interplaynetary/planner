@@ -29,26 +29,14 @@
     recipeStore: RecipeStore;
     specNames: Record<string, string>;
     resources?: EconomicResource[];
+    /** Output spec IDs this scope can produce — used to look up relevant recipes. */
+    outputSpecs?: string[];
   }
 
-  let { scopeId, recipeStore, specNames, resources = [] }: Props = $props();
-
-  // Map each leaf commune to all output specs it can produce
-  const scopeOutputSpecs: Record<string, string[]> = {
-    "commune-grain":    ["wheat", "flour", "bread", "porridge", "ale"],
-    "commune-dairy":    ["dairy", "butter", "cheese", "yogurt"],
-    "commune-forge":    ["tools", "nails", "agri-tools"],
-    "commune-workshop": ["goods", "tools", "rope", "bread"],
-    "commune-olive":    ["olive-oil", "soap", "infused-oil"],
-    "commune-citrus":   ["citrus", "juice", "citrus-preserve", "vinegar"],
-    "commune-mill":     ["flour", "pasta", "flatbread", "bread"],
-    "commune-bakery":   ["bread", "olive-bread", "citrus-loaf"],
-    "commune-fisher":   ["fish", "salted-fish", "smoked-fish", "fish-chowder"],
-    "commune-salter":   ["salt", "brine", "bread", "fish"],
-  };
+  let { scopeId, recipeStore, specNames, resources = [], outputSpecs = [] }: Props = $props();
 
   const recipes = $derived(
-    (scopeOutputSpecs[scopeId] ?? []).flatMap(spec => recipeStore.recipesForOutput(spec)),
+    [...new Set(outputSpecs)].flatMap(spec => recipeStore.recipesForOutput(spec)),
   );
 
   // ---------------------------------------------------------------------------

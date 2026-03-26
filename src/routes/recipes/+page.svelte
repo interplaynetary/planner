@@ -1,5 +1,6 @@
 <script lang="ts">
   import '$lib/components/ui/tokens.css';
+  import { buildFederationRecipes } from '$lib/knowledge/federation-recipes';
 
   // ---------------------------------------------------------------------------
   // Types
@@ -32,6 +33,37 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Existing recipe library
+  // ---------------------------------------------------------------------------
+
+  const recipeStore = buildFederationRecipes();
+  const specNames: Record<string, string> = Object.fromEntries(
+    recipeStore.allResourceSpecs().map(s => [s.id, s.name]),
+  );
+
+  const libraryRecipes = recipeStore.allRecipes().map(r => {
+    const procs = recipeStore.processesForRecipe(r.id);
+    const flows: AIFlow[] = procs.flatMap(p => {
+      const { inputs, outputs } = recipeStore.flowsForProcess(p.id);
+      return [...inputs, ...outputs].map(f => ({
+        id: f.id,
+        action: f.action,
+        resourceConformsTo: f.resourceConformsTo ? (specNames[f.resourceConformsTo] ?? f.resourceConformsTo) : undefined,
+        resourceQuantity: f.resourceQuantity,
+        effortQuantity: f.effortQuantity,
+        recipeInputOf: f.recipeInputOf,
+        recipeOutputOf: f.recipeOutputOf,
+      }));
+    });
+    return {
+      recipe: { id: r.id, name: r.name, note: r.note, primaryOutput: r.primaryOutput ? (specNames[r.primaryOutput] ?? r.primaryOutput) : undefined },
+      processes: procs.map(p => ({ id: p.id, name: p.name, note: p.note, hasDuration: p.hasDuration, sequenceGroup: p.sequenceGroup })),
+      flows,
+      active: true,
+    } satisfies GeneratedRecipe;
+  });
+
+  // ---------------------------------------------------------------------------
   // Example prompts
   // ---------------------------------------------------------------------------
 
@@ -54,6 +86,19 @@
   let generating = $state(false);
   let errorMsg   = $state('');
   let generated  = $state<GeneratedRecipe[]>([]);
+  let search     = $state('');
+  let tab        = $state<'library' | 'workshop'>('library');
+
+  const filteredLibrary = $derived(
+    search.trim() === ''
+      ? libraryRecipes
+      : libraryRecipes.filter(r => {
+          const q = search.toLowerCase();
+          return r.recipe.name.toLowerCase().includes(q)
+            || (r.recipe.primaryOutput ?? '').toLowerCase().includes(q)
+            || r.flows.some(f => (f.resourceConformsTo ?? '').toLowerCase().includes(q));
+        }),
+  );
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -120,144 +165,153 @@
   }
 </script>
 
+{#snippet recipeCard(r: GeneratedRecipe, showToggle: boolean)}
+  <div class="recipe-card" class:active={r.active} class:inactive={!r.active}>
+    <div class="card-head">
+      <div class="card-name-wrap">
+        <span class="card-name">{r.recipe.name}</span>
+        {#if r.recipe.primaryOutput}
+          <span class="card-output">{r.recipe.primaryOutput}</span>
+        {/if}
+      </div>
+      {#if showToggle}
+        <button class="toggle-pill" class:pill-on={r.active} onclick={() => toggleActive(r)}>
+          {r.active ? 'ACTIVE' : 'INACTIVE'}
+        </button>
+      {/if}
+    </div>
+    {#if r.recipe.note}
+      <div class="card-note">{r.recipe.note}</div>
+    {/if}
+    <div class="proc-section">
+      {#each sortedProcesses(r.processes) as p (p.id)}
+        <div class="proc-block">
+          <div class="proc-head">
+            {#if p.sequenceGroup !== undefined}
+              <span class="proc-seq">{p.sequenceGroup}</span>
+            {/if}
+            <span class="proc-name">{p.name}</span>
+            {#if p.hasDuration}
+              <span class="proc-dur">{p.hasDuration.hasNumericalValue} {p.hasDuration.hasUnit}</span>
+            {/if}
+          </div>
+          {#each inputFlows(r, p.id) as f (f.id)}
+            <div class="flow-row">
+              <span class="action-badge" style="color:{actionColor(f.action)};border-color:{actionColor(f.action)}40">{f.action}</span>
+              <span class="flow-spec">{f.resourceConformsTo ?? '—'}</span>
+              {#if f.resourceQuantity}
+                <span class="flow-qty">{f.resourceQuantity.hasNumericalValue} {f.resourceQuantity.hasUnit}</span>
+              {:else if f.effortQuantity}
+                <span class="flow-qty">{f.effortQuantity.hasNumericalValue} {f.effortQuantity.hasUnit}</span>
+              {/if}
+            </div>
+          {/each}
+          {#each outputFlows(r, p.id) as f (f.id)}
+            <div class="flow-row">
+              <span class="action-badge" style="color:{actionColor(f.action)};border-color:{actionColor(f.action)}40">{f.action}</span>
+              <span class="flow-spec">{f.resourceConformsTo ?? '—'}</span>
+              {#if f.resourceQuantity}
+                <span class="flow-qty">{f.resourceQuantity.hasNumericalValue} {f.resourceQuantity.hasUnit}</span>
+              {:else if f.effortQuantity}
+                <span class="flow-qty">{f.effortQuantity.hasNumericalValue} {f.effortQuantity.hasUnit}</span>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/each}
+      {#each r.flows.filter(f => !f.recipeInputOf && !f.recipeOutputOf) as f (f.id)}
+        <div class="flow-row unlinked">
+          <span class="action-badge" style="color:{actionColor(f.action)};border-color:{actionColor(f.action)}40">{f.action}</span>
+          <span class="flow-spec">{f.resourceConformsTo ?? '—'}</span>
+          {#if f.resourceQuantity}
+            <span class="flow-qty">{f.resourceQuantity.hasNumericalValue} {f.resourceQuantity.hasUnit}</span>
+          {:else if f.effortQuantity}
+            <span class="flow-qty">{f.effortQuantity.hasNumericalValue} {f.effortQuantity.hasUnit}</span>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  </div>
+{/snippet}
+
 <div class="page">
   <!-- ---- Header ---- -->
   <header class="page-header">
-    <span class="page-title">RECIPE WORKSHOP</span>
-    {#if generated.length > 0}
-      <span class="recipe-count">{generated.length} recipe{generated.length !== 1 ? 's' : ''}</span>
-    {/if}
-  </header>
-
-  <!-- ---- Prompt area ---- -->
-  <div class="prompt-area">
-    <div class="examples-row">
-      <span class="examples-lbl">EXAMPLES</span>
-      {#each EXAMPLES as ex (ex)}
-        <button class="chip" onclick={() => (prompt = ex)}>{ex}</button>
-      {/each}
-    </div>
-
-    <div class="input-row">
-      <textarea
-        class="prompt-input"
-        bind:value={prompt}
-        placeholder="Describe a production process — inputs, outputs, steps…"
-        rows="3"
-        onkeydown={(e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) generate();
-        }}
-      ></textarea>
-      <button
-        class="generate-btn"
-        onclick={generate}
-        disabled={generating || !prompt.trim()}
-      >
-        {#if generating}
-          <span class="spinner"></span> GENERATING…
-        {:else}
-          GENERATE RECIPE
-        {/if}
+    <span class="page-title">RECIPES</span>
+    <div class="tab-row">
+      <button class="tab-btn" class:tab-active={tab === 'library'} onclick={() => (tab = 'library')}>
+        LIBRARY <span class="tab-count">{libraryRecipes.length}</span>
+      </button>
+      <button class="tab-btn" class:tab-active={tab === 'workshop'} onclick={() => (tab = 'workshop')}>
+        WORKSHOP {#if generated.length > 0}<span class="tab-count">{generated.length}</span>{/if}
       </button>
     </div>
+  </header>
 
-    {#if errorMsg}
-      <div class="error-msg">{errorMsg}</div>
-    {/if}
-  </div>
+  {#if tab === 'library'}
+    <!-- ---- Library search ---- -->
+    <div class="search-area">
+      <input class="search-input" type="text" bind:value={search} placeholder="Search recipes, outputs, ingredients..." />
+      <span class="search-count">{filteredLibrary.length} recipe{filteredLibrary.length !== 1 ? 's' : ''}</span>
+    </div>
 
-  <!-- ---- Cards grid ---- -->
-  <div class="cards-area">
-    {#if generated.length === 0}
-      <div class="empty-state">
-        <span class="empty-label">No recipes yet.</span>
-        <span class="empty-sub">Pick an example or describe a process above.</span>
-      </div>
-    {:else}
-      {#each generated as r (r.recipe.id)}
-        <div class="recipe-card" class:active={r.active} class:inactive={!r.active}>
-          <!-- Card header -->
-          <div class="card-head">
-            <div class="card-name-wrap">
-              <span class="card-name">{r.recipe.name}</span>
-              {#if r.recipe.primaryOutput}
-                <span class="card-output">{r.recipe.primaryOutput}</span>
-              {/if}
-            </div>
-            <button
-              class="toggle-pill"
-              class:pill-on={r.active}
-              onclick={() => toggleActive(r)}
-            >
-              {r.active ? 'ACTIVE' : 'INACTIVE'}
-            </button>
-          </div>
-
-          {#if r.recipe.note}
-            <div class="card-note">{r.recipe.note}</div>
-          {/if}
-
-          <!-- Processes + flows -->
-          <div class="proc-section">
-            {#each sortedProcesses(r.processes) as p (p.id)}
-              <div class="proc-block">
-                <div class="proc-head">
-                  {#if p.sequenceGroup !== undefined}
-                    <span class="proc-seq">{p.sequenceGroup}</span>
-                  {/if}
-                  <span class="proc-name">{p.name}</span>
-                  {#if p.hasDuration}
-                    <span class="proc-dur">
-                      {p.hasDuration.hasNumericalValue} {p.hasDuration.hasUnit}
-                    </span>
-                  {/if}
-                </div>
-
-                <!-- Input flows -->
-                {#each inputFlows(r, p.id) as f (f.id)}
-                  <div class="flow-row">
-                    <span class="action-badge" style="color:{actionColor(f.action)};border-color:{actionColor(f.action)}40">{f.action}</span>
-                    <span class="flow-spec">{f.resourceConformsTo ?? '—'}</span>
-                    {#if f.resourceQuantity}
-                      <span class="flow-qty">{f.resourceQuantity.hasNumericalValue} {f.resourceQuantity.hasUnit}</span>
-                    {:else if f.effortQuantity}
-                      <span class="flow-qty">{f.effortQuantity.hasNumericalValue} {f.effortQuantity.hasUnit}</span>
-                    {/if}
-                  </div>
-                {/each}
-
-                <!-- Output flows -->
-                {#each outputFlows(r, p.id) as f (f.id)}
-                  <div class="flow-row">
-                    <span class="action-badge" style="color:{actionColor(f.action)};border-color:{actionColor(f.action)}40">{f.action}</span>
-                    <span class="flow-spec">{f.resourceConformsTo ?? '—'}</span>
-                    {#if f.resourceQuantity}
-                      <span class="flow-qty">{f.resourceQuantity.hasNumericalValue} {f.resourceQuantity.hasUnit}</span>
-                    {:else if f.effortQuantity}
-                      <span class="flow-qty">{f.effortQuantity.hasNumericalValue} {f.effortQuantity.hasUnit}</span>
-                    {/if}
-                  </div>
-                {/each}
-              </div>
-            {/each}
-
-            <!-- Flows not linked to any process -->
-            {#each r.flows.filter(f => !f.recipeInputOf && !f.recipeOutputOf) as f (f.id)}
-              <div class="flow-row unlinked">
-                <span class="action-badge" style="color:{actionColor(f.action)};border-color:{actionColor(f.action)}40">{f.action}</span>
-                <span class="flow-spec">{f.resourceConformsTo ?? '—'}</span>
-                {#if f.resourceQuantity}
-                  <span class="flow-qty">{f.resourceQuantity.hasNumericalValue} {f.resourceQuantity.hasUnit}</span>
-                {:else if f.effortQuantity}
-                  <span class="flow-qty">{f.effortQuantity.hasNumericalValue} {f.effortQuantity.hasUnit}</span>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        </div>
+    <!-- ---- Library grid ---- -->
+    <div class="cards-area">
+      {#each filteredLibrary as r (r.recipe.id)}
+        {@render recipeCard(r, false)}
       {/each}
-    {/if}
-  </div>
+    </div>
+  {:else}
+    <!-- ---- Workshop: AI generation ---- -->
+    <div class="prompt-area">
+      <div class="examples-row">
+        <span class="examples-lbl">EXAMPLES</span>
+        {#each EXAMPLES as ex (ex)}
+          <button class="chip" onclick={() => (prompt = ex)}>{ex}</button>
+        {/each}
+      </div>
+
+      <div class="input-row">
+        <textarea
+          class="prompt-input"
+          bind:value={prompt}
+          placeholder="Describe a production process — inputs, outputs, steps..."
+          rows="3"
+          onkeydown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) generate();
+          }}
+        ></textarea>
+        <button
+          class="generate-btn"
+          onclick={generate}
+          disabled={generating || !prompt.trim()}
+        >
+          {#if generating}
+            <span class="spinner"></span> GENERATING...
+          {:else}
+            GENERATE RECIPE
+          {/if}
+        </button>
+      </div>
+
+      {#if errorMsg}
+        <div class="error-msg">{errorMsg}</div>
+      {/if}
+    </div>
+
+    <div class="cards-area">
+      {#if generated.length === 0}
+        <div class="empty-state">
+          <span class="empty-label">No generated recipes yet.</span>
+          <span class="empty-sub">Pick an example or describe a process above.</span>
+        </div>
+      {:else}
+        {#each generated as r (r.recipe.id)}
+          {@render recipeCard(r, true)}
+        {/each}
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -291,9 +345,69 @@
     margin-right: auto;
   }
 
-  .recipe-count {
-    font-size: 0.58rem;
-    opacity: 0.5;
+  .tab-row {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+  }
+
+  .tab-btn {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.45);
+    font-family: var(--font-mono);
+    font-size: 0.52rem;
+    letter-spacing: 0.1em;
+    padding: 4px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+  }
+
+  .tab-btn:hover { color: rgba(255, 255, 255, 0.7); border-color: rgba(255, 255, 255, 0.25); }
+
+  .tab-btn.tab-active {
+    background: rgba(126, 232, 162, 0.1);
+    border-color: rgba(126, 232, 162, 0.45);
+    color: #7ee8a2;
+  }
+
+  .tab-count {
+    font-size: 0.44rem;
+    opacity: 0.65;
+    margin-left: 4px;
+  }
+
+  /* ---- Search ---- */
+  .search-area {
+    flex-shrink: 0;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border-faint);
+    background: var(--bg-surface);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .search-input {
+    flex: 1;
+    max-width: 420px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-dim);
+    border-radius: 3px;
+    color: rgba(228, 238, 255, 0.92);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    padding: 6px 10px;
+    transition: border-color 0.15s;
+  }
+
+  .search-input::placeholder { opacity: 0.35; }
+  .search-input:focus { outline: none; border-color: rgba(126, 232, 162, 0.4); }
+
+  .search-count {
+    font-size: 0.52rem;
+    opacity: 0.4;
     letter-spacing: 0.06em;
   }
 

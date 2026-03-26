@@ -231,22 +231,10 @@ class FederationScopePolicy implements ScopePolicy {
         };
     }
 
-    injectFederationSeeds(planStore: PlanStore, supplyIndex: IndependentSupplyIndex): string[] {
-        const seededIntentIds: string[] = [];
-        for (const slot of supplyIndex.supply_slots.values()) {
-            if (slot.slot_type !== 'scheduled_receipt' || !slot.spec_id || slot.quantity <= 0) continue;
-            const syntheticId = `fed-seed:${slot.source_id}`;
-            planStore.addIntent({
-                id: syntheticId,
-                action: 'produce',
-                outputOf: syntheticId,
-                resourceConformsTo: slot.spec_id,
-                resourceQuantity: { hasNumericalValue: slot.quantity, hasUnit: 'unit' },
-                finished: false,
-            });
-            seededIntentIds.push(syntheticId);
-        }
-        return seededIntentIds;
+    injectFederationSeeds(_planStore: PlanStore, _supplyIndex: IndependentSupplyIndex, _canonical: string[]): string[] {
+        // Federation seeds are no longer needed — handleScheduledReceipt already
+        // creates recipe-expanded processes for each scope's produce intents.
+        return [];
     }
 
     handleScheduledReceipt(
@@ -259,8 +247,9 @@ class FederationScopePolicy implements ScopePolicy {
     ): SurplusSignal | null {
         if (supplySlot.slot_type !== 'scheduled_receipt') return null;
 
-        const specName = recipeStore.getResourceSpec(supplySlot.spec_id!)?.name ?? supplySlot.spec_id!;
-        const unit = recipeStore.getResourceSpec(supplySlot.spec_id!)?.defaultUnitOfResource ?? 'unit';
+        const specId = supplySlot.spec_id!;
+        const specName = recipeStore.getResourceSpec(specId)?.name ?? specId;
+        const unit = recipeStore.getResourceSpec(specId)?.defaultUnitOfResource ?? 'unit';
         const proc = processes.register({
             name: `Produce ${specName}`,
             plannedWithin: supplyPlanId,
@@ -269,13 +258,13 @@ class FederationScopePolicy implements ScopePolicy {
         planStore.addIntent({
             action: 'produce',
             outputOf: proc.id,
-            resourceConformsTo: supplySlot.spec_id,
+            resourceConformsTo: specId,
             resourceQuantity: { hasNumericalValue: supplySlot.quantity, hasUnit: unit },
             plannedWithin: supplyPlanId,
             finished: false,
         });
         return {
-            specId: supplySlot.spec_id!,
+            specId,
             quantity: supplySlot.quantity,
             plannedWithin: supplyPlanId,
             availableFrom: supplySlot.available_from,

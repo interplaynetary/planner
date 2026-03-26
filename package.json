@@ -23,6 +23,7 @@
 		"vite": "^7.3.1"
 	},
 	"dependencies": {
+		"@tinyhumansai/neocortex": "^0.1.4",
 		"d3": "^7.9.0",
 		"h3-js": "^4.4.0",
 		"json-logic": "^2.0.0",

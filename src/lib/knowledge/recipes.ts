@@ -403,6 +403,31 @@ export class RecipeStore {
             errors.push((e as Error).message);
         }
 
+        // Validate resolveFromFlow references
+        for (const rp of processes) {
+            const { inputs, outputs } = this.flowsForProcess(rp.id);
+            const processFlowIds = new Set([...inputs, ...outputs].map(f => f.id));
+            for (const flow of [...inputs, ...outputs]) {
+                if (!flow.resolveFromFlow) continue;
+                if (!processFlowIds.has(flow.resolveFromFlow)) {
+                    errors.push(
+                        `Flow ${flow.id}: resolveFromFlow '${flow.resolveFromFlow}' ` +
+                        `is not a sibling flow in process '${rp.id}'.`,
+                    );
+                    continue;
+                }
+                const anchor = this.getRecipeFlow(flow.resolveFromFlow);
+                if (anchor) {
+                    if (anchor.action !== 'use') {
+                        errors.push(
+                            `Flow ${flow.id}: resolveFromFlow anchor '${flow.resolveFromFlow}' ` +
+                            `has action '${anchor.action}' — only 'use' is supported as a container anchor.`,
+                        );
+                    }
+                }
+            }
+        }
+
         return errors;
     }
 }

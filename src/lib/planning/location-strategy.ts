@@ -108,6 +108,7 @@ export interface ScopePolicy {
     injectFederationSeeds(
         planStore: PlanStore,
         supplyIndex: IndependentSupplyIndex,
+        canonical: string[],
     ): string[];
 
     /** Phase B: handle scheduled_receipt as direct surplus. Returns null to use dependentSupply. */
@@ -164,7 +165,7 @@ export interface PlanningMode {
 
 export const NULL_SCOPE_POLICY: ScopePolicy = {
     handleTransportCandidate: () => null,
-    injectFederationSeeds: () => [],
+    injectFederationSeeds: (_ps, _si, _c) => [],
     handleScheduledReceipt: () => null,
     annotateChildCommitments: () => {},
 };

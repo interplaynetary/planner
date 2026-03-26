@@ -51,6 +51,7 @@
     return [...cmts, ...procIntents];
   });
   const observed  = $derived.by(() => { void observerTick; return observer.allResources(); });
+  const allObsEvents = $derived.by(() => { void observerTick; return observer.allEvents(); });
 
   const onhandBySpec = $derived(
     observed.reduce<Record<string, number>>((acc, r) => {
@@ -138,9 +139,11 @@
         const unit = isWork ? (c.effortQuantity?.hasUnit ?? 'hr') : (c.resourceQuantity?.hasUnit ?? '');
         const onhand = isWork ? 0 : (onhandBySpec[specId] ?? 0);
         const bz = side === 'output' && !isWork ? bufferZones.find(b => b.specId === specId) : undefined;
-        const fulfillPct = mode === 'observe' && !isWork && qty > 0 ? Math.min(100, (onhand / qty) * 100) : undefined;
-        const fs = observer.getFulfillment(c.id);
-        const fulfilledQty = fs?.totalFulfilled.hasNumericalValue ?? 0;
+        const fillingEvents = allObsEvents.filter(e => e.fulfills === c.id);
+        const fulfilledQty = isWork
+          ? fillingEvents.reduce((s, e) => s + (e.effortQuantity?.hasNumericalValue ?? 0), 0)
+          : fillingEvents.reduce((s, e) => s + (e.resourceQuantity?.hasNumericalValue ?? 0), 0);
+        const fulfillPct = mode === 'observe' && !isWork && qty > 0 ? Math.min(100, (fulfilledQty / qty) * 100) : undefined;
         return {
           specId, specName: specNames[specId] ?? specId,
           action: c.action, qty, unit, isWork,
@@ -239,7 +242,7 @@
       action:        row.action,
       isInput,
       commitmentId:  row.commitmentId || undefined,
-      existingEvents: observer.allEvents().filter(e =>
+      existingEvents: allObsEvents.filter(e =>
         (isInput ? e.inputOf === node.proc.id : e.outputOf === node.proc.id) &&
         e.resourceConformsTo === row.specId
       ),
@@ -371,7 +374,7 @@
             <text x={ox} y={cardY + 36} text-anchor="middle" font-size="6.5" fill="rgba(226,232,240,0.3)"
               style="pointer-events:none">plan {row.qty} {row.unit}</text>
             <text x={ox} y={cardY + 43} text-anchor="middle" font-size="7" fill={fulfillColor(row.fulfillPct)}
-              style="pointer-events:none">OH {row.onhand} {row.unit}</text>
+              style="pointer-events:none">act {row.fulfilledQty.toFixed(1)} {row.unit}</text>
             {@const barW = (row.fulfillPct / 100) * (CARD_W - 6)}
             <rect x={cardX + 3} y={cardY + CARD_H - 4} width={Math.max(0, barW)} height={3} rx="1"
               fill={fulfillColor(row.fulfillPct)} opacity="0.9" style="pointer-events:none" />
