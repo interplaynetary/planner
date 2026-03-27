@@ -435,6 +435,42 @@ export class PlanNetter {
     }
 
     /**
+     * Best-effort capacity reservation for buffer-first planning (Pass 0).
+     * Scans scheduled output Intents for specId and marks them as allocated
+     * up to `qty`. Skips observer inventory (not scheduled production).
+     * If no scheduled outputs exist, this is a no-op.
+     */
+    reserve(specId: string, qty: number): number {
+        let remaining = qty;
+        for (const intent of this.planStore.intentsForSpec(specId)) {
+            if (remaining <= 0) break;
+            if (
+                intent.outputOf !== undefined &&
+                !intent.finished &&
+                !this.allocated.has(intent.id) &&
+                !isPlanningSignal(intent.resourceClassifiedAs) &&
+                (intent.resourceQuantity?.hasNumericalValue ?? 0) > 0
+            ) {
+                const take = Math.min(intent.resourceQuantity!.hasNumericalValue, remaining);
+                this.allocated.add(intent.id);
+                // Emit a VF-native reservation Intent — makes this reservation queryable
+                const reservationIntent = this.planStore.addIntent({
+                    action: intent.action,
+                    resourceConformsTo: specId,
+                    resourceQuantity: { hasNumericalValue: take, hasUnit: intent.resourceQuantity!.hasUnit },
+                    resourceClassifiedAs: [PLAN_TAGS.BUFFER_RESERVATION],
+                    satisfies: intent.id,
+                    plannedWithin: `reservation:${specId}`,
+                    finished: false,
+                });
+                this.allocationIntentIds.add(reservationIntent.id);
+                remaining -= take;
+            }
+        }
+        return qty - remaining;
+    }
+
+    /**
      * READ-ONLY peek: net available quantity of specId.
      * = inventory + scheduled outputs (not yet allocated)
      *   - scheduled consumptions (not yet allocated)

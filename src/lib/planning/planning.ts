@@ -66,6 +66,7 @@ export const PLAN_TAGS = {
     CONSERVATION: 'tag:plan:conservation',
     REPLENISHMENT: 'tag:plan:replenishment',
     SOFT_ALLOCATION: 'tag:plan:soft-allocation',
+    BUFFER_RESERVATION: 'tag:plan:buffer-reservation',
 } as const;
 
 /** VF actions that do not consume inventory (no quantity decrement). */

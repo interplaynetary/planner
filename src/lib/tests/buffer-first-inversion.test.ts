@@ -125,11 +125,11 @@ describe('buffer-first inversion', () => {
             bufferZoneStore: bzStore, bufferProfiles, generateId,
         });
 
-        // Buffer-first should have reserved capacity via Pass 0
-        // The buffer replenishment plan should exist
-        const allPlans = result.planStore.allPlans();
-        const pass0Plans = allPlans.filter(p => p.name?.startsWith('Buffer-first replenishment'));
-        expect(pass0Plans.length).toBeGreaterThanOrEqual(1);
+        // Buffer-first should have reserved capacity via Pass 0 (netter.reserve)
+        // A replenishment signal should exist for the stressed buffer
+        const replenSignals = result.planStore.intentsForTag(PLAN_TAGS.REPLENISHMENT)
+            .filter(i => i.resourceConformsTo === 'flour');
+        expect(replenSignals.length).toBeGreaterThanOrEqual(1);
     });
 
     // -----------------------------------------------------------------------
@@ -188,15 +188,12 @@ describe('buffer-first inversion', () => {
             bufferZoneStore: bzStore, bufferProfiles, generateId,
         });
 
-        // Both should get pass0 replenishment plans
-        const pass0Plans = result.planStore.allPlans().filter(p => p.name?.startsWith('Buffer-first replenishment'));
-        expect(pass0Plans.length).toBe(2);
-
-        // Strategic should be planned first (lower index in plans array)
-        const seedPlan = pass0Plans.find(p => p.name?.includes('seed-stock'));
-        const ricePlan = pass0Plans.find(p => p.name?.includes('rice'));
-        expect(seedPlan).toBeDefined();
-        expect(ricePlan).toBeDefined();
+        // Both stressed buffers should get replenishment signals
+        const replenSignals = result.planStore.intentsForTag(PLAN_TAGS.REPLENISHMENT);
+        const seedSignal = replenSignals.find(i => i.resourceConformsTo === 'seed-stock');
+        const riceSignal = replenSignals.find(i => i.resourceConformsTo === 'rice');
+        expect(seedSignal).toBeDefined();
+        expect(riceSignal).toBeDefined();
     });
 
     // -----------------------------------------------------------------------
@@ -270,10 +267,12 @@ describe('buffer-first inversion', () => {
             bufferZoneStore: bzStore, bufferProfiles, generateId,
         });
 
-        // Should have Pass 0 replenishment but NOT additional Pass 2 replenishment
-        const pass0Plans = result.planStore.allPlans().filter(p => p.name?.startsWith('Buffer-first replenishment'));
+        // Pass 0 reserves capacity (no demand explosion), replenishment signal is emitted,
+        // and the reserved spec is NOT double-replenished in Pass 2
+        const replenSignals = result.planStore.intentsForTag(PLAN_TAGS.REPLENISHMENT)
+            .filter(i => i.resourceConformsTo === 'oil');
+        expect(replenSignals.length).toBeGreaterThanOrEqual(1);
         const pass2Plans = result.planStore.allPlans().filter(p => p.name?.startsWith('Replenishment for oil'));
-        expect(pass0Plans.length).toBe(1);
         expect(pass2Plans.length).toBe(0);
     });
 

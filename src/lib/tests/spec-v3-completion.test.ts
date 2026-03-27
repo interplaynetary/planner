@@ -5,7 +5,7 @@ import { BufferZoneStore } from '../knowledge/buffer-zones';
 import { planForScope } from '../planning/plan-for-scope';
 import { planFederation } from '../planning/plan-federation';
 import { detectConflicts } from '../planning/plan-for-unit';
-import { PlanStore } from '../planning/planning';
+import { PlanStore, PLAN_TAGS } from '../planning/planning';
 import { ProcessRegistry } from '../process-registry';
 import { buildIndependentDemandIndex } from '../indexes/independent-demand';
 import { buildIndependentSupplyIndex } from '../indexes/independent-supply';
@@ -279,13 +279,12 @@ describe('Phase B supply routing to buffers', () => {
             bufferZoneStore: bzStore, bufferProfiles, generateId,
         });
 
-        // With buffer-first active, Pass 0 should generate replenishment for the red buffer
-        // using the on-hand inventory. Check for buffer-first replenishment plans or buffer-route plans.
-        const allPlans = result.planStore.allPlans();
-        const pass0Plans = allPlans.filter(p => p.name?.startsWith('Buffer-first replenishment'));
-        const routePlans = allPlans.filter(p => p.name?.startsWith('Route surplus to buffer'));
-        // Either Pass 0 replenishment picked it up, or Phase B routing did
-        expect(pass0Plans.length + routePlans.length).toBeGreaterThan(0);
+        // With buffer-first active, a replenishment signal should be emitted for the red buffer,
+        // and/or Phase B routing should route surplus to the stressed buffer.
+        const replenSignals = result.planStore.intentsForTag(PLAN_TAGS.REPLENISHMENT)
+            .filter(i => i.resourceConformsTo === 'steel');
+        const routePlans = result.planStore.allPlans().filter(p => p.name?.startsWith('Route surplus to buffer'));
+        expect(replenSignals.length + routePlans.length).toBeGreaterThan(0);
     });
 
     it('surplus not routed when buffer is green', () => {
