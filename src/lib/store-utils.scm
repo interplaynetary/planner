@@ -1,10 +1,11 @@
 ;;; store-utils.scm — Shared utilities for Goblins store actors
 ;;;
-;;; Provides hashmap helpers, ID generation, and ISO datetime parsing
-;;; used by all store actors.
+;;; Provides hashmap helpers, ID generation, ISO datetime parsing,
+;;; and shared classification tag constants used by all store actors.
 
 (use-modules (goblins utils hashmap)
              (srfi srfi-1))
+
 
 ;; =========================================================================
 ;; Hashmap helpers

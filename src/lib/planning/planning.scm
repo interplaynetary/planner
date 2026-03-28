@@ -412,10 +412,12 @@
 
     ;; --- Promote intent to commitment ---
 
-    ((promote-to-commitment iid counterparty)
+    ((promote-to-commitment iid counterparty . rest)
      ;; iid: intent ID string
      ;; counterparty: alist with optional 'provider and 'receiver keys
-     (let* ((the-intent (hashmap-ref (pss-intents st) iid #f)))
+     ;; rest: optional (observer-ref) — for labor ATP gate
+     (let* ((observer-ref (if (pair? rest) (car rest) #f))
+            (the-intent (hashmap-ref (pss-intents st) iid #f)))
        (unless the-intent (error (format #f "Intent ~a not found" iid)))
        (let* ((prov (or (intent-provider the-intent)
                         (assq-ref counterparty 'provider)))
@@ -423,6 +425,37 @@
                         (assq-ref counterparty 'receiver))))
          (unless (and prov recv)
            (error "Cannot promote: need both provider and receiver"))
+         ;; Capacity ATP gate: prevent overcommitment of agent capacity.
+         ;; Action type 'work' is the discriminator; unit-of-effort confirms capacity resource.
+         (when (and observer-ref
+                   (eq? (intent-action the-intent) 'work)
+                   (intent-resource-inventoried-as the-intent))
+           (let* ((cap-res ($ observer-ref 'get-resource
+                              (intent-resource-inventoried-as the-intent))))
+             (when (and cap-res
+                        (economic-resource-unit-of-effort cap-res))
+               (let* ((onhand (measure-qty
+                                (economic-resource-onhand-quantity cap-res)))
+                      (effort-qty (measure-qty
+                                    (or (intent-effort-quantity the-intent)
+                                        (intent-resource-quantity the-intent)
+                                        (make-measure 0 "hours"))))
+                      (already-committed
+                        (fold (lambda (c acc)
+                                (if (and (eq? (commitment-action c) 'work)
+                                         (equal? (commitment-resource-inventoried-as c)
+                                                 (intent-resource-inventoried-as the-intent))
+                                         (not (commitment-finished c)))
+                                    (+ acc (measure-qty
+                                             (or (commitment-effort-quantity c)
+                                                 (make-measure 0 "hours"))))
+                                    acc))
+                              0 (hashmap-values (pss-commitments st)))))
+                 (when (> (+ already-committed effort-qty) onhand)
+                   (error (format #f
+                     "Capacity overcommitment: ~a hours would exceed ~a on-hand ~a hours (~a already committed)"
+                     effort-qty (intent-resource-inventoried-as the-intent)
+                     onhand already-committed)))))))
          ;; Build commitment from intent fields
          (let* ((cid (generate-id "commit-"))
                 (commitment (make-commitment

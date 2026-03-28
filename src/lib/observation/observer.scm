@@ -630,6 +630,40 @@
                       (os-events-by-id st) new-idx-spec)))
        (bcom (^observer bcom new-st))))
 
+    ;; --- Capacity resources (one per agent) ---
+
+    ((seed-capacity-resource agent-id hours-available . rest)
+     ;; rest: optional (unit conforms-to location availability-window)
+     (let* ((unit (if (pair? rest) (car rest) "hours"))
+            (spec (if (and (pair? rest) (pair? (cdr rest))) (cadr rest) "spec:agent-capacity"))
+            (location (if (and (pair? rest) (pair? (cdr rest)) (pair? (cddr rest)))
+                          (caddr rest) #f))
+            (avail-win (if (and (pair? rest) (pair? (cdr rest)) (pair? (cddr rest)) (pair? (cdddr rest)))
+                          (cadddr rest) #f))
+            (rid (string-append "capacity:" agent-id))
+            (resource (make-economic-resource
+                        rid #f #f #f #f
+                        spec
+                        #f  ;; no classifiedAs
+                        (make-measure hours-available unit)
+                        (make-measure hours-available unit)
+                        location #f
+                        agent-id #f
+                        #f #f #f unit #f #f avail-win)))
+       ;; Storage + spec index maintenance
+       (let* ((new-resources (hashmap-set (os-resources st) rid resource))
+              (new-idx-spec (let ((existing (hashmap-ref (os-idx-by-spec st) spec '())))
+                              (if (member rid existing)
+                                  (os-idx-by-spec st)
+                                  (hashmap-set (os-idx-by-spec st) spec (cons rid existing)))))
+              (new-st (make-observer-state
+                        (os-events st) new-resources (os-fulfillments st)
+                        (os-satisfactions st) (os-claim-states st)
+                        (os-idx-by-resource st) (os-idx-by-process st)
+                        (os-idx-by-agent st) (os-idx-by-action st)
+                        (os-events-by-id st) new-idx-spec)))
+         (bcom (^observer bcom new-st) resource))))
+
     ;; --- Queries (read-only, no state change) ---
 
     ((get-event id)      (hashmap-ref (os-events-by-id st) id #f))
@@ -657,6 +691,17 @@
      ;; O(log n) via idx-by-spec instead of O(R) hashmap-filter
      (let ((rids (hashmap-ref (os-idx-by-spec st) spec-id '())))
        (filter-map (lambda (rid) (hashmap-ref (os-resources st) rid #f)) rids)))
+
+    ((capacity-resource-for-agent agent-id)
+     ;; The capacity resource for the given agent (one per agent).
+     ;; Identified by having unit-of-effort set.
+     (let loop ((resources (hashmap-values (os-resources st))))
+       (cond
+         ((null? resources) #f)
+         ((and (equal? (economic-resource-primary-accountable (car resources)) agent-id)
+               (economic-resource-unit-of-effort (car resources)))
+          (car resources))
+         (else (loop (cdr resources))))))
 
     ((resources-contained-in container-id)
      (hashmap-filter

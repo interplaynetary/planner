@@ -183,6 +183,8 @@ export function buildIndependentSupplyIndex(
     for (const resource of resources) {
         // Skip contained resources (not top-level)
         if (resource.containedIn) continue;
+        // Skip capacity resources — handled separately in Stratum 3 (AgentCapacity)
+        if (resource.unitOfEffort) continue;
         const qty = resource.onhandQuantity?.hasNumericalValue ?? 0;
         if (qty <= 0) continue;
 

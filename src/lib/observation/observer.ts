@@ -287,6 +287,37 @@ export class Observer {
         this.resources.set(resource.id, { ...resource });
     }
 
+    /**
+     * Seed a capacity resource — an agent's total available effort hours.
+     *
+     * ONE per agent. Represents the agent's time budget for a planning cycle.
+     * Skills/capabilities are separate resources (see skillsOf/agentsWithSkill).
+     * The `unitOfEffort` field is the structural discriminator: any resource
+     * with unitOfEffort set is a capacity resource, not a material.
+     */
+    seedCapacityResource(params: {
+        agentId: string;
+        hoursAvailable: number;
+        unit?: string;
+        conformsTo?: string;
+        location?: string;
+        availability_window?: EconomicResource['availability_window'];
+    }): EconomicResource {
+        const unit = params.unit ?? 'hours';
+        const resource: EconomicResource = {
+            id: `capacity:${params.agentId}`,
+            conformsTo: params.conformsTo ?? 'spec:agent-capacity',
+            accountingQuantity: { hasNumericalValue: params.hoursAvailable, hasUnit: unit },
+            onhandQuantity: { hasNumericalValue: params.hoursAvailable, hasUnit: unit },
+            primaryAccountable: params.agentId,
+            currentLocation: params.location,
+            unitOfEffort: unit,
+            availability_window: params.availability_window,
+        };
+        this.seedResource(resource);
+        return resource;
+    }
+
     // =========================================================================
     // ACTION EFFECTS — Apply event effects to resources
     // =========================================================================
@@ -895,7 +926,9 @@ export class Observer {
      * tagged with resourceClassifiedAs: ['skill'].
      */
     skillsOf(agentId: string): EconomicResource[] {
-        return this.allResources().filter(r => r.primaryAccountable === agentId);
+        return this.allResources().filter(r =>
+            r.primaryAccountable === agentId && !r.unitOfEffort,
+        );
     }
 
     /**
@@ -908,6 +941,21 @@ export class Observer {
                 .filter(r => r.conformsTo === specId && r.primaryAccountable)
                 .map(r => r.primaryAccountable!),
         )];
+    }
+
+    // =========================================================================
+    // QUERIES — Capacity Resources
+    // =========================================================================
+
+    /**
+     * The capacity resource for the given agent (one per agent).
+     * Capacity resources are identified by having `unitOfEffort` set.
+     */
+    capacityResourceForAgent(agentId: string): EconomicResource | undefined {
+        return this.allResources().find(r =>
+            r.primaryAccountable === agentId &&
+            !!r.unitOfEffort,
+        );
     }
 
     // =========================================================================

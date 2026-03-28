@@ -737,6 +737,7 @@ export class PlanStore {
     promoteToCommitment(
         intentId: string,
         counterparty: { provider?: string; receiver?: string },
+        observer?: Observer,
     ): Commitment {
         const intent = this.intents.get(intentId);
         if (!intent) throw new Error(`Intent ${intentId} not found`);
@@ -759,7 +760,7 @@ export class PlanStore {
             }
         }
 
-        // --- availableQuantity check and decrement ---
+        // --- availableQuantity check (no mutation yet — ATP gate must pass first) ---
         if (intent.availableQuantity && committedQty) {
             if (committedQty.hasNumericalValue > intent.availableQuantity.hasNumericalValue) {
                 throw new Error(
@@ -768,6 +769,36 @@ export class PlanStore {
                     `for Intent ${intentId}`,
                 );
             }
+        }
+
+        // --- Capacity ATP gate: prevent overcommitment of agent capacity ---
+        // The action type 'work' is the discriminator — no tags needed.
+        // unitOfEffort on the resource confirms it's a capacity resource.
+        if (observer && intent.action === 'work' && intent.resourceInventoriedAs) {
+            const capacityResource = observer.getResource(intent.resourceInventoriedAs);
+            if (capacityResource?.unitOfEffort) {
+                const onhand = capacityResource.onhandQuantity?.hasNumericalValue ?? 0;
+                const effortQty = committedQty?.hasNumericalValue ?? 0;
+                const alreadyCommitted = this.allCommitments()
+                    .filter(c =>
+                        c.action === 'work' &&
+                        c.resourceInventoriedAs === intent.resourceInventoriedAs &&
+                        !c.finished,
+                    )
+                    .reduce((sum, c) => sum + (c.effortQuantity?.hasNumericalValue ?? 0), 0);
+
+                if (alreadyCommitted + effortQty > onhand) {
+                    throw new Error(
+                        `Capacity overcommitment: ${effortQty} hours would exceed ` +
+                        `${capacityResource.id} on-hand ${onhand} hours ` +
+                        `(${alreadyCommitted} already committed)`,
+                    );
+                }
+            }
+        }
+
+        // --- availableQuantity decrement (all validation passed) ---
+        if (intent.availableQuantity && committedQty) {
             intent.availableQuantity.hasNumericalValue -= committedQty.hasNumericalValue;
         }
 
