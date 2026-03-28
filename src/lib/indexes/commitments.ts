@@ -3,8 +3,9 @@ import {
     type HexIndex, type HexNode,
 } from '../utils/space-time-index';
 import { getSpaceTimeSignature, commitmentToSpaceTimeContext, toDateKey, wrapDate } from '../utils/space-time-keys';
-import { spatialThingToH3 } from '../utils/space';
-import type { Commitment, SpatialThing } from '../schemas';
+import { spatialThingToH3WithContainment } from '../utils/space';
+import type { Commitment } from '../schemas';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 
 export interface CommitmentIndex {
     commitments:       Map<string, Commitment>;
@@ -26,7 +27,7 @@ function addTo(map: Map<string, Set<string>>, key: string | undefined, id: strin
 
 export function buildCommitmentIndex(
     commitments: Commitment[],
-    locations: Map<string, SpatialThing>,
+    locations: SpatialThingStore,
     h3Resolution: number = 7,
 ): CommitmentIndex {
     const index: CommitmentIndex = {
@@ -53,8 +54,8 @@ export function buildCommitmentIndex(
         addTo(index.process_index, commitment.outputOf, commitment.id);
         addTo(index.satisfies_index, commitment.satisfies, commitment.id);
 
-        const st = commitment.atLocation ? locations.get(commitment.atLocation) : undefined;
-        const ctx = commitmentToSpaceTimeContext(commitment, st, h3Resolution);
+        const st = commitment.atLocation ? locations.getLocation(commitment.atLocation) : undefined;
+        const ctx = commitmentToSpaceTimeContext(commitment, st, h3Resolution, locations);
         const sig = getSpaceTimeSignature(ctx, h3Resolution);
         addTo(index.space_time_index, sig, commitment.id);
 
@@ -63,7 +64,7 @@ export function buildCommitmentIndex(
                 index.spatial_hierarchy,
                 commitment,
                 commitment.id,
-                { lat: st.lat, lon: st.long, h3_index: spatialThingToH3(st, h3Resolution) },
+                { lat: st.lat, lon: st.long, h3_index: spatialThingToH3WithContainment(st, locations, h3Resolution) },
                 {
                     quantity: commitment.resourceQuantity?.hasNumericalValue,
                     hours: commitment.effortQuantity?.hasNumericalValue,

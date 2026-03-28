@@ -7,7 +7,8 @@ import {
     getTotalSupplyQuantity,
     getTotalSupplyHours,
 } from "../indexes/independent-supply";
-import { buildAgentIndex } from "../indexes/agents";
+import { Observer } from "../observation/observer";
+import { SpatialThingStore } from "../knowledge/spatial-things";
 import type { EconomicResource, Intent, Commitment, SpatialThing } from "../schemas";
 
 // ---------------------------------------------------------------------------
@@ -46,14 +47,14 @@ function commitment(overrides: Partial<Commitment> & { id?: string }): Commitmen
 const LONDON: SpatialThing = { id: 'loc:london', lat: 51.5074, long: -0.1278 };
 const PARIS:  SpatialThing = { id: 'loc:paris',  lat: 48.8566, long: 2.3522 };
 
-const emptyAgentIndex = buildAgentIndex([], [], new Map());
+const emptyObserver = new Observer();
 
 // ---------------------------------------------------------------------------
 
 describe("IndependentSupplyIndex — inventory stratum", () => {
     test("resource with positive onhandQuantity appears as inventory slot", () => {
         const r = resource({ id: 'r1', conformsTo: 'spec:wheat', onhandQuantity: { hasNumericalValue: 100, hasUnit: 'kg' } });
-        const index = buildIndependentSupplyIndex([r], [], [], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([r], [], [], emptyObserver, new SpatialThingStore());
 
         expect(index.supply_slots.size).toBe(1);
         const slot = index.supply_slots.get('inv:r1');
@@ -67,13 +68,13 @@ describe("IndependentSupplyIndex — inventory stratum", () => {
 
     test("resource with zero onhandQuantity is excluded", () => {
         const r = resource({ conformsTo: 'spec:wheat', onhandQuantity: { hasNumericalValue: 0, hasUnit: 'kg' } });
-        const index = buildIndependentSupplyIndex([r], [], [], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([r], [], [], emptyObserver, new SpatialThingStore());
         expect(index.supply_slots.size).toBe(0);
     });
 
     test("resource without onhandQuantity is excluded", () => {
         const r = resource({ conformsTo: 'spec:wheat' });
-        const index = buildIndependentSupplyIndex([r], [], [], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([r], [], [], emptyObserver, new SpatialThingStore());
         expect(index.supply_slots.size).toBe(0);
     });
 
@@ -83,13 +84,13 @@ describe("IndependentSupplyIndex — inventory stratum", () => {
             containedIn: 'container:1',
             onhandQuantity: { hasNumericalValue: 50, hasUnit: 'kg' },
         });
-        const index = buildIndependentSupplyIndex([r], [], [], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([r], [], [], emptyObserver, new SpatialThingStore());
         expect(index.supply_slots.size).toBe(0);
     });
 
     test("spec_index populated for inventory slot", () => {
         const r = resource({ id: 'r2', conformsTo: 'spec:flour', onhandQuantity: { hasNumericalValue: 20, hasUnit: 'kg' } });
-        const index = buildIndependentSupplyIndex([r], [], [], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([r], [], [], emptyObserver, new SpatialThingStore());
 
         const ids = index.spec_index.get('spec:flour');
         expect(ids).toBeDefined();
@@ -103,8 +104,9 @@ describe("IndependentSupplyIndex — inventory stratum", () => {
             onhandQuantity: { hasNumericalValue: 10, hasUnit: 'ea' },
             currentLocation: 'loc:london',
         });
-        const locations = new Map<string, SpatialThing>([['loc:london', LONDON]]);
-        const index = buildIndependentSupplyIndex([r], [], [], emptyAgentIndex, locations);
+        const locations = new SpatialThingStore();
+        locations.addLocation(LONDON);
+        const index = buildIndependentSupplyIndex([r], [], [], emptyObserver, locations);
 
         const slot = index.supply_slots.get('inv:r3')!;
         expect(slot.h3_cell).toBeDefined();
@@ -125,7 +127,7 @@ describe("IndependentSupplyIndex — scheduled_receipt stratum (intents)", () =>
             resourceQuantity: { hasNumericalValue: 30, hasUnit: 'loaves' },
             hasEnd: '2026-03-01T12:00:00Z',
         });
-        const index = buildIndependentSupplyIndex([], [i], [], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([], [i], [], emptyObserver, new SpatialThingStore());
 
         expect(index.supply_slots.size).toBe(1);
         const slot = index.supply_slots.get('sched:i1');
@@ -139,19 +141,19 @@ describe("IndependentSupplyIndex — scheduled_receipt stratum (intents)", () =>
 
     test("intent without outputOf is excluded", () => {
         const i = intent({ resourceConformsTo: 'spec:bread', resourceQuantity: { hasNumericalValue: 5, hasUnit: 'loaves' } });
-        const index = buildIndependentSupplyIndex([], [i], [], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([], [i], [], emptyObserver, new SpatialThingStore());
         expect(index.supply_slots.size).toBe(0);
     });
 
     test("finished outputOf intent is excluded", () => {
         const i = intent({ outputOf: 'process:bake', finished: true, resourceConformsTo: 'spec:bread' });
-        const index = buildIndependentSupplyIndex([], [i], [], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([], [i], [], emptyObserver, new SpatialThingStore());
         expect(index.supply_slots.size).toBe(0);
     });
 
     test("work outputOf intent is excluded (labor handled separately)", () => {
         const i = intent({ outputOf: 'process:work', action: 'work', resourceConformsTo: 'spec:labor' });
-        const index = buildIndependentSupplyIndex([], [i], [], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([], [i], [], emptyObserver, new SpatialThingStore());
         expect(index.supply_slots.size).toBe(0);
     });
 });
@@ -165,7 +167,7 @@ describe("IndependentSupplyIndex — scheduled_receipt stratum (commitments)", (
             resourceQuantity: { hasNumericalValue: 5, hasUnit: 'tons' },
             due: '2026-04-01T00:00:00Z',
         });
-        const index = buildIndependentSupplyIndex([], [], [c], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([], [], [c], emptyObserver, new SpatialThingStore());
 
         expect(index.supply_slots.size).toBe(1);
         const slot = index.supply_slots.get('sched:c1');
@@ -177,30 +179,24 @@ describe("IndependentSupplyIndex — scheduled_receipt stratum (commitments)", (
 
     test("finished commitment is excluded", () => {
         const c = commitment({ outputOf: 'process:forge', finished: true, resourceConformsTo: 'spec:steel' });
-        const index = buildIndependentSupplyIndex([], [], [c], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([], [], [c], emptyObserver, new SpatialThingStore());
         expect(index.supply_slots.size).toBe(0);
     });
 
     test("work commitment is excluded", () => {
         const c = commitment({ outputOf: 'process:work', action: 'work' });
-        const index = buildIndependentSupplyIndex([], [], [c], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([], [], [c], emptyObserver, new SpatialThingStore());
         expect(index.supply_slots.size).toBe(0);
     });
 });
 
-describe("IndependentSupplyIndex — labor stratum", () => {
-    test("AgentCapacity with remaining_hours appears as labor slot", () => {
-        const workIntent = intent({
-            id: 'wi1',
-            action: 'work',
-            provider: 'agent:alice',
-            resourceConformsTo: 'spec:welding',
-            effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' },
-            hasBeginning: '2026-02-23T09:00:00Z',
-            hasEnd: '2026-02-23T17:00:00Z',
-        });
-        const agentIndex = buildAgentIndex([workIntent], [], new Map());
-        const index = buildIndependentSupplyIndex([], [], [], agentIndex, new Map());
+describe("IndependentSupplyIndex — capacity stratum", () => {
+    test("capacity resource with onhandQuantity appears as labor slot", () => {
+        const obs = new Observer();
+        obs.seedCapacityResource({ agentId: 'agent:alice', hoursAvailable: 8 });
+        const capRes = obs.getResource('capacity:agent:alice')!;
+
+        const index = buildIndependentSupplyIndex([capRes], [], [], obs, new SpatialThingStore());
 
         expect(index.supply_slots.size).toBe(1);
         const [slot] = [...index.supply_slots.values()];
@@ -210,48 +206,37 @@ describe("IndependentSupplyIndex — labor stratum", () => {
         expect(slot.agent_id).toBe('agent:alice');
     });
 
-    test("AgentCapacity with remaining_hours=0 is excluded", () => {
-        const workIntent = intent({
-            action: 'work',
-            provider: 'agent:bob',
-            resourceConformsTo: 'spec:welding',
-            effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' },
-            hasBeginning: '2026-02-23T09:00:00Z',
-            hasEnd: '2026-02-23T17:00:00Z',
-        });
-        const overCommit = commitment({
-            action: 'work',
-            provider: 'agent:bob',
-            effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' },
-            hasBeginning: '2026-02-23T09:00:00Z',
-            hasEnd: '2026-02-23T17:00:00Z',
-        });
-        const agentIndex = buildAgentIndex([workIntent], [], new Map(), 7, [overCommit]);
-        const index = buildIndependentSupplyIndex([], [], [], agentIndex, new Map());
+    test("capacity resource with zero hours is excluded", () => {
+        const obs = new Observer();
+        obs.seedCapacityResource({ agentId: 'agent:bob', hoursAvailable: 0 });
+        const capRes = obs.getResource('capacity:agent:bob')!;
+
+        const index = buildIndependentSupplyIndex([capRes], [], [], obs, new SpatialThingStore());
         expect(index.supply_slots.size).toBe(0);
     });
 
-    test("labor slot appears in spec_index for each resource_spec of the AgentCapacity", () => {
-        const i1 = intent({
-            action: 'work',
-            provider: 'agent:alice',
-            resourceConformsTo: 'spec:welding',
-            effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' },
-            hasBeginning: '2026-02-23T09:00:00Z',
-            hasEnd: '2026-02-23T17:00:00Z',
+    test("capacity slot appears in spec_index for each skill the agent holds", () => {
+        const obs = new Observer();
+        obs.seedCapacityResource({ agentId: 'agent:alice', hoursAvailable: 8 });
+        // Seed two skill resources for alice
+        obs.seedResource({
+            id: 'skill:alice:welding', conformsTo: 'spec:welding',
+            primaryAccountable: 'agent:alice',
+            accountingQuantity: { hasNumericalValue: 1, hasUnit: 'cert' },
+            onhandQuantity: { hasNumericalValue: 1, hasUnit: 'cert' },
         });
-        const i2 = intent({
-            action: 'work',
-            provider: 'agent:alice',
-            resourceConformsTo: 'spec:cutting',
-            effortQuantity: { hasNumericalValue: 6, hasUnit: 'hours' },
-            hasBeginning: '2026-02-23T09:00:00Z',
-            hasEnd: '2026-02-23T17:00:00Z',
+        obs.seedResource({
+            id: 'skill:alice:cutting', conformsTo: 'spec:cutting',
+            primaryAccountable: 'agent:alice',
+            accountingQuantity: { hasNumericalValue: 1, hasUnit: 'cert' },
+            onhandQuantity: { hasNumericalValue: 1, hasUnit: 'cert' },
         });
-        const agentIndex = buildAgentIndex([i1, i2], [], new Map());
-        const index = buildIndependentSupplyIndex([], [], [], agentIndex, new Map());
 
-        // ONE slot (same space-time sig → same AgentCapacity), but referenced by both specs
+        const capRes = obs.getResource('capacity:agent:alice')!;
+        // Only pass the capacity resource (skills are queried from observer)
+        const index = buildIndependentSupplyIndex([capRes], [], [], obs, new SpatialThingStore());
+
+        // ONE slot, referenced by both skill specs
         expect(index.supply_slots.size).toBe(1);
         const [slot] = [...index.supply_slots.values()];
 
@@ -259,27 +244,15 @@ describe("IndependentSupplyIndex — labor stratum", () => {
         expect(index.spec_index.get('spec:cutting')?.has(slot.id)).toBe(true);
     });
 
-    test("labor hours reflect remaining_hours (after committed deduction)", () => {
-        const workIntent = intent({
-            action: 'work',
-            provider: 'agent:carol',
-            resourceConformsTo: 'spec:masonry',
-            effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' },
-            hasBeginning: '2026-02-23T09:00:00Z',
-            hasEnd: '2026-02-23T17:00:00Z',
-        });
-        const committed = commitment({
-            action: 'work',
-            provider: 'agent:carol',
-            effortQuantity: { hasNumericalValue: 3, hasUnit: 'hours' },
-            hasBeginning: '2026-02-23T09:00:00Z',
-            hasEnd: '2026-02-23T12:00:00Z',
-        });
-        const agentIndex = buildAgentIndex([workIntent], [], new Map(), 7, [committed]);
-        const index = buildIndependentSupplyIndex([], [], [], agentIndex, new Map());
+    test("capacity hours come from onhandQuantity", () => {
+        const obs = new Observer();
+        obs.seedCapacityResource({ agentId: 'agent:carol', hoursAvailable: 5 });
+
+        const capRes = obs.getResource('capacity:agent:carol')!;
+        const index = buildIndependentSupplyIndex([capRes], [], [], obs, new SpatialThingStore());
 
         const [slot] = [...index.supply_slots.values()];
-        expect(slot.hours).toBe(5); // 8 - 3
+        expect(slot.hours).toBe(5);
     });
 });
 
@@ -297,12 +270,11 @@ describe("IndependentSupplyIndex — querySupplyBySpecAndLocation", () => {
             onhandQuantity: { hasNumericalValue: 5, hasUnit: 'tons' },
             currentLocation: 'loc:paris',
         });
-        const locations = new Map<string, SpatialThing>([
-            ['loc:london', LONDON],
-            ['loc:paris', PARIS],
-        ]);
+        const locations = new SpatialThingStore();
+        locations.addLocation(LONDON);
+        locations.addLocation(PARIS);
 
-        const index = buildIndependentSupplyIndex([londonResource, parisResource], [], [], emptyAgentIndex, locations, 4);
+        const index = buildIndependentSupplyIndex([londonResource, parisResource], [], [], emptyObserver, locations, 4);
 
         const londonResults = querySupplyBySpecAndLocation(index, 'spec:steel', {
             latitude: 51.5074,
@@ -323,7 +295,7 @@ describe("IndependentSupplyIndex — querySupplyBySpecAndLocation", () => {
 
     test("returns empty array for unknown spec", () => {
         const r = resource({ conformsTo: 'spec:steel', onhandQuantity: { hasNumericalValue: 10, hasUnit: 'tons' } });
-        const index = buildIndependentSupplyIndex([r], [], [], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([r], [], [], emptyObserver, new SpatialThingStore());
         const results = querySupplyBySpecAndLocation(index, 'spec:unknown', { latitude: 0, longitude: 0 });
         expect(results).toHaveLength(0);
     });
@@ -333,7 +305,7 @@ describe("IndependentSupplyIndex — getTotalSupplyQuantity / getTotalSupplyHour
     test("getTotalSupplyQuantity sums material slots only", () => {
         const r1 = resource({ conformsTo: 'spec:grain', onhandQuantity: { hasNumericalValue: 100, hasUnit: 'kg' } });
         const r2 = resource({ conformsTo: 'spec:grain', onhandQuantity: { hasNumericalValue: 50, hasUnit: 'kg' } });
-        const index = buildIndependentSupplyIndex([r1, r2], [], [], emptyAgentIndex, new Map());
+        const index = buildIndependentSupplyIndex([r1, r2], [], [], emptyObserver, new SpatialThingStore());
 
         const slots = querySupplyBySpec(index, 'spec:grain');
         expect(getTotalSupplyQuantity(slots)).toBe(150);
@@ -341,24 +313,17 @@ describe("IndependentSupplyIndex — getTotalSupplyQuantity / getTotalSupplyHour
     });
 
     test("getTotalSupplyHours sums labor slots only", () => {
-        const wi1 = intent({
-            action: 'work',
-            provider: 'agent:alice',
-            resourceConformsTo: 'spec:carpentry',
-            effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' },
-            hasBeginning: '2026-02-23T09:00:00Z',
-            hasEnd: '2026-02-23T17:00:00Z',
-        });
-        const wi2 = intent({
-            action: 'work',
-            provider: 'agent:bob',
-            resourceConformsTo: 'spec:carpentry',
-            effortQuantity: { hasNumericalValue: 6, hasUnit: 'hours' },
-            hasBeginning: '2026-02-23T09:00:00Z',
-            hasEnd: '2026-02-23T17:00:00Z',
-        });
-        const agentIndex = buildAgentIndex([wi1, wi2], [], new Map());
-        const index = buildIndependentSupplyIndex([], [], [], agentIndex, new Map());
+        const obs = new Observer();
+        obs.seedCapacityResource({ agentId: 'agent:alice', hoursAvailable: 8 });
+        obs.seedCapacityResource({ agentId: 'agent:bob', hoursAvailable: 6 });
+        // Both have carpentry skill
+        obs.seedResource({ id: 'skill:alice:carp', conformsTo: 'spec:carpentry', primaryAccountable: 'agent:alice',
+            accountingQuantity: { hasNumericalValue: 1, hasUnit: 'cert' }, onhandQuantity: { hasNumericalValue: 1, hasUnit: 'cert' } });
+        obs.seedResource({ id: 'skill:bob:carp', conformsTo: 'spec:carpentry', primaryAccountable: 'agent:bob',
+            accountingQuantity: { hasNumericalValue: 1, hasUnit: 'cert' }, onhandQuantity: { hasNumericalValue: 1, hasUnit: 'cert' } });
+
+        const resources = obs.allResources().filter(r => !!r.unitOfEffort);
+        const index = buildIndependentSupplyIndex(resources, [], [], obs, new SpatialThingStore());
 
         const slots = querySupplyBySpec(index, 'spec:carpentry');
         expect(getTotalSupplyHours(slots)).toBe(14); // 8 + 6
@@ -366,17 +331,14 @@ describe("IndependentSupplyIndex — getTotalSupplyQuantity / getTotalSupplyHour
     });
 
     test("mixed strata: quantities and hours both summed correctly", () => {
+        const obs = new Observer();
+        obs.seedCapacityResource({ agentId: 'agent:alice', hoursAvailable: 4 });
+        obs.seedResource({ id: 'skill:alice:mixed', conformsTo: 'spec:mixed', primaryAccountable: 'agent:alice',
+            accountingQuantity: { hasNumericalValue: 1, hasUnit: 'cert' }, onhandQuantity: { hasNumericalValue: 1, hasUnit: 'cert' } });
+
         const r = resource({ conformsTo: 'spec:mixed', onhandQuantity: { hasNumericalValue: 20, hasUnit: 'kg' } });
-        const wi = intent({
-            action: 'work',
-            provider: 'agent:alice',
-            resourceConformsTo: 'spec:mixed',
-            effortQuantity: { hasNumericalValue: 4, hasUnit: 'hours' },
-            hasBeginning: '2026-02-23T09:00:00Z',
-            hasEnd: '2026-02-23T13:00:00Z',
-        });
-        const agentIndex = buildAgentIndex([wi], [], new Map());
-        const index = buildIndependentSupplyIndex([r], [], [], agentIndex, new Map());
+        const capRes = obs.getResource('capacity:agent:alice')!;
+        const index = buildIndependentSupplyIndex([r, capRes], [], [], obs, new SpatialThingStore());
 
         const slots = querySupplyBySpec(index, 'spec:mixed');
         expect(getTotalSupplyQuantity(slots)).toBe(20);

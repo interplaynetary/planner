@@ -28,6 +28,10 @@
         "note": {
             "description": "A textual comment or description.",
             "type": "string"
+        },
+        "containedIn": {
+            "description": "References another SpatialThing that this location is contained in (e.g. a room in a floor, a floor in a building).",
+            "type": "string"
         }
     }
 }

@@ -2,9 +2,10 @@ import {
     createHexIndex, addItemToHexIndex, queryHexIndexRadius,
     type HexIndex, type HexNode,
 } from '../utils/space-time-index';
-import { spatialThingToH3 } from '../utils/space';
+import { spatialThingToH3WithContainment } from '../utils/space';
 import { getSpaceTimeSignature, toDateKey, wrapDate } from '../utils/space-time-keys';
-import type { Proposal, SpatialThing } from '../schemas';
+import type { Proposal } from '../schemas';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 
 export interface ProposalIndex {
     proposals:         Map<string, Proposal>;
@@ -22,7 +23,7 @@ function addTo(map: Map<string, Set<string>>, key: string | undefined, id: strin
 
 export function buildProposalIndex(
     proposals: Proposal[],
-    locations: Map<string, SpatialThing>,
+    locations: SpatialThingStore,
     h3Resolution: number = 7,
 ): ProposalIndex {
     const index: ProposalIndex = {
@@ -42,9 +43,9 @@ export function buildProposalIndex(
             addTo(index.scope_index, agentId, proposal.id);
         }
 
-        const st = proposal.eligibleLocation ? locations.get(proposal.eligibleLocation) : undefined;
+        const st = proposal.eligibleLocation ? locations.getLocation(proposal.eligibleLocation) : undefined;
 
-        const h3Cell = st ? spatialThingToH3(st, h3Resolution) : undefined;
+        const h3Cell = st ? spatialThingToH3WithContainment(st, locations, h3Resolution) : undefined;
         const sig = getSpaceTimeSignature({
             h3_index: h3Cell,
             latitude: st?.lat,

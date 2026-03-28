@@ -1,8 +1,9 @@
 import * as h3 from 'h3-js';
-import { computeH3Index, REMOTE_H3_INDEX, spatialThingToH3 } from './space';
+import { computeH3Index, REMOTE_H3_INDEX, spatialThingToH3, spatialThingToH3WithContainment } from './space';
 import type { AvailabilityWindow, TemporalExpression, TimeRange, DaySchedule, WeekSchedule, MonthSchedule, DayOfWeek } from './time';
 import { isSpecificDateWindow } from './time';
 import type { Intent, Commitment, EconomicEvent, SpatialThing } from '../schemas';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 
 /**
  * Creates a deterministic, normalized string representation of a TimeRange.
@@ -230,13 +231,29 @@ export function groupSlotsBySpaceTime<T extends QuantifiedSpaceTimeContext>(
 function spatialContextFromSpatialThing(
     st: SpatialThing | undefined,
     h3Resolution: number = 7,
+    store?: SpatialThingStore,
 ): Pick<SpaceTimeContext, 'latitude' | 'longitude' | 'h3_index'> {
     if (!st) return {};
-    return {
-        latitude: st.lat,
-        longitude: st.long,
-        h3_index: spatialThingToH3(st, h3Resolution),
-    };
+    // If the location has its own coordinates, use them directly.
+    if (st.lat !== undefined && st.long !== undefined) {
+        return {
+            latitude: st.lat,
+            longitude: st.long,
+            h3_index: spatialThingToH3(st, h3Resolution),
+        };
+    }
+    // Otherwise, resolve through containment chain if store is available.
+    if (store) {
+        const coords = store.resolveCoordinates(st.id);
+        if (coords) {
+            return {
+                latitude: coords.lat,
+                longitude: coords.long,
+                h3_index: spatialThingToH3WithContainment(st, store, h3Resolution),
+            };
+        }
+    }
+    return {};
 }
 
 /**
@@ -259,8 +276,9 @@ export function intentToSpaceTimeContext(
     intent: Intent,
     location?: SpatialThing,
     h3Resolution: number = 7,
+    store?: SpatialThingStore,
 ): SpaceTimeContext {
-    const spatial = spatialContextFromSpatialThing(location, h3Resolution);
+    const spatial = spatialContextFromSpatialThing(location, h3Resolution, store);
 
     const start_date = intent.hasBeginning
         ?? intent.hasPointInTime
@@ -293,8 +311,9 @@ export function commitmentToSpaceTimeContext(
     commitment: Commitment,
     location?: SpatialThing,
     h3Resolution: number = 7,
+    store?: SpatialThingStore,
 ): SpaceTimeContext {
-    const spatial = spatialContextFromSpatialThing(location, h3Resolution);
+    const spatial = spatialContextFromSpatialThing(location, h3Resolution, store);
 
     const start_date = commitment.hasBeginning
         ?? commitment.hasPointInTime
@@ -328,8 +347,9 @@ export function economicEventToSpaceTimeContext(
     event: EconomicEvent,
     location?: SpatialThing,
     h3Resolution: number = 7,
+    store?: SpatialThingStore,
 ): SpaceTimeContext {
-    const spatial = spatialContextFromSpatialThing(location, h3Resolution);
+    const spatial = spatialContextFromSpatialThing(location, h3Resolution, store);
 
     const start_date = event.hasBeginning
         ?? event.hasPointInTime

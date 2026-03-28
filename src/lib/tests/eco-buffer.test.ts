@@ -10,10 +10,11 @@ import { buildAgentIndex } from '../indexes/agents';
 import { bufferStatus } from '../algorithms/ddmrp';
 import { PlanStore, PLAN_TAGS, type ConservationMeta } from '../planning/planning';
 import { ProcessRegistry } from '../process-registry';
+import { SpatialThingStore } from '../knowledge/spatial-things';
 
-const locations = new Map();
+const locations = new SpatialThingStore();
 const di = buildIndependentDemandIndex([], [], [], locations);
-const ai = buildAgentIndex([], [], new Map(), 7);
+const ai = buildAgentIndex([], [], new SpatialThingStore(), 7);
 const si = buildIndependentSupplyIndex([], [], [], ai, locations);
 
 describe('ecological buffer — tippingPoint + ConservationSignal', () => {

@@ -420,7 +420,9 @@ function processDemand(
         for (const r of params.observer.allResources()) {
             if (r.conformsTo !== demand.specId) continue;
             if (r.containedIn) continue;                         // not free to transport
-            if (!r.currentLocation || r.currentLocation === demand.atLocation) continue;
+            if (!r.currentLocation) continue;
+            // Skip resources already at the demand location (including hierarchical containment)
+            if (netter.locationContains(demand.atLocation, r.currentLocation)) continue;
             const avail = netter.netAvailableQty(demand.specId, { atLocation: r.currentLocation });
             if (avail > 0) candidateLocations.set(r.currentLocation, avail);
         }

@@ -9,6 +9,7 @@ import { buildIndependentDemandIndex } from '../indexes/independent-demand';
 import { buildIndependentSupplyIndex } from '../indexes/independent-supply';
 import { buildAgentIndex } from '../indexes/agents';
 import { PLAN_TAGS } from '../planning/planning';
+import { SpatialThingStore } from '../knowledge/spatial-things';
 
 // =============================================================================
 // HIERARCHY: leaf-a, leaf-b → mid → root
@@ -21,8 +22,8 @@ const parentOf = new Map([
     ['mid', 'root'],
 ]);
 
-const locations = new Map();
-const emptyAgentIndex = buildAgentIndex([], [], new Map(), 7);
+const locations = new SpatialThingStore();
+const emptyAgentIndex = buildAgentIndex([], [], new SpatialThingStore(), 7);
 const horizon = { from: new Date('2026-04-01'), to: new Date('2026-06-30') };
 
 let idCounter = 0;

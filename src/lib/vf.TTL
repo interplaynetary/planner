@@ -877,6 +877,15 @@ vf:hasDetailedGeometry a    owl:ObjectProperty ;
         rdfs:comment        "A spatial geometry of any complexity and tooling supported by geosparql."@en ;
         .
 
+vf:spatiallyContainedIn a   owl:ObjectProperty ;
+        rdfs:label          "spatially contained in"@en ;
+        rdfs:domain         vf:SpatialThing ;
+        rdfs:range          vf:SpatialThing ;
+        owl:maxCardinality  1 ;
+        vs:term_status      "testing" ;
+        rdfs:comment        "References another SpatialThing that this location is physically contained within, enabling hierarchical spatial containment (e.g. room in floor, floor in building)."@en ;
+        .
+
 vf:currentLocation a        owl:ObjectProperty ;
         rdfs:label          "current location"@en ;
         rdfs:domain         vf:EconomicResource ;

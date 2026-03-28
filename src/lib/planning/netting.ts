@@ -18,6 +18,7 @@
 import { type PlanStore, PLAN_TAGS } from './planning';
 import type { Observer } from '../observation/observer';
 import type { ScheduleBook } from './schedule-book';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 import { isWithinTemporalExpression } from '../utils/time';
 
 /**
@@ -113,7 +114,27 @@ export class PlanNetter {
         private readonly observer?: Observer,
         private readonly scheduleBook?: ScheduleBook,
         private readonly conservationFloors?: Map<string, number>,
+        private readonly locationStore?: SpatialThingStore,
     ) {}
+
+    /**
+     * Hierarchical location match: returns true if `candidateLocation` is at
+     * or contained within `demandLocation`. Falls back to exact match when
+     * no locationStore is available.
+     */
+    private locationMatches(candidateLocation: string, demandLocation: string): boolean {
+        if (candidateLocation === demandLocation) return true;
+        return this.locationStore?.isDescendantOrEqual(candidateLocation, demandLocation) ?? false;
+    }
+
+    /**
+     * Public hierarchical containment check: returns true if `candidateLocation`
+     * is equal to or a descendant of `ancestorLocation`.
+     * Used by dependent-demand for transport routing decisions.
+     */
+    locationContains(ancestorLocation: string, candidateLocation: string): boolean {
+        return this.locationMatches(candidateLocation, ancestorLocation);
+    }
 
     /** Start a named transaction. Allocations can be committed or rolled back. */
     begin(): NettingTransaction {
@@ -152,8 +173,8 @@ export class PlanNetter {
                     } else {
                         if (r.containedIn !== undefined) return false;
                     }
-                    // Location guard: only absorb inventory at the demand location
-                    if (opts?.atLocation && r.currentLocation && r.currentLocation !== opts.atLocation) return false;
+                    // Location guard: only absorb inventory at the demand location (hierarchical)
+                    if (opts?.atLocation && r.currentLocation && !this.locationMatches(r.currentLocation, opts.atLocation)) return false;
                     return true;
                 });
 
@@ -184,8 +205,8 @@ export class PlanNetter {
                 ) {
                     // Temporal guard: output must be ready by neededBy
                     if (opts?.neededBy && intent.due && new Date(intent.due) > opts.neededBy) continue;
-                    // Location guard: only absorb output at the demand location
-                    if (opts?.atLocation && intent.atLocation && intent.atLocation !== opts.atLocation) continue;
+                    // Location guard: only absorb output at the demand location (hierarchical)
+                    if (opts?.atLocation && intent.atLocation && !this.locationMatches(intent.atLocation, opts.atLocation)) continue;
                     const take = Math.min(intent.resourceQuantity!.hasNumericalValue, remaining);
                     this.allocated.add(intent.id);
                     tx?.track(intent.id);
@@ -222,8 +243,8 @@ export class PlanNetter {
                 ) {
                     // Temporal guard: output must be ready by neededBy
                     if (opts?.neededBy && commitment.due && new Date(commitment.due) > opts.neededBy) continue;
-                    // Location guard: only absorb output at the demand location
-                    if (opts?.atLocation && commitment.atLocation && commitment.atLocation !== opts.atLocation) continue;
+                    // Location guard: only absorb output at the demand location (hierarchical)
+                    if (opts?.atLocation && commitment.atLocation && !this.locationMatches(commitment.atLocation, opts.atLocation)) continue;
                     const take = Math.min(commitment.resourceQuantity!.hasNumericalValue, remaining);
                     this.allocated.add(commitment.id);
                     tx?.track(commitment.id);
@@ -272,8 +293,8 @@ export class PlanNetter {
             ) {
                 // Temporal guard: supply must be available before the consumption is due
                 if (availableFrom && intent.due && new Date(intent.due) < availableFrom) continue;
-                // Location guard: only absorb consumptions at the supply location
-                if (atLocation && intent.atLocation && intent.atLocation !== atLocation) continue;
+                // Location guard: only absorb consumptions at the supply location (hierarchical)
+                if (atLocation && intent.atLocation && !this.locationMatches(intent.atLocation, atLocation)) continue;
                 const take = Math.min(intent.resourceQuantity!.hasNumericalValue, remaining);
                 this.allocated.add(intent.id);
                 remaining -= take;
@@ -292,8 +313,8 @@ export class PlanNetter {
             ) {
                 // Temporal guard: supply must be available before the consumption is due
                 if (availableFrom && commitment.due && new Date(commitment.due) < availableFrom) continue;
-                // Location guard: only absorb consumptions at the supply location
-                if (atLocation && commitment.atLocation && commitment.atLocation !== atLocation) continue;
+                // Location guard: only absorb consumptions at the supply location (hierarchical)
+                if (atLocation && commitment.atLocation && !this.locationMatches(commitment.atLocation, atLocation)) continue;
                 const take = Math.min(commitment.resourceQuantity!.hasNumericalValue, remaining);
                 this.allocated.add(commitment.id);
                 remaining -= take;
@@ -420,6 +441,7 @@ export class PlanNetter {
             opts ? opts.observer : this.observer,
             this.scheduleBook,
             this.conservationFloors,
+            this.locationStore,
         );
         for (const id of this.allocated) child.allocated.add(id);
         return child;
@@ -491,8 +513,8 @@ export class PlanNetter {
                 } else {
                     if (r.containedIn !== undefined) continue;
                 }
-                // Location guard: only count inventory at the queried location
-                if (opts?.atLocation && r.currentLocation && r.currentLocation !== opts.atLocation) continue;
+                // Location guard: only count inventory at the queried location (hierarchical)
+                if (opts?.atLocation && r.currentLocation && !this.locationMatches(r.currentLocation, opts.atLocation)) continue;
                 // Availability guard: delegate to scheduleBook when available, else inline check
                 if (opts?.asOf) {
                     if (this.scheduleBook) {
@@ -520,8 +542,8 @@ export class PlanNetter {
             ) {
                 // Temporal guard: only count outputs that are ready by asOf
                 if (opts?.asOf && intent.due && new Date(intent.due) > opts.asOf) continue;
-                // Location guard: only count output at the queried location
-                if (opts?.atLocation && intent.atLocation && intent.atLocation !== opts.atLocation) continue;
+                // Location guard: only count output at the queried location (hierarchical)
+                if (opts?.atLocation && intent.atLocation && !this.locationMatches(intent.atLocation, opts.atLocation)) continue;
                 total += intent.resourceQuantity!.hasNumericalValue;
             }
         }
@@ -534,8 +556,8 @@ export class PlanNetter {
             ) {
                 // Temporal guard: only count outputs that are ready by asOf
                 if (opts?.asOf && commitment.due && new Date(commitment.due) > opts.asOf) continue;
-                // Location guard: only count output at the queried location
-                if (opts?.atLocation && commitment.atLocation && commitment.atLocation !== opts.atLocation) continue;
+                // Location guard: only count output at the queried location (hierarchical)
+                if (opts?.atLocation && commitment.atLocation && !this.locationMatches(commitment.atLocation, opts.atLocation)) continue;
                 total += commitment.resourceQuantity!.hasNumericalValue;
             }
         }
@@ -553,8 +575,8 @@ export class PlanNetter {
             ) {
                 // Temporal guard: only deduct consumptions due by asOf (future ones haven't consumed yet)
                 if (opts?.asOf && intent.due && new Date(intent.due) > opts.asOf) continue;
-                // Location guard: only deduct consumptions at the queried location
-                if (opts?.atLocation && intent.atLocation && intent.atLocation !== opts.atLocation) continue;
+                // Location guard: only deduct consumptions at the queried location (hierarchical)
+                if (opts?.atLocation && intent.atLocation && !this.locationMatches(intent.atLocation, opts.atLocation)) continue;
                 total -= intent.resourceQuantity!.hasNumericalValue;
             }
         }
@@ -568,8 +590,8 @@ export class PlanNetter {
             ) {
                 // Temporal guard: only deduct consumptions due by asOf (future ones haven't consumed yet)
                 if (opts?.asOf && commitment.due && new Date(commitment.due) > opts.asOf) continue;
-                // Location guard: only deduct consumptions at the queried location
-                if (opts?.atLocation && commitment.atLocation && commitment.atLocation !== opts.atLocation) continue;
+                // Location guard: only deduct consumptions at the queried location (hierarchical)
+                if (opts?.atLocation && commitment.atLocation && !this.locationMatches(commitment.atLocation, opts.atLocation)) continue;
                 total -= commitment.resourceQuantity!.hasNumericalValue;
             }
         }

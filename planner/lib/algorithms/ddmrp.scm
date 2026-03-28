@@ -21,6 +21,34 @@
 
 
 ;; =========================================================================
+;; Location-aware helpers
+;; =========================================================================
+
+(define (sum-onhand-at-location observer spec-id at-location location-store)
+  "Sum onhandQuantity for spec, filtered to resources at location or descendants.
+   When at-location is #f, sums across all locations."
+  (let ((resources ($ observer 'conforming-resources spec-id)))
+    (fold (lambda (r acc)
+            (let ((loc (economic-resource-current-location r)))
+              (if (or (not at-location)
+                      (not loc)
+                      (equal? loc at-location)
+                      (and location-store
+                           ($ location-store 'is-descendant-or-equal loc at-location)))
+                  (+ acc (measure-qty (economic-resource-onhand-quantity r)))
+                  acc)))
+          0 resources)))
+
+(define (location-matches-ddmrp candidate ancestor location-store)
+  "True if candidate location is at or contained within ancestor.
+   When either is #f, returns #t (no constraint)."
+  (or (not ancestor) (not candidate)
+      (equal? candidate ancestor)
+      (and location-store
+           ($ location-store 'is-descendant-or-equal candidate ancestor))))
+
+
+;; =========================================================================
 ;; ADU — Average Daily Usage
 ;; =========================================================================
 
@@ -210,20 +238,15 @@
 ;; NFP — Net Flow Position
 ;; =========================================================================
 
-(define (compute-nfp spec-id buffer-zone profile plan-store observer
-                      . rest)
+(define* (compute-nfp spec-id buffer-zone profile plan-store observer
+                       #:key (today-seconds (current-time))
+                             (location-store #f))
   "Compute NFP = onhand + onorder - qualifiedDemand.
    Returns alist: ((nfp . number) (onhand . number) (onorder . number)
                     (qualified-demand . number) (zone . symbol) (priority . number))."
-  (let* ((today-seconds (if (pair? rest) (car rest) (current-time)))
-         ;; Onhand: sum of onhandQuantity for conforming resources
-         (resources ($ observer 'conforming-resources spec-id))
-         (onhand (fold (lambda (r acc)
-                         (+ acc (if (economic-resource-onhand-quantity r)
-                                    (measure-has-numerical-value
-                                      (economic-resource-onhand-quantity r))
-                                    0)))
-                       0 resources))
+  (let* (;; Onhand: sum filtered to buffer zone's location scope
+         (onhand (sum-onhand-at-location observer spec-id
+                   (buffer-zone-at-location buffer-zone) location-store))
          ;; Onorder: sum of open supply commitments (outputOf set, not finished,
          ;;          excluding non-consuming actions like use/work/cite/deliverService)
          (all-commitments ($ plan-store 'commitments-for-spec spec-id))
@@ -299,8 +322,9 @@
 ;; Buffer Recalibration
 ;; =========================================================================
 
-(define (recalibrate-buffer-zone existing new-adu new-dlt-days profile
-                                 adjustments as-of-seconds)
+(define* (recalibrate-buffer-zone existing new-adu new-dlt-days profile
+                                  adjustments as-of-seconds
+                                  #:key (location-store #f))
   "Recalibrate a BufferZone with fresh ADU and DLT.
    Returns a new <buffer-zone> record."
   (let* ((classification (buffer-zone-buffer-classification existing)))
@@ -310,7 +334,8 @@
         (let* (;; Aggregate adjustment factors
                (agg (aggregate-adjustment-factors adjustments as-of-seconds
                       (buffer-zone-spec-id existing)
-                      (buffer-zone-at-location existing)))
+                      #:at-location (buffer-zone-at-location existing)
+                      #:location-store location-store))
                (opts `((demand-adj-factor . ,(or (assq-ref agg 'demand) 1.0))
                        (lead-time-adj-factor . ,(or (assq-ref agg 'lead-time) 1.0))
                        (red-zone-adj-factor . ,(or (assq-ref agg 'red) 1.0))
@@ -373,18 +398,19 @@
 ;; Adjustment Factor Aggregation
 ;; =========================================================================
 
-(define (aggregate-adjustment-factors adjustments as-of-seconds spec-id
-                                      . rest)
+(define* (aggregate-adjustment-factors adjustments as-of-seconds spec-id
+                                       #:key (at-location #f) (location-store #f))
   "Aggregate active DemandAdjustmentFactors by type.
    Returns alist: ((demand . factor) (lead-time . factor)
                     (red . factor) (yellow . factor) (green . factor))."
-  (let* ((at-location (and (pair? rest) (car rest)))
-         (active (filter
+  (let* ((active (filter
                    (lambda (daf)
                      (and (equal? (demand-adjustment-factor-spec-id daf) spec-id)
-                          (or (not at-location)
-                              (not (demand-adjustment-factor-at-location daf))
-                              (equal? (demand-adjustment-factor-at-location daf) at-location))
+                          (or (not (demand-adjustment-factor-at-location daf))
+                              (location-matches-ddmrp
+                                at-location
+                                (demand-adjustment-factor-at-location daf)
+                                location-store))
                           (or (not (demand-adjustment-factor-is-active daf))
                               (demand-adjustment-factor-is-active daf))
                           (let ((from (iso-datetime->epoch
@@ -588,16 +614,15 @@
             (< (or (assq-ref a 'nfp-pct) 0)
                (or (assq-ref b 'nfp-pct) 0)))))))
 
-(define (project-on-hand spec-id buffer-zone today-seconds plan-store observer)
+(define* (project-on-hand spec-id buffer-zone today-seconds plan-store observer
+                          #:key (location-store #f))
   "Day-by-day on-hand projection over DLT window.
    Returns list of alists: ((date . str) (demand . n) (receipts . n)
                              (projected-on-hand . n) (zone . symbol))."
   (let* ((dlt-days (max 1 (inexact->exact (ceiling (buffer-zone-dlt-days buffer-zone)))))
-         ;; Current on-hand
-         (resources ($ observer 'conforming-resources spec-id))
-         (initial-oh (fold (lambda (r acc)
-                             (+ acc (measure-qty (economic-resource-onhand-quantity r))))
-                           0 resources))
+         ;; Current on-hand (filtered to buffer zone's location scope)
+         (initial-oh (sum-onhand-at-location observer spec-id
+                       (buffer-zone-at-location buffer-zone) location-store))
          ;; Bucket supply and demand by day
          (supply-by-day (make-hash-table))
          (demand-by-day (make-hash-table))
@@ -702,28 +727,29 @@
               ($ buffer-zone-store 'replace-zone updated)))))
       all-zones)))
 
-(define (build-buffer-health-report buffer-zone-store buffer-profiles
-                                     plan-store observer . rest)
+(define* (build-buffer-health-report buffer-zone-store buffer-profiles
+                                      plan-store observer
+                                      #:key (as-of (current-time))
+                                            (location-store #f))
   "Aggregate buffer health snapshot across all zones.
    Returns alist: ((as-of . seconds) (buffers . list) (summary . alist))."
-  (let* ((as-of (if (pair? rest) (car rest) (current-time)))
-         (all-zones ($ buffer-zone-store 'all-zones))
+  (let* ((all-zones ($ buffer-zone-store 'all-zones))
          (red-count 0) (yellow-count 0) (green-count 0) (excess-count 0)
          (buffers
            (map (lambda (bz)
                   (let* ((profile (and buffer-profiles
                                       (hashmap-ref buffer-profiles
                                         (buffer-zone-profile-id bz) #f)))
-                         (resources ($ observer 'conforming-resources
-                                      (buffer-zone-spec-id bz)))
-                         (onhand (fold (lambda (r acc)
-                                         (+ acc (measure-qty
-                                                  (economic-resource-onhand-quantity r))))
-                                       0 resources))
+                         (onhand (sum-onhand-at-location observer
+                                   (buffer-zone-spec-id bz)
+                                   (buffer-zone-at-location bz)
+                                   location-store))
                          (zone (if profile
                                    (let ((nfp (compute-nfp
                                                 (buffer-zone-spec-id bz) bz profile
-                                                plan-store observer as-of)))
+                                                plan-store observer
+                                                #:today-seconds as-of
+                                                #:location-store location-store)))
                                      (assq-ref nfp 'zone))
                                    (assq-ref (buffer-status onhand bz) 'zone)))
                          (tp-breached (and (buffer-zone-tipping-point bz)
@@ -859,7 +885,8 @@
              slots)))
     (sort scored (lambda (a b) (< (assq-ref a 'nfp-pct) (assq-ref b 'nfp-pct))))))
 
-(define (order-activity-summary plan-store observer zone-store)
+(define* (order-activity-summary plan-store observer zone-store
+                                  #:key (location-store #f))
   "Unified execution dashboard: open supply commitments with buffer status."
   (let ((commits ($ plan-store 'all-commitments)))
     (filter-map
@@ -867,10 +894,12 @@
         (and (not (commitment-finished c))
              (commitment-resource-conforms-to c)
              (let* ((spec (commitment-resource-conforms-to c))
-                    (bz (and zone-store ($ zone-store 'find-zone spec)))
-                    (resources ($ observer 'conforming-resources spec))
-                    (onhand (fold (lambda (r a) (+ a (measure-qty (economic-resource-onhand-quantity r))))
-                                  0 resources))
+                    (bz (and zone-store
+                             ($ zone-store 'find-zone spec
+                                (commitment-at-location c) location-store)))
+                    (onhand (sum-onhand-at-location observer spec
+                              (and bz (buffer-zone-at-location bz))
+                              location-store))
                     (status (and bz (buffer-status onhand bz))))
                `((commitment-id . ,(commitment-id c))
                  (spec-id . ,spec)

@@ -25,7 +25,8 @@ import {
 } from '../utils/space-time-index';
 import { spatialThingToH3 } from '../utils/space';
 import type { EconomicResource, Intent, Commitment, SpatialThing } from '../schemas';
-import type { AgentIndex } from './agents';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
+import type { Observer } from '../observation/observer';
 
 // =============================================================================
 // TYPES
@@ -153,12 +154,16 @@ function addSlot(
 }
 
 /**
- * Build the IndependentSupplyIndex from inventory, planned flows, and labor.
+ * Build the IndependentSupplyIndex from resources and planned flows.
  *
- * @param resources    All EconomicResources in scope (current on-hand inventory)
+ * Two strata:
+ *   1. Resources — material (inventory) and capacity (labor), distinguished by unitOfEffort.
+ *   2. Scheduled — outputOf Intents/Commitments (future production/receipts).
+ *
+ * @param resources    All EconomicResources in scope
  * @param intents      All Intents (only outputOf + non-work + non-finished are indexed)
  * @param commitments  All Commitments (only outputOf + non-work + non-finished are indexed)
- * @param agentIndex   Pre-built AgentIndex providing remaining labor capacity
+ * @param observer     Observer for skill queries on capacity resources
  * @param locations    SpatialThing lookup for H3 indexing
  * @param h3Resolution H3 resolution for spatial bucketing (default 7 ≈ 1km²)
  */
@@ -166,8 +171,8 @@ export function buildIndependentSupplyIndex(
     resources: EconomicResource[],
     intents: Intent[],
     commitments: Commitment[],
-    agentIndex: AgentIndex,
-    locations: Map<string, SpatialThing>,
+    observer: Observer,
+    locations: SpatialThingStore,
     h3Resolution: number = 7,
 ): IndependentSupplyIndex {
     const index: IndependentSupplyIndex = {
@@ -178,31 +183,50 @@ export function buildIndependentSupplyIndex(
         scope_index: new Map(),
     };
 
-    // --- Stratum 1: Inventory (EconomicResources) ---
+    // --- Stratum 1: Resources (material inventory + agent capacity) ---
 
     for (const resource of resources) {
-        // Skip contained resources (not top-level)
         if (resource.containedIn) continue;
-        // Skip capacity resources — handled separately in Stratum 3 (AgentCapacity)
-        if (resource.unitOfEffort) continue;
         const qty = resource.onhandQuantity?.hasNumericalValue ?? 0;
         if (qty <= 0) continue;
 
-        const st = resource.currentLocation ? locations.get(resource.currentLocation) : undefined;
+        const st = resource.currentLocation ? locations.getLocation(resource.currentLocation) : undefined;
         const h3Cell = st ? spatialThingToH3(st, h3Resolution) : undefined;
 
-        const slot: SupplySlot = {
-            id:        'inv:' + resource.id,
-            slot_type: 'inventory',
-            spec_id:   resource.conformsTo,
-            quantity:  qty,
-            hours:     0,
-            h3_cell:   h3Cell,
-            source_id: resource.id,
-            scope_ids: resource.custodianScope ? [resource.custodianScope] : [],
-        };
+        if (resource.unitOfEffort) {
+            // Capacity resource → labor supply slot
+            const agentId = resource.primaryAccountable;
+            const skills = agentId ? observer.skillsOf(agentId) : [];
+            const specIds = skills.map(s => s.conformsTo).filter(Boolean);
 
-        addSlot(index, slot, resource.conformsTo ? [resource.conformsTo] : [], st, h3Resolution);
+            const slot: SupplySlot = {
+                id:        'capacity:' + resource.id,
+                slot_type: 'labor',
+                spec_id:   undefined,
+                quantity:  0,
+                hours:     qty,
+                h3_cell:   h3Cell,
+                agent_id:  agentId,
+                source_id: resource.id,
+                scope_ids: resource.custodianScope ? [resource.custodianScope] : [],
+            };
+
+            addSlot(index, slot, specIds, st, h3Resolution);
+        } else {
+            // Material resource → inventory supply slot
+            const slot: SupplySlot = {
+                id:        'inv:' + resource.id,
+                slot_type: 'inventory',
+                spec_id:   resource.conformsTo,
+                quantity:  qty,
+                hours:     0,
+                h3_cell:   h3Cell,
+                source_id: resource.id,
+                scope_ids: resource.custodianScope ? [resource.custodianScope] : [],
+            };
+
+            addSlot(index, slot, resource.conformsTo ? [resource.conformsTo] : [], st, h3Resolution);
+        }
     }
 
     // --- Stratum 2: Scheduled Receipts (outputOf Intents) ---
@@ -212,7 +236,7 @@ export function buildIndependentSupplyIndex(
         if (intent.finished) continue;
         if (intent.action === 'work') continue;   // labor handled separately
 
-        const st = intent.atLocation ? locations.get(intent.atLocation) : undefined;
+        const st = intent.atLocation ? locations.getLocation(intent.atLocation) : undefined;
         const h3Cell = st ? spatialThingToH3(st, h3Resolution) : undefined;
 
         const slot: SupplySlot = {
@@ -237,7 +261,7 @@ export function buildIndependentSupplyIndex(
         if (commitment.finished) continue;
         if (commitment.action === 'work') continue;
 
-        const st = commitment.atLocation ? locations.get(commitment.atLocation) : undefined;
+        const st = commitment.atLocation ? locations.getLocation(commitment.atLocation) : undefined;
         const h3Cell = st ? spatialThingToH3(st, h3Resolution) : undefined;
 
         const slot: SupplySlot = {
@@ -253,34 +277,6 @@ export function buildIndependentSupplyIndex(
         };
 
         addSlot(index, slot, commitment.resourceConformsTo ? [commitment.resourceConformsTo] : [], st, h3Resolution);
-    }
-
-    // --- Stratum 3: Labor (AgentCapacity from AgentIndex) ---
-
-    for (const capacity of agentIndex.agent_capacities.values()) {
-        if (capacity.remaining_hours <= 0) continue;
-
-        const loc = capacity.location;
-        const st: SpatialThing | undefined = (loc?.latitude !== undefined && loc?.longitude !== undefined)
-            ? { id: `synthetic:${capacity.id}`, lat: loc.latitude, long: loc.longitude }
-            : undefined;
-        const h3Cell = loc?.h3_index ?? (st ? spatialThingToH3(st, h3Resolution) : undefined);
-
-        const slot: SupplySlot = {
-            id:        'labor:' + capacity.id,
-            slot_type: 'labor',
-            spec_id:   undefined,
-            quantity:  0,
-            hours:     capacity.remaining_hours,
-            h3_cell:   h3Cell,
-            agent_id:  capacity.agent_id,
-            source_id: capacity.id,
-            scope_ids: [],
-        };
-
-        // Register under each skill this agent offers in this context
-        const specIds = capacity.resource_specs;
-        addSlot(index, slot, specIds, st, h3Resolution);
     }
 
     return index;

@@ -38,12 +38,12 @@ import { dependentSupply } from '../algorithms/dependent-supply';
 import { bufferStatus, computeNFP, generateReplenishmentSignal, type NFPResult } from '../algorithms/ddmrp';
 import { bufferTypeFromTags, compositeBufferPriority } from '../utils/buffer-type';
 import { buildSNEIndex, type SNEIndex } from '../algorithms/SNE';
-import type { AgentIndex } from '../indexes/agents';
 import type { BufferZoneStore } from '../knowledge/buffer-zones';
 import type { DemandSlot } from '../indexes/independent-demand';
 import type { IndependentDemandIndex } from '../indexes/independent-demand';
 import type { IndependentSupplyIndex, SupplySlot } from '../indexes/independent-supply';
 import type { Observer } from '../observation/observer';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 import type {
     PlanningMode,
     SlotRecord,
@@ -73,7 +73,7 @@ export interface PlanningContext {
     bufferZoneStore?: BufferZoneStore;
     bufferProfiles?: Map<string, BufferProfile>;
     sneIndex?: SNEIndex;
-    agentIndex?: AgentIndex;
+    locationStore?: SpatialThingStore;
 }
 export type UnitPlanContext = PlanningContext;
 
@@ -167,7 +167,7 @@ export function mergePlanStores(subStores: PlanStore[], generateId?: () => strin
     return merged;
 }
 
-export function detectConflicts(planStore: PlanStore, observer: Observer, agentIndex?: AgentIndex): Conflict[] {
+export function detectConflicts(planStore: PlanStore, observer: Observer): Conflict[] {
     const conflicts: Conflict[] = [];
 
     const committedByResource = new Map<string, { total: number; candidates: string[] }>();
@@ -215,19 +215,16 @@ export function detectConflicts(planStore: PlanStore, observer: Observer, agentI
         entry.candidates.push(i.inputOf ?? i.id);
         workByAgent.set(agentId, entry);
     }
-    if (agentIndex) {
-        for (const [agentId, { total, candidates }] of workByAgent) {
-            const capacityNodes = [...agentIndex.agent_capacities.values()]
-                .filter(c => c.agent_id === agentId);
-            const totalCapacity = capacityNodes.reduce((s, c) => s + c.total_hours, 0);
-            if (totalCapacity > 0 && total > totalCapacity) {
-                conflicts.push({
-                    type: 'capacity-contention',
-                    resourceOrAgentId: agentId,
-                    overclaimed: total,
-                    candidates,
-                });
-            }
+    for (const [agentId, { total, candidates }] of workByAgent) {
+        const capRes = observer.capacityResourceForAgent(agentId);
+        const totalCapacity = capRes?.accountingQuantity?.hasNumericalValue ?? 0;
+        if (totalCapacity > 0 && total > totalCapacity) {
+            conflicts.push({
+                type: 'capacity-contention',
+                resourceOrAgentId: agentId,
+                overclaimed: total,
+                candidates,
+            });
         }
     }
 
@@ -1142,7 +1139,7 @@ function resolveConflicts(
     if (!subStores || subStores.length === 0) return;
 
     const { mode, canonical, horizon, ctx, planStore, netter, generateId } = session;
-    let conflicts = detectConflicts(planStore, ctx.observer, ctx.agentIndex);
+    let conflicts = detectConflicts(planStore, ctx.observer);
     let iterations = 0;
     const MAX_ITERATIONS = 10;
     while (conflicts.length > 0 && iterations < MAX_ITERATIONS) {
@@ -1196,12 +1193,12 @@ function resolveConflicts(
                         mode.scope.annotateChildCommitments(reResult.commitments, mergeChildProv.originLocation);
                     }
                 }
-                const newConflicts = detectConflicts(planStore, ctx.observer, ctx.agentIndex);
+                const newConflicts = detectConflicts(planStore, ctx.observer);
                 const stillConflicted = newConflicts.some(nc => nc.resourceOrAgentId === conflict.resourceOrAgentId);
                 if (!stillConflicted) break;
             }
         }
-        conflicts = detectConflicts(planStore, ctx.observer, ctx.agentIndex);
+        conflicts = detectConflicts(planStore, ctx.observer);
     }
 }
 
@@ -1407,7 +1404,7 @@ export function planForUnit(
         if (conservationFloors.size === 0) conservationFloors = undefined;
     }
 
-    const netter = new PlanNetter(planStore, ctx.observer, undefined, conservationFloors);
+    const netter = new PlanNetter(planStore, ctx.observer, undefined, conservationFloors, ctx.locationStore);
 
     const sneIndex = ctx.sneIndex ?? buildSNEIndex(ctx.recipeStore);
     const bufferedSpecs: ReadonlySet<string> = ctx.bufferZoneStore

@@ -1,6 +1,7 @@
 import { expect, test, describe } from "bun:test";
 import { buildIndependentDemandIndex, queryDemandBySpecAndLocation, queryPlanDemands, queryOpenDemands } from "../indexes/independent-demand";
-import type { Intent, Commitment, EconomicEvent, SpatialThing } from "../schemas";
+import { SpatialThingStore } from "../knowledge/spatial-things";
+import type { Intent, Commitment, EconomicEvent } from "../schemas";
 
 describe("IndependentDemandIndex", () => {
     test("buildIndependentDemandIndex properly handles satisfied and unsatisfied intents", () => {
@@ -54,7 +55,7 @@ describe("IndependentDemandIndex", () => {
             }
         ];
 
-        const locations = new Map<string, SpatialThing>();
+        const locations = new SpatialThingStore();
 
         const index = buildIndependentDemandIndex(intents, commitments, events, locations, 7);
 
@@ -107,10 +108,9 @@ describe("IndependentDemandIndex", () => {
         ];
 
         // Let's mock locations
-        const locations = new Map<string, SpatialThing>([
-            ["loc1", { id: "loc1", lat: 51.5074, long: -0.1278 }], // London
-            ["loc2", { id: "loc2", lat: 48.8566, long: 2.3522 }]   // Paris
-        ]);
+        const locations = new SpatialThingStore();
+        locations.addLocation({ id: "loc1", lat: 51.5074, long: -0.1278 }); // London
+        locations.addLocation({ id: "loc2", lat: 48.8566, long: 2.3522 });  // Paris
 
         const index = buildIndependentDemandIndex(intents, [], [], locations, 4);
 
@@ -157,7 +157,7 @@ describe("IndependentDemandIndex", () => {
             }
         ];
         
-        const index = buildIndependentDemandIndex([], commitments, [], new Map(), 7);
+        const index = buildIndependentDemandIndex([], commitments, [], new SpatialThingStore(), 7);
         
         const planAdemands = queryPlanDemands(index, "planA");
         expect(planAdemands.length).toBe(2);

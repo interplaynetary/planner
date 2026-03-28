@@ -26,8 +26,9 @@ import {
     type HexIndex, type HexNode,
 } from '../utils/space-time-index';
 import { intentToSpaceTimeContext, getSpaceTimeSignature, toDateKey, wrapDate } from '../utils/space-time-keys';
-import { spatialThingToH3 } from '../utils/space'
-import type { Intent, Commitment, EconomicEvent, SpatialThing } from '../schemas';
+import { spatialThingToH3WithContainment } from '../utils/space'
+import type { Intent, Commitment, EconomicEvent } from '../schemas';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 
 // =============================================================================
 // TYPES
@@ -167,7 +168,7 @@ export function buildIndependentDemandIndex(
     intents: Intent[],
     commitments: Commitment[],
     events: EconomicEvent[],
-    locations: Map<string, SpatialThing>,
+    locations: SpatialThingStore,
     h3Resolution: number = 7,
 ): IndependentDemandIndex {
     const index: IndependentDemandIndex = {
@@ -216,10 +217,10 @@ export function buildIndependentDemandIndex(
         const remainingHours = Math.max(0, requiredHours - doneHours);
 
         // Build the spatial context
-        const st = intent.atLocation ? locations.get(intent.atLocation) : undefined;
-        const ctx = intentToSpaceTimeContext(intent, st, h3Resolution);
+        const st = intent.atLocation ? locations.getLocation(intent.atLocation) : undefined;
+        const ctx = intentToSpaceTimeContext(intent, st, h3Resolution, locations);
         const sig = getSpaceTimeSignature(ctx, h3Resolution);
-        const h3Cell = st ? spatialThingToH3(st, h3Resolution) : undefined;
+        const h3Cell = st ? spatialThingToH3WithContainment(st, locations, h3Resolution) : undefined;
 
         const slot: DemandSlot = {
             intent_id:           intent.id,

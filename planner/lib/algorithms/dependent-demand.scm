@@ -33,7 +33,7 @@
                            recipe-store plan-store observer initial-ns
                            #:key (agents #f) (generate-id-fn #f) (sne-index #f)
                                  (at-location #f) (honor-decoupling-points #f)
-                                 (buffered-specs '()))
+                                 (buffered-specs '()) (location-store #f))
   "Explode a demand through the bill of materials via BFS.
    initial-ns: <netter-state> (immutable — threaded through via set! on binding).
    Returns (values new-ns result-alist)."
@@ -127,6 +127,9 @@
                                   (not (economic-resource-contained-in r))
                                   (economic-resource-current-location r)
                                   (not (equal? (economic-resource-current-location r) demand-location))
+                                  (not (and location-store
+                                            ($ location-store 'is-descendant-or-equal
+                                               (economic-resource-current-location r) demand-location)))
                                   (> (measure-qty (economic-resource-onhand-quantity r)) 0))
                              (let* ((loc (economic-resource-current-location r))
                                     (existing (assoc-ref acc loc)))

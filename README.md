@@ -394,7 +394,7 @@ CONSTRAINTS (in priority order):
 3. Satisfy all buffer replenishment signals (Red > Yellow)          ✓
    (red-first sorting of derived demands in Pass 2)
 4. Respect max_individual_effort_time per day                       ◐
-   (detectConflicts checks agent capacity ceiling when agentIndex provided;
+   (detectConflicts checks agent capacity via capacity EconomicResources;
     per-day granular limits not yet enforced)
 5. Satisfy independent demands to extent possible after 1-4        ✓
 ```

@@ -10,6 +10,7 @@
 
 import * as h3 from 'h3-js';
 import type { SpatialThing } from '../schemas';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 
 // ═══════════════════════════════════════════════════════════════════
 // CONSTANTS
@@ -148,6 +149,27 @@ export function spatialThingToH3(
 	if (st.lat === undefined || st.long === undefined) return undefined;
 	if (resolution < 0 || resolution > 15) return undefined;
 	return h3.latLngToCell(st.lat, st.long, resolution);
+}
+
+/**
+ * Derive an H3 cell from a VF SpatialThing, resolving through the
+ * containedIn chain when the immediate location lacks coordinates.
+ * Falls back to the nearest ancestor with lat/long.
+ */
+export function spatialThingToH3WithContainment(
+	st: SpatialThing,
+	store: SpatialThingStore,
+	resolution: number = DEFAULT_H3_RESOLUTION,
+): string | undefined {
+	if (resolution < 0 || resolution > 15) return undefined;
+	// Fast path: location has its own coordinates
+	if (st.lat !== undefined && st.long !== undefined) {
+		return h3.latLngToCell(st.lat, st.long, resolution);
+	}
+	// Walk containedIn chain for inherited coordinates
+	const coords = store.resolveCoordinates(st.id);
+	if (!coords) return undefined;
+	return h3.latLngToCell(coords.lat, coords.long, resolution);
 }
 
 /**

@@ -24,8 +24,9 @@ import {
 } from '../utils/space-time-index';
 import { getSpaceTimeSignature, intentToSpaceTimeContext } from '../utils/space-time-keys';
 import { hoursInWindowOnDate, type TemporalExpression } from '../utils/time';
-import { spatialThingToH3 } from '../utils/space';
-import type { Agent, Intent, SpatialThing, Commitment } from '../schemas';
+import { spatialThingToH3WithContainment } from '../utils/space';
+import type { Agent, Intent, Commitment } from '../schemas';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 
 // =============================================================================
 // TYPES
@@ -195,7 +196,7 @@ function commitmentOverlapsCapacity(
 export function buildAgentIndex(
     intents: Intent[],
     agents: Agent[],
-    locations: Map<string, SpatialThing>,
+    locations: SpatialThingStore,
     h3Resolution: number = 7,
     commitments: Commitment[] = [],
 ): AgentIndex {
@@ -226,8 +227,8 @@ export function buildAgentIndex(
         // Must have a provider to be supply
         if (!intent.provider) continue;
 
-        const st = intent.atLocation ? locations.get(intent.atLocation) : undefined;
-        const ctx = intentToSpaceTimeContext(intent, st, h3Resolution);
+        const st = intent.atLocation ? locations.getLocation(intent.atLocation) : undefined;
+        const ctx = intentToSpaceTimeContext(intent, st, h3Resolution, locations);
         const sig = getSpaceTimeSignature(ctx, h3Resolution);
         const capacityId = `${intent.provider}|${sig}`;
 
@@ -268,7 +269,7 @@ export function buildAgentIndex(
 
     // Commit accumulator → AgentCapacity records and build all indexes
     for (const [capacityId, acc] of accumulator) {
-        const h3Cell = acc.st ? spatialThingToH3(acc.st, h3Resolution) : undefined;
+        const h3Cell = acc.st ? spatialThingToH3WithContainment(acc.st, locations, h3Resolution) : undefined;
 
         // Tally committed effort hours for this capacity window
         let committed_hours = 0;

@@ -28,6 +28,7 @@
   import BufferStatusDashboard from "$lib/components/execution/BufferStatusDashboard.svelte";
   import { BufferSnapshotStore } from "$lib/knowledge/buffer-snapshots";
   import { startExecution } from "$lib/execution/scope-execution";
+  import { SpatialThingStore } from "$lib/knowledge/spatial-things";
   import type { ExecutionAlert } from "$lib/execution/alerts";
   import { SPEC_NAMES, buildFederationInventory } from "$lib/knowledge/federation-recipes";
 
@@ -1174,7 +1175,8 @@
     { observer: combinedObserver, planStore: new PlanStore(new ProcessRegistry()), bufferZoneStore, snapshotStore },
   );
 
-  const emptyAgentIndex = buildAgentIndex([], [], new Map());
+  const emptyLocations = new SpatialThingStore();
+  const emptyAgentIndex = buildAgentIndex([], [], emptyLocations);
 
   // Produce intents: each commune's committed production run.
   // Phase B of planForScope sees these as supply slots → generates SurplusSignal → lateral matching has a non-empty surplusPool.
@@ -1231,7 +1233,7 @@
 
   // Supply index = on-hand inventory + committed produce intents (Stratum 2a).
   // Phase B sees produce intents as forward-scheduled outputs → SurplusSignal generation.
-  const supplyIndex = buildIndependentSupplyIndex(allInventory, produceIntents, [], emptyAgentIndex, new Map());
+  const supplyIndex = buildIndependentSupplyIndex(allInventory, produceIntents, [], emptyAgentIndex, emptyLocations);
 
   // ---------------------------------------------------------------------------
   // planFederation — imperative replan with dirty-scope tracking
@@ -1254,7 +1256,7 @@
     {
       recipeStore,
       observer: combinedObserver,
-      demandIndex: buildIndependentDemandIndex(demandIntents, [], [], new Map()),
+      demandIndex: buildIndependentDemandIndex(demandIntents, [], [], emptyLocations),
       supplyIndex,
       parentOf: parentOfMap,
       memberCounts,
@@ -1271,7 +1273,7 @@
       {
         recipeStore,
         observer: combinedObserver,
-        demandIndex: buildIndependentDemandIndex(demandIntents, [], [], new Map()),
+        demandIndex: buildIndependentDemandIndex(demandIntents, [], [], emptyLocations),
         supplyIndex,
         parentOf: parentOfMap,
         memberCounts,

@@ -6,8 +6,10 @@
  * are the ephemeral planning outputs that reference them via bufferZoneId.
  *
  * Lookup semantics for findZone():
- *   - Exact match (specId + atLocation) wins over global zone (specId, no atLocation)
- *   - If no location-specific zone exists, falls back to the global zone for that spec
+ *   - Exact match (specId + atLocation) wins over ancestor or global zone
+ *   - When a SpatialThingStore is provided, walks up the containedIn chain to
+ *     find the nearest ancestor location with a configured buffer zone
+ *   - Falls back to the global zone for that spec (no atLocation)
  *
  * DDMRP ref: Ptak & Smith Ch 8 — Buffer Profiles & Levels
  *            Ch 12 — Signal Integrity
@@ -15,6 +17,7 @@
 
 import { nanoid } from 'nanoid';
 import type { BufferZone } from '../schemas';
+import type { SpatialThingStore } from './spatial-things';
 
 // =============================================================================
 // BUFFER ZONE STORE
@@ -64,17 +67,28 @@ export class BufferZoneStore {
      *
      * Priority:
      *   1. Exact match: specId + atLocation
-     *   2. Global match: specId + no atLocation
-     *   3. undefined (no zone configured)
+     *   2. Ancestor match: walk up containedIn chain (when locationStore provided)
+     *   3. Global match: specId + no atLocation
+     *   4. undefined (no zone configured)
      */
-    findZone(specId: string, atLocation?: string): BufferZone | undefined {
+    findZone(specId: string, atLocation?: string, locationStore?: SpatialThingStore): BufferZone | undefined {
+        const allZones = Array.from(this.zones.values());
         if (atLocation) {
-            const exact = Array.from(this.zones.values())
-                .find(z => z.specId === specId && z.atLocation === atLocation);
+            // Try exact match first
+            const exact = allZones.find(z => z.specId === specId && z.atLocation === atLocation);
             if (exact) return exact;
+            // Walk up containment chain for nearest ancestor with a buffer
+            if (locationStore) {
+                const chain = locationStore.resolveChain(atLocation);
+                // chain[0] is self (already tried), start from chain[1] (parent)
+                for (let i = 1; i < chain.length; i++) {
+                    const ancestor = allZones.find(z => z.specId === specId && z.atLocation === chain[i].id);
+                    if (ancestor) return ancestor;
+                }
+            }
         }
-        return Array.from(this.zones.values())
-            .find(z => z.specId === specId && !z.atLocation);
+        // Fall back to global zone
+        return allZones.find(z => z.specId === specId && !z.atLocation);
     }
 
     /**

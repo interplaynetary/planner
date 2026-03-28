@@ -5,13 +5,13 @@ import { BufferZoneStore } from '../knowledge/buffer-zones';
 import { planForScope } from '../planning/plan-for-scope';
 import { buildIndependentDemandIndex, type DemandSlot } from '../indexes/independent-demand';
 import { buildIndependentSupplyIndex } from '../indexes/independent-supply';
-import { buildAgentIndex } from '../indexes/agents';
 import { PLAN_TAGS, type ConservationMeta } from '../planning/planning';
 import type { BufferProfile, Intent } from '../schemas';
 import { compositeBufferPriority, bufferTypeFromTags } from '../utils/buffer-type';
+import { SpatialThingStore } from '../knowledge/spatial-things';
 
-const locations = new Map();
-const ai = buildAgentIndex([], [], new Map(), 7);
+const locations = new SpatialThingStore();
+const obs = new Observer();
 
 function makeProfile(id: string): BufferProfile {
     return {
@@ -72,7 +72,7 @@ describe('buffer-first inversion', () => {
             due: '2026-01-15T00:00:00.000Z', inScopeOf: ['c1'],
         };
         const di = makeDemandIndex([demandIntent]);
-        const si = buildIndependentSupplyIndex([], [], [], ai, locations);
+        const si = buildIndependentSupplyIndex([], [], [], obs, locations);
 
         // Without bufferProfiles → no buffer-first activation
         const result = planForScope(['c1'], horizon, {
@@ -118,7 +118,7 @@ describe('buffer-first inversion', () => {
             due: '2026-01-15T00:00:00.000Z', inScopeOf: ['c1'],
         };
         const di = makeDemandIndex([demandIntent]);
-        const si = buildIndependentSupplyIndex([], [], [], ai, locations);
+        const si = buildIndependentSupplyIndex([], [], [], obs, locations);
 
         const result = planForScope(['c1'], horizon, {
             recipeStore, observer, demandIndex: di, supplyIndex: si,
@@ -181,7 +181,7 @@ describe('buffer-first inversion', () => {
         bufferProfiles.set('p-met', makeProfile('p-met'));
 
         const di = makeDemandIndex([]);
-        const si = buildIndependentSupplyIndex([], [], [], ai, locations);
+        const si = buildIndependentSupplyIndex([], [], [], obs, locations);
 
         const result = planForScope(['c1'], horizon, {
             recipeStore, observer, demandIndex: di, supplyIndex: si,
@@ -225,7 +225,7 @@ describe('buffer-first inversion', () => {
             due: '2026-01-15T00:00:00.000Z', inScopeOf: ['c1'],
         };
         const di = makeDemandIndex([demandIntent]);
-        const si = buildIndependentSupplyIndex([], [], [], ai, locations);
+        const si = buildIndependentSupplyIndex([], [], [], obs, locations);
 
         const result = planForScope(['c1'], horizon, {
             recipeStore, observer, demandIndex: di, supplyIndex: si,
@@ -260,7 +260,7 @@ describe('buffer-first inversion', () => {
         bufferProfiles.set('p1', makeProfile('p1'));
 
         const di = makeDemandIndex([]);
-        const si = buildIndependentSupplyIndex([], [], [], ai, locations);
+        const si = buildIndependentSupplyIndex([], [], [], obs, locations);
 
         const result = planForScope(['c1'], horizon, {
             recipeStore, observer, demandIndex: di, supplyIndex: si,
@@ -300,7 +300,7 @@ describe('buffer-first inversion', () => {
         bufferProfiles.set('p1', makeProfile('p1'));
 
         const di = makeDemandIndex([]);
-        const si = buildIndependentSupplyIndex([], [], [], ai, locations);
+        const si = buildIndependentSupplyIndex([], [], [], obs, locations);
 
         const result = planForScope(['c1'], horizon, {
             recipeStore, observer, demandIndex: di, supplyIndex: si,
@@ -342,7 +342,7 @@ describe('buffer-first inversion', () => {
         bufferProfiles.set('p-eco', makeProfile('p-eco'));
 
         const di = makeDemandIndex([]);
-        const si = buildIndependentSupplyIndex([], [], [], ai, locations);
+        const si = buildIndependentSupplyIndex([], [], [], obs, locations);
 
         const result = planForScope(['c1'], horizon, {
             recipeStore, observer, demandIndex: di, supplyIndex: si,

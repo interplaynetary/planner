@@ -33,6 +33,7 @@ import type { PlanStore } from '../planning/planning';
 import type { Observer, FulfillmentState } from '../observation/observer';
 import type { RecipeStore } from '../knowledge/recipes';
 import type { BufferZoneStore } from '../knowledge/buffer-zones';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 import { materializeOccurrenceDates } from '../utils/recurrence';
 import { isSpecificDateWindow } from '../utils/time';
 import type { AvailabilityWindow } from '../utils/time';
@@ -47,6 +48,45 @@ import type { AvailabilityWindow } from '../utils/time';
  * Mirrors the same set used in netting.ts.
  */
 const NON_CONSUMING_ACTIONS = new Set(['use', 'work', 'cite', 'deliverService']);
+
+// =============================================================================
+// LOCATION-AWARE HELPERS
+// =============================================================================
+
+/**
+ * Sum on-hand quantity for a spec, optionally filtered to resources at a
+ * specific location or any of its descendants (hierarchical containment).
+ * When `atLocation` is undefined, sums across all locations.
+ */
+function sumOnHandAtLocation(
+    observer: Observer,
+    specId: string,
+    atLocation?: string,
+    locationStore?: SpatialThingStore,
+): number {
+    return observer.conformingResources(specId)
+        .filter(r => {
+            if (!atLocation) return true;
+            if (!r.currentLocation) return true; // unlocated resources count everywhere
+            if (r.currentLocation === atLocation) return true;
+            return locationStore?.isDescendantOrEqual(r.currentLocation, atLocation) ?? false;
+        })
+        .reduce((sum, r) => sum + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+}
+
+/**
+ * Hierarchical location match for DDMRP: returns true if `candidateLocation`
+ * is at or contained within `ancestorLocation`.
+ */
+function locationMatchesDDMRP(
+    candidateLocation: string | undefined,
+    ancestorLocation: string | undefined,
+    locationStore?: SpatialThingStore,
+): boolean {
+    if (!ancestorLocation || !candidateLocation) return true;
+    if (candidateLocation === ancestorLocation) return true;
+    return locationStore?.isDescendantOrEqual(candidateLocation, ancestorLocation) ?? false;
+}
 
 // =============================================================================
 // TYPES
@@ -680,6 +720,7 @@ export function aggregateAdjustmentFactors(
     asOf: Date,
     specId: string,
     atLocation?: string,
+    locationStore?: SpatialThingStore,
 ): AggregatedFactors {
     const asOfStr = asOf.toISOString().slice(0, 10);
 
@@ -693,9 +734,10 @@ export function aggregateAdjustmentFactors(
 
     for (const adj of adjustments) {
         if (adj.specId !== specId) continue;
-        // Location match: if adj is location-scoped it must match caller's location.
+        // Location match: if adj is location-scoped it must match caller's location
+        // (hierarchical — a DAF at a parent location applies to child locations).
         // Global adjustments (no atLocation) apply to all locations.
-        if (adj.atLocation && adj.atLocation !== atLocation) continue;
+        if (adj.atLocation && !locationMatchesDDMRP(atLocation, adj.atLocation, locationStore)) continue;
         // Active window: validFrom ≤ asOf ≤ validTo (YYYY-MM-DD string comparison)
         if (adj.validFrom > asOfStr || adj.validTo < asOfStr) continue;
 
@@ -816,10 +858,9 @@ export function computeNFP(
     planStore: PlanStore,
     observer: Observer,
     today: Date = new Date(),
+    locationStore?: SpatialThingStore,
 ): NFPResult {
-    const onhand = observer
-        .conformingResources(specId)
-        .reduce((sum, r) => sum + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+    const onhand = sumOnHandAtLocation(observer, specId, bufferZone.atLocation, locationStore);
 
     let onorder = 0;
     for (const c of planStore.commitmentsForSpec(specId)) {
@@ -992,6 +1033,7 @@ export function recalibrateBufferZone(
     profile: BufferProfile,
     adjustments: DemandAdjustmentFactor[],
     asOf: Date,
+    locationStore?: SpatialThingStore,
 ): BufferZone {
     // Ch 7: replenished_override zones are user-managed (contractual/constrained);
     // auto-recalculation must never overwrite user-set TOR/TOY/TOG values.
@@ -1001,7 +1043,7 @@ export function recalibrateBufferZone(
     }
 
     const factors = aggregateAdjustmentFactors(
-        adjustments, asOf, existing.specId, existing.atLocation,
+        adjustments, asOf, existing.specId, existing.atLocation, locationStore,
     );
 
     // Bootstrap ADU blending — Ch 7 Fig 7-16
@@ -1033,7 +1075,7 @@ export function recalibrateBufferZone(
     const activeAdjustmentIds = adjustments
         .filter(adj =>
             adj.specId === existing.specId &&
-            (!adj.atLocation || adj.atLocation === existing.atLocation) &&
+            (!adj.atLocation || locationMatchesDDMRP(existing.atLocation, adj.atLocation, locationStore)) &&
             adj.validFrom <= asOfStr &&
             adj.validTo >= asOfStr,
         )
@@ -1121,14 +1163,13 @@ export function projectOnHand(
     today: Date,
     planStore: PlanStore,
     observer: Observer,
+    locationStore?: SpatialThingStore,
 ): DailyProjectionEntry[] {
     const dltDays = Math.max(1, Math.ceil(bufferZone.dltDays));
     const result: DailyProjectionEntry[] = [];
 
-    // Day 0 = sum of current onhandQuantity
-    let runningOH = observer
-        .conformingResources(specId)
-        .reduce((sum, r) => sum + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+    // Day 0 = sum of current onhandQuantity (filtered to buffer zone's location scope)
+    let runningOH = sumOnHandAtLocation(observer, specId, bufferZone.atLocation, locationStore);
 
     // Pre-bucket commitments and intents by due date
     const supplyByDay  = new Map<string, number>(); // outputOf Commitments only
@@ -1717,6 +1758,7 @@ export function bufferHealthHistory(
     bz: BufferZone,
     fromDate: string,
     toDate: string,
+    locationStore?: SpatialThingStore,
 ): BufferHealthEntry[] {
     // Build a resource-id → conformsTo map for resolving transfer events
     const resourceSpec = new Map(resources.map(r => [r.id, r.conformsTo]));
@@ -1745,8 +1787,8 @@ export function bufferHealthHistory(
             const toSpec   = e.toResourceInventoriedAs ? resourceSpec.get(e.toResourceInventoriedAs) : undefined;
 
             if (bz.atLocation) {
-                if (toSpec === specId && e.toLocation === bz.atLocation)   delta =  qty; // incoming
-                else if (fromSpec === specId && e.atLocation === bz.atLocation) delta = -qty; // outgoing
+                if (toSpec === specId && locationMatchesDDMRP(e.toLocation, bz.atLocation, locationStore))   delta =  qty; // incoming
+                else if (fromSpec === specId && locationMatchesDDMRP(e.atLocation, bz.atLocation, locationStore)) delta = -qty; // outgoing
             } else {
                 // No location constraint: track from source if it matches spec
                 if (fromSpec === specId || e.resourceConformsTo === specId) delta = -qty;
@@ -1754,9 +1796,9 @@ export function bufferHealthHistory(
         } else {
             // Simple increment / decrement
             if (e.resourceConformsTo !== specId) continue;
-            // When the buffer zone has a location, exclude events that lack a matching
-            // atLocation (this filters out synthetic ADU-only history events).
-            if (bz.atLocation && e.atLocation !== bz.atLocation) continue;
+            // When the buffer zone has a location, exclude events outside its scope
+            // (hierarchical: events at child locations contribute to the buffer).
+            if (bz.atLocation && !locationMatchesDDMRP(e.atLocation, bz.atLocation, locationStore)) continue;
 
             if (def.onhandEffect === 'increment') delta =  qty;
             else if (def.onhandEffect === 'decrement') delta = -qty;
@@ -1948,6 +1990,7 @@ export function orderActivitySummary(
     planStore: PlanStore,
     observer: Observer,
     zoneStore: BufferZoneStore,
+    locationStore?: SpatialThingStore,
 ): OrderActivityEntry[] {
     function classifyOrderType(action: string): OrderActivityEntry['orderType'] {
         switch (action) {
@@ -1969,11 +2012,9 @@ export function orderActivitySummary(
 
             let bs: BufferStatusResult | undefined;
             if (c.resourceConformsTo) {
-                const zone = zoneStore.findZone(c.resourceConformsTo, c.atLocation);
+                const zone = zoneStore.findZone(c.resourceConformsTo, c.atLocation, locationStore);
                 if (zone) {
-                    const onhand = observer
-                        .conformingResources(c.resourceConformsTo)
-                        .reduce((sum, r) => sum + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+                    const onhand = sumOnHandAtLocation(observer, c.resourceConformsTo, zone.atLocation, locationStore);
                     bs = bufferStatus(onhand, zone);
                 }
             }
@@ -3001,6 +3042,7 @@ export function buildBufferHealthReport(
     planStore: PlanStore,
     observer: Observer,
     asOf?: Date,
+    locationStore?: SpatialThingStore,
 ): BufferHealthReport {
     const now = asOf ?? new Date();
     const buffers: BufferHealthReport['buffers'] = [];
@@ -3012,12 +3054,11 @@ export function buildBufferHealthReport(
         let zone: 'red' | 'yellow' | 'green' | 'excess';
 
         if (profile) {
-            const nfp = computeNFP(bz.specId, bz, profile, planStore, observer, now);
+            const nfp = computeNFP(bz.specId, bz, profile, planStore, observer, now, locationStore);
             zone = nfp.zone;
             onhand = nfp.onhand;
         } else {
-            onhand = observer.conformingResources(bz.specId)
-                .reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+            onhand = sumOnHandAtLocation(observer, bz.specId, bz.atLocation, locationStore);
             const status = bufferStatus(onhand, bz);
             zone = status.zone;
         }
@@ -3429,12 +3470,12 @@ export type ExecutionPriorityEntry = z.infer<typeof ExecutionPriorityEntrySchema
 export function computeExecutionPriority(
     bufferZoneStore: BufferZoneStore,
     observer: Observer,
+    locationStore?: SpatialThingStore,
 ): ExecutionPriorityEntry[] {
     const entries: ExecutionPriorityEntry[] = [];
 
     for (const bz of bufferZoneStore.allBufferZones()) {
-        const onhand = observer.conformingResources(bz.specId)
-            .reduce((sum, r) => sum + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
+        const onhand = sumOnHandAtLocation(observer, bz.specId, bz.atLocation, locationStore);
 
         const status = bufferStatus(onhand, bz);
         const percentage = bz.tog > 0 ? onhand / bz.tog : 0;

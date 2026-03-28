@@ -146,6 +146,15 @@ Features:
 - **Process completion**: standalone `check-process-completion` detects when all
   output commitments are fulfilled and marks the process finished
 
+**Capacity/capability model:**
+- `seed-capacity-resource` — creates ONE capacity resource per agent (total available
+  hours). Identified structurally by `unit-of-effort` field, not by tags. ID format:
+  `capacity:{agentId}`. Skills/capabilities are separate resources queried via
+  `skillsOf`/`agentsWithSkill`.
+- `capacity-resource-for-agent` — returns the single capacity resource for an agent
+- VF action semantics do the rest: `work.onhandEffect = noEffect` (non-consuming),
+  `work.accountableEffect = noEffect` (inalienable). No special guards needed.
+
 ### `^plan-store` — planning layer (1,300 lines)
 
 Holds all planning artifacts: intents, commitments, plans, agreements, claims,
@@ -154,7 +163,12 @@ commitments-by-spec, commitments-by-process) for O(k) lookups.
 
 Key operations:
 - **`promote-to-commitment`** — elevates an Intent to a Commitment with
-  `minimumQuantity` validation, `availableQuantity` check and decrement (ATP mechanism)
+  `minimumQuantity` validation, `availableQuantity` check and decrement (ATP mechanism).
+  Optional `observer-ref` parameter enables the **capacity ATP gate**: when
+  `action=work` and the referenced resource has `unit-of-effort` set, sums
+  already-committed work hours and rejects if the commitment would exceed
+  `onhandQuantity`. Over-offering (intents summing > capacity) is allowed;
+  overcommitment is structurally impossible.
 - **`instantiate-recipe`** — full recipe expansion with scaleFactor computation,
   back/forward scheduling, durable input detection, observer-based inventory
   allocation, and RecipeExchange→Agreement conversion
@@ -211,7 +225,9 @@ Persistence round-trips verified by spawning a fresh vat from the same memory-st
 
 Pre-built hashmap indexes for O(log n) queries over intents, commitments,
 economic events, economic resources, independent demand/supply, membership,
-proposals, and agent capacity.
+and proposals. The agents index (`agents.scm`) is a scheduling/assignment
+utility — the planning hot path derives capacity from `EconomicResource`
+records with `unit-of-effort` set, not from a separate agent index.
 
 ### Utilities (2 modules)
 
@@ -382,10 +398,10 @@ planner/lib/
 │   ├── economic-events.scm                 55 lines  Index: events by spec/action/agent/resource/process
 │   ├── economic-resources.scm              48 lines  Index: resources by spec/accountable/stage/location
 │   ├── independent-demand.scm              52 lines  Index: demand by spec/action/scope
-│   ├── independent-supply.scm              55 lines  Index: supply by spec (inventory + scheduled)
+│   ├── independent-supply.scm              55 lines  Index: supply by spec (excludes capacity resources)
 │   ├── membership.scm                      49 lines  Index: citizen/scope mapping
 │   ├── proposals.scm                       27 lines  Index: proposals by purpose/scope
-│   └── agents.scm                          32 lines  Index: agent capacity by spec
+│   └── agents.scm                          32 lines  Index: agent capacity (scheduling utility)
 └── utils/
     ├── buffer-type.scm                     38 lines  Utility: buffer type from tags
     └── recurrence.scm                     100 lines  Utility: occurrence tracking

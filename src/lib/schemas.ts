@@ -62,6 +62,7 @@ export const SpatialThingSchema = z.object({
     long: z.number().optional(),
     alt: z.number().optional(),
     mappableAddress: z.string().optional(),
+    containedIn: z.string().optional(),
 });
 export type SpatialThing = z.infer<typeof SpatialThingSchema>;
 

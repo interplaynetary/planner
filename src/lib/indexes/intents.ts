@@ -3,8 +3,9 @@ import {
     type HexIndex, type HexNode,
 } from '../utils/space-time-index';
 import { getSpaceTimeSignature, intentToSpaceTimeContext, toDateKey, wrapDate } from '../utils/space-time-keys';
-import { spatialThingToH3 } from '../utils/space';
-import type { Intent, SpatialThing } from '../schemas';
+import { spatialThingToH3WithContainment } from '../utils/space';
+import type { Intent } from '../schemas';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 
 export interface IntentIndex {
     intents:           Map<string, Intent>;
@@ -24,7 +25,7 @@ function addTo(map: Map<string, Set<string>>, key: string | undefined, id: strin
 
 export function buildIntentIndex(
     intents: Intent[],
-    locations: Map<string, SpatialThing>,
+    locations: SpatialThingStore,
     h3Resolution: number = 7,
 ): IntentIndex {
     const index: IntentIndex = {
@@ -46,8 +47,8 @@ export function buildIntentIndex(
         addTo(index.agent_index, intent.receiver, intent.id);
         addTo(index.plan_index, intent.plannedWithin, intent.id);
 
-        const st = intent.atLocation ? locations.get(intent.atLocation) : undefined;
-        const ctx = intentToSpaceTimeContext(intent, st, h3Resolution);
+        const st = intent.atLocation ? locations.getLocation(intent.atLocation) : undefined;
+        const ctx = intentToSpaceTimeContext(intent, st, h3Resolution, locations);
         const sig = getSpaceTimeSignature(ctx, h3Resolution);
         addTo(index.space_time_index, sig, intent.id);
 
@@ -56,7 +57,7 @@ export function buildIntentIndex(
                 index.spatial_hierarchy,
                 intent,
                 intent.id,
-                { lat: st.lat, lon: st.long, h3_index: spatialThingToH3(st, h3Resolution) },
+                { lat: st.lat, lon: st.long, h3_index: spatialThingToH3WithContainment(st, locations, h3Resolution) },
                 {
                     quantity: intent.resourceQuantity?.hasNumericalValue,
                     hours: intent.effortQuantity?.hasNumericalValue,

@@ -2,8 +2,9 @@ import {
     createHexIndex, addItemToHexIndex, queryHexIndexRadius,
     type HexIndex, type HexNode,
 } from '../utils/space-time-index';
-import { spatialThingToH3 } from '../utils/space';
-import type { EconomicResource, SpatialThing } from '../schemas';
+import { spatialThingToH3WithContainment } from '../utils/space';
+import type { EconomicResource } from '../schemas';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 
 export interface EconomicResourceIndex {
     resources:         Map<string, EconomicResource>;
@@ -32,7 +33,7 @@ function addTo(map: Map<string, Set<string>>, key: string | undefined, id: strin
 
 export function buildEconomicResourceIndex(
     resources: EconomicResource[],
-    locations: Map<string, SpatialThing>,
+    locations: SpatialThingStore,
     h3Resolution: number = 7,
 ): EconomicResourceIndex {
     const index: EconomicResourceIndex = {
@@ -53,9 +54,9 @@ export function buildEconomicResourceIndex(
         addTo(index.stage_index, resource.stage, resource.id);
         addTo(index.location_index, resource.currentLocation, resource.id);
 
-        const st = resource.currentLocation ? locations.get(resource.currentLocation) : undefined;
+        const st = resource.currentLocation ? locations.getLocation(resource.currentLocation) : undefined;
         if (st) {
-            const h3Cell = spatialThingToH3(st, h3Resolution);
+            const h3Cell = spatialThingToH3WithContainment(st, locations, h3Resolution);
             addTo(index.cell_index, h3Cell, resource.id);
 
             addItemToHexIndex(

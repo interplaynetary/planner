@@ -15,10 +15,11 @@ import { planForScope } from '../planning/plan-for-scope';
 import { planFederation, DefaultLateralMatchingPolicy, type LateralMatchingPolicy, type FederationPlanContext } from '../planning/plan-federation';
 import type { PlanningSession } from '../planning/plan-for-unit';
 import type { Intent } from '../schemas';
+import { SpatialThingStore } from '../knowledge/spatial-things';
 
-const locations = new Map();
+const locations = new SpatialThingStore();
 const di = buildIndependentDemandIndex([], [], [], locations);
-const ai = buildAgentIndex([], [], new Map(), 7);
+const ai = buildAgentIndex([], [], new SpatialThingStore(), 7);
 const si = buildIndependentSupplyIndex([], [], [], ai, locations);
 
 let idCounter = 0;

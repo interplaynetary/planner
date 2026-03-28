@@ -478,6 +478,12 @@ export function seedExample(): void {
     locations.addLocation({ id: 'loc-region-east',  name: 'East Region Warehouse'  });
     locations.addLocation({ id: 'loc-region-west',  name: 'West Region Warehouse'  });
 
+    // Indoor hierarchy — building → floor → room (coordinates on building only)
+    locations.addLocation({ id: 'loc-building-east', name: 'East Building',  lat: 38.555, long: -91.131 });
+    locations.addLocation({ id: 'loc-floor-2',       name: 'Floor 2',        containedIn: 'loc-building-east' });
+    locations.addLocation({ id: 'loc-room-3b',       name: 'Room 3B',        containedIn: 'loc-floor-2' });
+    locations.addLocation({ id: 'loc-room-3c',       name: 'Room 3C',        containedIn: 'loc-floor-2' });
+
     // Distribution agents
     agents.addAgent({ id: 'hub-midwest', type: 'Organization', name: 'Midwest Hub DC'        });
     agents.addAgent({ id: 'wh-east',     type: 'Organization', name: 'East Region Warehouse' });

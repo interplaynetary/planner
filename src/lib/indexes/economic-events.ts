@@ -3,8 +3,9 @@ import {
     type HexIndex, type HexNode,
 } from '../utils/space-time-index';
 import { getSpaceTimeSignature, economicEventToSpaceTimeContext, toDateKey, wrapDate } from '../utils/space-time-keys';
-import { spatialThingToH3 } from '../utils/space';
-import type { EconomicEvent, SpatialThing } from '../schemas';
+import { spatialThingToH3WithContainment } from '../utils/space';
+import type { EconomicEvent } from '../schemas';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 
 export interface EconomicEventIndex {
     events:                Map<string, EconomicEvent>;
@@ -26,7 +27,7 @@ function addTo(map: Map<string, Set<string>>, key: string | undefined, id: strin
 
 export function buildEconomicEventIndex(
     events: EconomicEvent[],
-    locations: Map<string, SpatialThing>,
+    locations: SpatialThingStore,
     h3Resolution: number = 7,
 ): EconomicEventIndex {
     const index: EconomicEventIndex = {
@@ -54,8 +55,8 @@ export function buildEconomicEventIndex(
         addTo(index.process_index, event.outputOf, event.id);
 
         // Origin (atLocation) — space-time signature + origin hierarchy
-        const originSt = event.atLocation ? locations.get(event.atLocation) : undefined;
-        const ctx = economicEventToSpaceTimeContext(event, originSt, h3Resolution);
+        const originSt = event.atLocation ? locations.getLocation(event.atLocation) : undefined;
+        const ctx = economicEventToSpaceTimeContext(event, originSt, h3Resolution, locations);
         const sig = getSpaceTimeSignature(ctx, h3Resolution);
         addTo(index.space_time_index, sig, event.id);
 
@@ -66,7 +67,7 @@ export function buildEconomicEventIndex(
                 index.origin_hierarchy,
                 event,
                 event.id,
-                { lat: originSt.lat, lon: originSt.long, h3_index: spatialThingToH3(originSt, h3Resolution) },
+                { lat: originSt.lat, lon: originSt.long, h3_index: spatialThingToH3WithContainment(originSt, locations, h3Resolution) },
                 {
                     quantity: event.resourceQuantity?.hasNumericalValue,
                     hours: event.effortQuantity?.hasNumericalValue,
@@ -76,13 +77,13 @@ export function buildEconomicEventIndex(
         }
 
         // Destination (toLocation) — destination hierarchy only
-        const destSt = event.toLocation ? locations.get(event.toLocation) : undefined;
+        const destSt = event.toLocation ? locations.getLocation(event.toLocation) : undefined;
         if (destSt) {
             addItemToHexIndex(
                 index.destination_hierarchy,
                 event,
                 event.id,
-                { lat: destSt.lat, lon: destSt.long, h3_index: spatialThingToH3(destSt, h3Resolution) },
+                { lat: destSt.lat, lon: destSt.long, h3_index: spatialThingToH3WithContainment(destSt, locations, h3Resolution) },
                 {
                     quantity: event.resourceQuantity?.hasNumericalValue,
                     hours: event.effortQuantity?.hasNumericalValue,

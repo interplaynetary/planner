@@ -8,6 +8,7 @@ import {
     type ScenarioIndex,
     type Scenario
 } from "../utils/space-time-scenario";
+import { SpatialThingStore } from "../knowledge/spatial-things";
 import type { Commitment, Process, SpatialThing, Intent } from "../schemas";
 import type { IndependentDemandIndex } from "../indexes/independent-demand";
 import { createHexIndex } from "../utils/space-time-index";
@@ -139,10 +140,9 @@ describe("ScenarioIndex and Scenario Logic", () => {
             resolution: 9
         };
 
-        const locations = new Map<string, SpatialThing>([
-            ["locA", { id: "locA", lat: 51.5, long: -0.1 }],
-            ["locB", { id: "locB", lat: 51.5, long: -0.1 }]
-        ]);
+        const locations = new SpatialThingStore();
+        locations.addLocation({ id: "locA", lat: 51.5, long: -0.1 });
+        locations.addLocation({ id: "locB", lat: 51.5, long: -0.1 });
 
         let idCount = 0;
         const result = mergeScenarios(sA, sB, 8, locations, () => `rand_id_${idCount++}`);

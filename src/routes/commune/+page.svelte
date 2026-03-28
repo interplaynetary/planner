@@ -54,6 +54,7 @@
     type DerivedDependentPolicy,
   } from "$lib/observation/demand-policy";
   import { buildIndependentDemandIndex } from "$lib/indexes/independent-demand";
+  import { SpatialThingStore } from "$lib/knowledge/spatial-things";
   import { seedExample } from "$lib/vf-seed";
   import { resetStores } from "$lib/vf-stores.svelte";
   import type { EconomicResource, Intent } from "$lib/schemas";
@@ -189,7 +190,7 @@
       ),
       commitmentList,
       eventList,
-      new Map(),
+      new SpatialThingStore(),
     ),
   );
 

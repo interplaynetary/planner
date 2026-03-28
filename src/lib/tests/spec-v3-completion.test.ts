@@ -9,13 +9,12 @@ import { PlanStore, PLAN_TAGS } from '../planning/planning';
 import { ProcessRegistry } from '../process-registry';
 import { buildIndependentDemandIndex } from '../indexes/independent-demand';
 import { buildIndependentSupplyIndex } from '../indexes/independent-supply';
-import { buildAgentIndex, type AgentIndex } from '../indexes/agents';
 import { buildSNEIndex, type SNEIndex } from '../algorithms/SNE';
 import { buildBufferHealthReport, computeDecoupledLeadTime, recipeLeadTime, orchestrateBufferRecalibration } from '../algorithms/ddmrp';
 import type { BufferProfile, Intent } from '../schemas';
+import { SpatialThingStore } from '../knowledge/spatial-things';
 
-const locations = new Map();
-const emptyAi = buildAgentIndex([], [], new Map(), 7);
+const locations = new SpatialThingStore();
 
 function makeProfile(id: string): BufferProfile {
     return {
@@ -104,7 +103,7 @@ describe('SNE wiring', () => {
             due: '2026-01-15T00:00:00.000Z', inScopeOf: ['c1'],
         };
         const di = makeDemandIndex([demandIntent]);
-        const si = buildIndependentSupplyIndex([], [], [], emptyAi, locations);
+        const si = buildIndependentSupplyIndex([], [], [], new Observer(), locations);
 
         const result = planForScope(['c1'], horizon, {
             recipeStore, observer, demandIndex: di, supplyIndex: si,
@@ -140,7 +139,7 @@ describe('SNE wiring', () => {
             due: '2026-01-15T00:00:00.000Z', inScopeOf: ['c1'],
         };
         const di = makeDemandIndex([demandIntent]);
-        const si = buildIndependentSupplyIndex([], [], [], emptyAi, locations);
+        const si = buildIndependentSupplyIndex([], [], [], new Observer(), locations);
 
         // No sneIndex provided — should still work (SNLT fallback)
         const result = planForScope(['c1'], horizon, {
@@ -166,18 +165,8 @@ describe('labor capacity ceiling', () => {
         const planId = 'p1';
         planStore.addPlan({ id: planId, name: 'Test plan' });
 
-        // Agent "alice" has 8h capacity
-        const agentIndex: AgentIndex = {
-            agents: new Map([['alice', { id: 'alice', name: 'Alice' }]]),
-            agent_capacities: new Map([
-                ['alice|default', {
-                    id: 'alice|default', agent_id: 'alice', space_time_signature: 'default',
-                    total_hours: 8, committed_hours: 0, remaining_hours: 8,
-                    resource_spec_ids: [],
-                }],
-            ]),
-            spec_index: new Map(),
-        };
+        // Agent "alice" has 8h capacity via capacity resource
+        observer.seedCapacityResource({ agentId: 'alice', hoursAvailable: 8 });
 
         // Add 12h of work commitments for alice
         const proc = processes.register({ id: 'proc-1', name: 'Work process', plannedWithin: planId });
@@ -192,14 +181,14 @@ describe('labor capacity ceiling', () => {
             plannedWithin: planId, finished: false,
         });
 
-        const conflicts = detectConflicts(planStore, observer, agentIndex);
+        const conflicts = detectConflicts(planStore, observer);
         const capacityConflicts = conflicts.filter(c => c.type === 'capacity-contention');
         expect(capacityConflicts).toHaveLength(1);
         expect(capacityConflicts[0].resourceOrAgentId).toBe('alice');
         expect(capacityConflicts[0].overclaimed).toBe(12);
     });
 
-    it('detectConflicts skips labor check without agentIndex', () => {
+    it('detectConflicts skips capacity check when no capacity resource exists', () => {
         const generateId = (() => { let n = 0; return () => `id-${++n}`; })();
         const processes = new ProcessRegistry(generateId);
         const planStore = new PlanStore(processes, generateId);
@@ -215,7 +204,7 @@ describe('labor capacity ceiling', () => {
             plannedWithin: planId, finished: false,
         });
 
-        // No agentIndex → no capacity-contention conflict
+        // No capacity resource → no capacity-contention conflict
         const conflicts = detectConflicts(planStore, observer);
         const capacityConflicts = conflicts.filter(c => c.type === 'capacity-contention');
         expect(capacityConflicts).toHaveLength(0);
@@ -272,7 +261,7 @@ describe('Phase B supply routing to buffers', () => {
         });
 
         const di = makeDemandIndex([]);
-        const si = buildIndependentSupplyIndex([], [], [], emptyAi, locations);
+        const si = buildIndependentSupplyIndex([], [], [], new Observer(), locations);
 
         const result = planForScope(['c1'], horizon, {
             recipeStore, observer, demandIndex: di, supplyIndex: si,
@@ -312,7 +301,7 @@ describe('Phase B supply routing to buffers', () => {
         // No demand, no external supply — just the resource above.
         // Buffer is green → no buffer-route plans should be created.
         const di = makeDemandIndex([]);
-        const si = buildIndependentSupplyIndex([], [], [], emptyAi, locations);
+        const si = buildIndependentSupplyIndex([], [], [], new Observer(), locations);
 
         const result = planForScope(['c1'], horizon, {
             recipeStore, observer, demandIndex: di, supplyIndex: si,
@@ -699,7 +688,7 @@ describe('planFederation threads sneIndex and agentIndex to scopes', () => {
             due: '2026-01-15T00:00:00.000Z', inScopeOf: ['c1'],
         };
         const di = makeDemandIndex([demandIntent]);
-        const si = buildIndependentSupplyIndex([], [], [], emptyAi, locations);
+        const si = buildIndependentSupplyIndex([], [], [], new Observer(), locations);
 
         const result = planFederation(['c1', 'c2'], horizon, {
             recipeStore, observer, demandIndex: di, supplyIndex: si,

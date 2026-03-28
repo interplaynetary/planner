@@ -76,12 +76,16 @@
 
 (define (extract-supply-from-observer observer canonical-ids)
   "Extract inventory supply slots from observer resources.
+   Capacity resources (unitOfEffort set) are excluded — they represent
+   agent time budgets, not material inventory. Capacity is enforced
+   at commitment time via the ATP gate in promote-to-commitment.
    Returns list of supply slot alists."
   (let ((resources ($ observer 'all-resources)))
     (filter-map
       (lambda (r)
         (let ((qty (measure-qty (economic-resource-onhand-quantity r))))
           (and (> qty *epsilon-pu*)
+               (not (economic-resource-unit-of-effort r))  ;; skip capacity resources
                `((id . ,(string-append "inv:" (economic-resource-id r)))
                  (slot-type . inventory)
                  (spec-id . ,(economic-resource-conforms-to r))

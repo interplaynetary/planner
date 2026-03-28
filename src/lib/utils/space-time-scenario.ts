@@ -44,10 +44,10 @@
  */
 
 import * as h3 from 'h3-js';
-import type { Process, Commitment, Intent, Plan, SpatialThing } from '../schemas';
+import type { Process, Commitment, Intent, Plan } from '../schemas';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 import type { IndependentDemandIndex, DemandSlot } from '../indexes/independent-demand';
 import { getSpaceTimeSignature, commitmentToSpaceTimeContext } from './space-time-keys';
-import { spatialThingToH3 } from './space';
 
 // =============================================================================
 // TYPES
@@ -333,7 +333,7 @@ function getOrCreateScenarioNode(
 export function addScenarioToIndex(
     index: ScenarioIndex,
     scenario: Scenario,
-    locations: Map<string, SpatialThing>,
+    locations: SpatialThingStore,
 ): void {
     index.scenarios.set(scenario.id, scenario);
 
@@ -476,7 +476,7 @@ export function mergeScenarios(
     a: Scenario,
     b: Scenario,
     resolution: number,
-    locations: Map<string, SpatialThing>,
+    locations: SpatialThingStore,
     generateId: () => string,
 ): Scenario | MergeConflict {
     // Both scenarios must share a parent H3 cell at `resolution`.
@@ -625,7 +625,7 @@ export function mergeFrontier(
     index: ScenarioIndex,
     scenarios: Scenario[],
     resolution: number,
-    locations: Map<string, SpatialThing>,
+    locations: SpatialThingStore,
     generateId: () => string,
     allIntents: Intent[],
 ): Scenario[] {
