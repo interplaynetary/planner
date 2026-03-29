@@ -4,6 +4,7 @@
     resourceList,
     resourceSpecs,
     bufferProfileList,
+    locations,
   } from '$lib/vf-stores.svelte';
   import { bufferStatus } from '$lib/algorithms/ddmrp';
   import { getBufferType, getResponseTime } from '$lib/utils/buffer-type';
@@ -31,9 +32,10 @@
 
   const enriched = $derived(
     bufferZoneList.map(bz => {
-      const pool = bz.atLocation
-        ? resourceList.filter(r => r.conformsTo === bz.specId && r.currentLocation === bz.atLocation)
-        : resourceList.filter(r => r.conformsTo === bz.specId);
+      const pool = resourceList.filter(r =>
+        r.conformsTo === bz.specId &&
+        (!bz.atLocation || !r.currentLocation || locations.isDescendantOrEqual(r.currentLocation, bz.atLocation))
+      );
       const onhand = pool.reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
       const status = bufferStatus(onhand, bz);
       const type = getBufferType(bz.specId, resourceSpecs);

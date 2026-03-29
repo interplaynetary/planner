@@ -23,7 +23,7 @@ import {
     createHexIndex, addItemToHexIndex, queryHexIndexRadius,
     type HexIndex, type HexNode,
 } from '../utils/space-time-index';
-import { spatialThingToH3 } from '../utils/space';
+import { spatialThingToH3WithContainment } from '../utils/space';
 import type { EconomicResource, Intent, Commitment, SpatialThing } from '../schemas';
 import type { SpatialThingStore } from '../knowledge/spatial-things';
 import type { Observer } from '../observation/observer';
@@ -191,7 +191,7 @@ export function buildIndependentSupplyIndex(
         if (qty <= 0) continue;
 
         const st = resource.currentLocation ? locations.getLocation(resource.currentLocation) : undefined;
-        const h3Cell = st ? spatialThingToH3(st, h3Resolution) : undefined;
+        const h3Cell = st ? spatialThingToH3WithContainment(st, locations, h3Resolution) : undefined;
 
         if (resource.unitOfEffort) {
             // Capacity resource → labor supply slot
@@ -237,7 +237,7 @@ export function buildIndependentSupplyIndex(
         if (intent.action === 'work') continue;   // labor handled separately
 
         const st = intent.atLocation ? locations.getLocation(intent.atLocation) : undefined;
-        const h3Cell = st ? spatialThingToH3(st, h3Resolution) : undefined;
+        const h3Cell = st ? spatialThingToH3WithContainment(st, locations, h3Resolution) : undefined;
 
         const slot: SupplySlot = {
             id:             'sched:' + intent.id,
@@ -262,7 +262,7 @@ export function buildIndependentSupplyIndex(
         if (commitment.action === 'work') continue;
 
         const st = commitment.atLocation ? locations.getLocation(commitment.atLocation) : undefined;
-        const h3Cell = st ? spatialThingToH3(st, h3Resolution) : undefined;
+        const h3Cell = st ? spatialThingToH3WithContainment(st, locations, h3Resolution) : undefined;
 
         const slot: SupplySlot = {
             id:             'sched:' + commitment.id,

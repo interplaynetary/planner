@@ -4,7 +4,7 @@
   import {
     processSpecs, processList, commitmentList, eventList,
     resourceList, bufferZoneList, resourceSpecs, capacityBufferList,
-    locationList, agentList,
+    locationList, agentList, locations,
   } from '$lib/vf-stores.svelte';
   import { capacityBufferStatus } from '$lib/algorithms/ddmrp';
   import { showTip, hideTip, moveTip } from '$lib/tooltip.svelte';
@@ -204,10 +204,9 @@
         const isWork  = c.action === 'work';
 
         // For work rows skip the inventory pool lookup
-        const pool = isWork ? [] : (
-          bz?.atLocation
-            ? resourceList.filter(r => r.conformsTo === specId && r.currentLocation === bz.atLocation)
-            : resourceList.filter(r => r.conformsTo === specId)
+        const pool = isWork ? [] : resourceList.filter(r =>
+          r.conformsTo === specId &&
+          (!bz?.atLocation || !r.currentLocation || locations.isDescendantOrEqual(r.currentLocation, bz.atLocation))
         );
         const onhand = pool.reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
         const unit   = isWork
@@ -442,7 +441,7 @@
         const locId = locIds[i];
         const cy    = baseY + secH / 2 + (i - (locIds.length - 1) / 2) * DN_ROW_H;
         const loc   = locationList.find(l => l.id === locId);
-        const warehouseRes = resourceList.find(r => r.currentLocation === locId);
+        const warehouseRes = resourceList.find(r => r.currentLocation && locations.isDescendantOrEqual(r.currentLocation, locId));
         const agentName    = warehouseRes?.primaryAccountable
           ? agentList.find(a => a.id === warehouseRes.primaryAccountable)?.name
           : undefined;
@@ -450,7 +449,7 @@
           .filter(bz => bz.atLocation === locId)
           .map(bz => {
             const spec = resourceSpecs.find(s => s.id === bz.specId);
-            const pool = resourceList.filter(r => r.conformsTo === bz.specId && r.currentLocation === locId);
+            const pool = resourceList.filter(r => r.conformsTo === bz.specId && r.currentLocation && locations.isDescendantOrEqual(r.currentLocation, locId));
             const onhand = pool.reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
             return {
               bz,

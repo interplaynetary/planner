@@ -14,7 +14,7 @@
     resourceSpecs, processSpecs, recipeList,
     planList, processList, commitmentList, intentList,
     resourceList, eventList, agentList, bufferZoneList,
-    capacityBufferList, bufferZones, refresh,
+    capacityBufferList, bufferZones, refresh, locations,
     adjustmentFactorList, upsertAdjustmentFactor,
     bufferProfileList,
   } from '$lib/vf-stores.svelte';
@@ -48,9 +48,10 @@
 
   const selectedBzOnhand = $derived.by(() => {
     if (!selectedBz) return 0;
-    const pool = selectedBz.atLocation
-      ? resourceList.filter(r => r.conformsTo === selectedBz.specId && r.currentLocation === selectedBz.atLocation)
-      : resourceList.filter(r => r.conformsTo === selectedBz.specId);
+    const pool = resourceList.filter(r =>
+      r.conformsTo === selectedBz.specId &&
+      (!selectedBz.atLocation || !r.currentLocation || locations.isDescendantOrEqual(r.currentLocation, selectedBz.atLocation))
+    );
     return pool.reduce((s, r) => s + (r.onhandQuantity?.hasNumericalValue ?? 0), 0);
   });
 

@@ -46,6 +46,7 @@ import type { RecipeStore } from '../knowledge/recipes';
 import { type EconomicContext } from '../planning/planning';
 import { PlanNetter } from '../planning/netting';
 import type { Observer } from '../observation/observer';
+import type { SpatialThingStore } from '../knowledge/spatial-things';
 import type { ProcessRegistry } from '../process-registry';
 import { computeSNEForRecipe, type SNEIndex } from './SNE';
 import {
@@ -189,6 +190,8 @@ export function dependentDemand(params: EconomicContext & {
     honorDecouplingPoints?: boolean;
     /** Spec IDs with active BufferZones — derived from bufferZoneStore at session start. */
     bufferedSpecs?: ReadonlySet<string>;
+    /** Optional SpatialThingStore for hierarchical location matching. */
+    locationStore?: SpatialThingStore;
 }): DependentDemandResult {
     const {
         planId,
@@ -203,7 +206,7 @@ export function dependentDemand(params: EconomicContext & {
     if (!plan) throw new Error(`Plan ${planId} not found`);
 
     // Use the provided netter or create a fresh one (backward compatible).
-    const netter = params.netter ?? new PlanNetter(planStore, params.observer);
+    const netter = params.netter ?? new PlanNetter(planStore, params.observer, undefined, undefined, params.locationStore);
 
     const result: DependentDemandResult = {
         plan,
