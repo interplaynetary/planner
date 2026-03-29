@@ -21,7 +21,7 @@
  */
 
 import { nanoid } from 'nanoid';
-import type { Intent, Plan, Process, Commitment, SpatialThing, Agent } from '../../src/lib/schemas';
+import type { Intent, Plan, Process, Commitment, Agent } from '../../src/lib/schemas';
 import { ACTION_DEFINITIONS } from '../../src/lib/schemas';
 import type { DemandSlot } from '../../src/lib/indexes/independent-demand';
 import { RecipeStore } from '../../src/lib/knowledge/recipes';
@@ -45,6 +45,7 @@ import {
     scenarioToPlan,
 } from '../../src/lib/utils/space-time-scenario';
 import { PlanStore } from '../../src/lib/planning/planning';
+import { SpatialThingStore } from '../../src/lib/knowledge/spatial-things';
 
 // =============================================================================
 // INFRASTRUCTURE TAG
@@ -566,7 +567,7 @@ export interface LeafScenarioParams {
     /** All open Intents in scope (denominator for coverage scoring). */
     allIntents: Intent[];
     /** SpatialThing lookup: location ID → SpatialThing. */
-    locations: Map<string, SpatialThing>;
+    locations: SpatialThingStore;
     config: IntegratedPlannerConfig;
     /**
      * Optional infrastructure reproduction target overrides (specId → quantity).
@@ -684,7 +685,7 @@ export function generateLeafScenario(params: LeafScenarioParams): Scenario | nul
 
     // ── Build Scenario with deterministic ID ──────────────────────────────────
     const signatures = [...allCommitments.values()].map(c => {
-        const loc = c.atLocation ? locations.get(c.atLocation) : undefined;
+        const loc = c.atLocation ? locations.getLocation(c.atLocation) : undefined;
         return commitmentSignature(c, loc, config.leafResolution);
     });
     const id = computeScenarioId(signatures);
@@ -733,7 +734,7 @@ export interface PlanningSearchParams {
     recipeStore: RecipeStore;
     planStore: PlanStore;
     /** SpatialThing lookup: location ID → SpatialThing. */
-    locations: Map<string, SpatialThing>;
+    locations: SpatialThingStore;
     config?: Partial<IntegratedPlannerConfig>;
     /**
      * Optional explicit infrastructure reproduction targets per cell.

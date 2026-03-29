@@ -25,7 +25,7 @@ import {
 import { getSpaceTimeSignature, intentToSpaceTimeContext } from '../utils/space-time-keys';
 import { hoursInWindowOnDate, type TemporalExpression } from '../utils/time';
 import { spatialThingToH3WithContainment } from '../utils/space';
-import type { Agent, Intent, Commitment } from '../schemas';
+import type { Agent, Intent, Commitment, SpatialThing } from '../schemas';
 import type { SpatialThingStore } from '../knowledge/spatial-things';
 
 // =============================================================================

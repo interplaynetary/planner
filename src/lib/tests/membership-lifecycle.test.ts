@@ -7,7 +7,6 @@ import { Observer } from '../observation/observer';
 import { BufferZoneStore } from '../knowledge/buffer-zones';
 import { buildIndependentDemandIndex } from '../indexes/independent-demand';
 import { buildIndependentSupplyIndex } from '../indexes/independent-supply';
-import { buildAgentIndex } from '../indexes/agents';
 import { SpatialThingStore } from '../knowledge/spatial-things';
 
 // =============================================================================
@@ -169,9 +168,8 @@ describe('integration: agent-derived hierarchy → planFederation', () => {
         const recipeStore = new RecipeStore();
         const observer = new Observer();
         const bufferZoneStore = new BufferZoneStore();
-        const emptyAgentIndex = buildAgentIndex([], [], new SpatialThingStore());
         const demandIndex = buildIndependentDemandIndex([], [], [], new SpatialThingStore());
-        const supplyIndex = buildIndependentSupplyIndex([], [], [], emptyAgentIndex, new SpatialThingStore());
+        const supplyIndex = buildIndependentSupplyIndex([], [], [], new Observer(), new SpatialThingStore());
 
         const result = planFederation(
             scopeIds,

@@ -44,7 +44,7 @@
  */
 
 import * as h3 from 'h3-js';
-import type { Process, Commitment, Intent, Plan } from '../schemas';
+import type { Process, Commitment, Intent, Plan, SpatialThing } from '../schemas';
 import type { SpatialThingStore } from '../knowledge/spatial-things';
 import type { IndependentDemandIndex, DemandSlot } from '../indexes/independent-demand';
 import { getSpaceTimeSignature, commitmentToSpaceTimeContext } from './space-time-keys';

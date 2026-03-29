@@ -6,7 +6,6 @@ import { planForScope } from '../planning/plan-for-scope';
 import { planFederation } from '../planning/plan-federation';
 import { buildIndependentDemandIndex } from '../indexes/independent-demand';
 import { buildIndependentSupplyIndex } from '../indexes/independent-supply';
-import { buildAgentIndex } from '../indexes/agents';
 import { bufferStatus } from '../algorithms/ddmrp';
 import { PlanStore, PLAN_TAGS, type ConservationMeta } from '../planning/planning';
 import { ProcessRegistry } from '../process-registry';
@@ -14,8 +13,7 @@ import { SpatialThingStore } from '../knowledge/spatial-things';
 
 const locations = new SpatialThingStore();
 const di = buildIndependentDemandIndex([], [], [], locations);
-const ai = buildAgentIndex([], [], new SpatialThingStore(), 7);
-const si = buildIndependentSupplyIndex([], [], [], ai, locations);
+const si = buildIndependentSupplyIndex([], [], [], new Observer(), locations);
 
 describe('ecological buffer — tippingPoint + ConservationSignal', () => {
     let recipeStore: RecipeStore;

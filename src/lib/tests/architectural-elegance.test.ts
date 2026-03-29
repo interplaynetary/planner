@@ -10,7 +10,6 @@ import { RecipeStore } from '../knowledge/recipes';
 import { BufferZoneStore } from '../knowledge/buffer-zones';
 import { buildIndependentDemandIndex } from '../indexes/independent-demand';
 import { buildIndependentSupplyIndex } from '../indexes/independent-supply';
-import { buildAgentIndex } from '../indexes/agents';
 import { planForScope } from '../planning/plan-for-scope';
 import { planFederation, DefaultLateralMatchingPolicy, type LateralMatchingPolicy, type FederationPlanContext } from '../planning/plan-federation';
 import type { PlanningSession } from '../planning/plan-for-unit';
@@ -19,8 +18,7 @@ import { SpatialThingStore } from '../knowledge/spatial-things';
 
 const locations = new SpatialThingStore();
 const di = buildIndependentDemandIndex([], [], [], locations);
-const ai = buildAgentIndex([], [], new SpatialThingStore(), 7);
-const si = buildIndependentSupplyIndex([], [], [], ai, locations);
+const si = buildIndependentSupplyIndex([], [], [], new Observer(), locations);
 
 let idCounter = 0;
 const generateId = () => `id-${++idCounter}`;

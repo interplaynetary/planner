@@ -7,7 +7,6 @@ import { RecipeStore } from '../knowledge/recipes';
 import { Observer } from '../observation/observer';
 import { buildIndependentDemandIndex } from '../indexes/independent-demand';
 import { buildIndependentSupplyIndex } from '../indexes/independent-supply';
-import { buildAgentIndex } from '../indexes/agents';
 import { PLAN_TAGS } from '../planning/planning';
 import { SpatialThingStore } from '../knowledge/spatial-things';
 
@@ -23,7 +22,6 @@ const parentOf = new Map([
 ]);
 
 const locations = new SpatialThingStore();
-const emptyAgentIndex = buildAgentIndex([], [], new SpatialThingStore(), 7);
 const horizon = { from: new Date('2026-04-01'), to: new Date('2026-06-30') };
 
 let idCounter = 0;
@@ -52,7 +50,7 @@ function makeCtx(overrides?: Partial<FederationPlanContext>): FederationPlanCont
     ];
 
     const demandIndex = buildIndependentDemandIndex(demandIntents, [], [], locations);
-    const supplyIndex = buildIndependentSupplyIndex([], [], [], emptyAgentIndex, locations);
+    const supplyIndex = buildIndependentSupplyIndex([], [], [], new Observer(), locations);
 
     return {
         recipeStore,

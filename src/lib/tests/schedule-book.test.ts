@@ -6,6 +6,7 @@ import { ProcessRegistry } from '../process-registry';
 import { Observer } from '../observation/observer';
 import { buildAgentIndex, nodeCoversDay, getTotalAgentHours, netEffortHours } from '../indexes/agents';
 import type { AgentCapacity } from '../indexes/agents';
+import { SpatialThingStore } from '../knowledge/spatial-things';
 import type { EconomicResource, Intent, Commitment } from '../schemas';
 
 // =============================================================================
@@ -405,7 +406,7 @@ describe('netEffortHours (agents.ts)', () => {
     }
 
     test('returns 0 for unknown agent', () => {
-        const index = buildAgentIndex([], [], new Map());
+        const index = buildAgentIndex([], [], new SpatialThingStore());
         expect(netEffortHours('agent:nobody', monday, index)).toBe(0);
     });
 
@@ -416,7 +417,7 @@ describe('netEffortHours (agents.ts)', () => {
             hasEnd: '2026-02-23T17:00:00.000Z',
             effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' },
         });
-        const index = buildAgentIndex([intent], [], new Map());
+        const index = buildAgentIndex([intent], [], new SpatialThingStore());
         expect(netEffortHours('agent:alice', monday, index)).toBe(8);
     });
 
@@ -434,7 +435,7 @@ describe('netEffortHours (agents.ts)', () => {
             hasEnd: '2026-02-23T15:00:00.000Z',
             effortQuantity: { hasNumericalValue: 6, hasUnit: 'hours' },
         };
-        const index = buildAgentIndex([intent], [], new Map(), 7, [commitment]);
+        const index = buildAgentIndex([intent], [], new SpatialThingStore(), 7, [commitment]);
         expect(netEffortHours('agent:alice', monday, index)).toBe(2);
     });
 
@@ -452,7 +453,7 @@ describe('netEffortHours (agents.ts)', () => {
             hasEnd: '2026-02-23T17:00:00.000Z',
             effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' },
         };
-        const index = buildAgentIndex([intent], [], new Map(), 7, [commitment]);
+        const index = buildAgentIndex([intent], [], new SpatialThingStore(), 7, [commitment]);
         expect(netEffortHours('agent:alice', monday, index)).toBe(0);
     });
 
@@ -463,7 +464,7 @@ describe('netEffortHours (agents.ts)', () => {
             hasEnd: '2026-02-23T17:00:00.000Z',
             effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' },
         });
-        const index = buildAgentIndex([intent], [], new Map());
+        const index = buildAgentIndex([intent], [], new SpatialThingStore());
         const tuesday = new Date('2026-02-24T10:00:00Z');
         expect(netEffortHours('agent:alice', tuesday, index)).toBe(0);
     });
@@ -476,7 +477,7 @@ describe('netEffortHours (agents.ts)', () => {
                 day_schedules: [{ days: ['monday'], time_ranges: [{ start_time: '09:00', end_time: '17:00' }] }],
             },
         });
-        const index = buildAgentIndex([intent], [], new Map());
+        const index = buildAgentIndex([intent], [], new SpatialThingStore());
         expect(netEffortHours('agent:alice', monday, index)).toBe(8);
         expect(netEffortHours('agent:alice', new Date('2026-02-24T10:00:00Z'), index)).toBe(0);
     });
@@ -494,7 +495,7 @@ describe('netEffortHours (agents.ts)', () => {
             hasEnd: '2026-02-23T17:00:00.000Z',
             effortQuantity: { hasNumericalValue: 3, hasUnit: 'hours' },
         });
-        const index = buildAgentIndex([i1, i2], [], new Map());
+        const index = buildAgentIndex([i1, i2], [], new SpatialThingStore());
         expect(netEffortHours('agent:alice', monday, index)).toBe(6);
     });
 });
@@ -514,7 +515,7 @@ describe('buildAgentIndex with commitments', () => {
             effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' },
             finished: false,
         };
-        const index = buildAgentIndex([intent], [], new Map());
+        const index = buildAgentIndex([intent], [], new SpatialThingStore());
         const capacities = [...index.agent_capacities.values()];
         expect(capacities).toHaveLength(1);
         expect(capacities[0].committed_hours).toBe(0);
@@ -541,7 +542,7 @@ describe('buildAgentIndex with commitments', () => {
             effortQuantity: { hasNumericalValue: 6, hasUnit: 'hours' },
             finished: false,
         };
-        const index = buildAgentIndex([intent], [], new Map(), 7, [commitment]);
+        const index = buildAgentIndex([intent], [], new SpatialThingStore(), 7, [commitment]);
         const capacities = [...index.agent_capacities.values()];
         expect(capacities[0].committed_hours).toBe(6);
         expect(capacities[0].remaining_hours).toBe(2);
@@ -567,7 +568,7 @@ describe('buildAgentIndex with commitments', () => {
             effortQuantity: { hasNumericalValue: 6, hasUnit: 'hours' },
             finished: false,
         };
-        const index = buildAgentIndex([intent], [], new Map(), 7, [commitment]);
+        const index = buildAgentIndex([intent], [], new SpatialThingStore(), 7, [commitment]);
         const capacities = [...index.agent_capacities.values()];
         expect(capacities[0].committed_hours).toBe(0);
     });
@@ -592,7 +593,7 @@ describe('buildAgentIndex with commitments', () => {
             effortQuantity: { hasNumericalValue: 6, hasUnit: 'hours' },
             finished: false,
         };
-        const index = buildAgentIndex([intent], [], new Map(), 7, [commitment]);
+        const index = buildAgentIndex([intent], [], new SpatialThingStore(), 7, [commitment]);
         const capacities = [...index.agent_capacities.values()];
         expect(capacities[0].committed_hours).toBe(0);
         expect(capacities[0].remaining_hours).toBe(8);
@@ -618,7 +619,7 @@ describe('buildAgentIndex with commitments', () => {
             effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' }, // more than offered
             finished: false,
         };
-        const index = buildAgentIndex([intent], [], new Map(), 7, [commitment]);
+        const index = buildAgentIndex([intent], [], new SpatialThingStore(), 7, [commitment]);
         const capacities = [...index.agent_capacities.values()];
         expect(capacities[0].committed_hours).toBe(8);
         expect(capacities[0].remaining_hours).toBe(0); // clamped
@@ -710,7 +711,7 @@ describe('buildAgentIndex — availability_window exposure', () => {
             availability_window: window,
             finished: false,
         };
-        const index = buildAgentIndex([intent], [], new Map());
+        const index = buildAgentIndex([intent], [], new SpatialThingStore());
         const cap = [...index.agent_capacities.values()][0];
         expect(cap.availability_window).toEqual(window);
     });
@@ -725,7 +726,7 @@ describe('buildAgentIndex — availability_window exposure', () => {
             effortQuantity: { hasNumericalValue: 8, hasUnit: 'hours' },
             finished: false,
         };
-        const index = buildAgentIndex([intent], [], new Map());
+        const index = buildAgentIndex([intent], [], new SpatialThingStore());
         const cap = [...index.agent_capacities.values()][0];
         expect(cap.availability_window).toBeUndefined();
     });
@@ -818,7 +819,7 @@ describe('getTotalAgentHours — dt guard', () => {
                 effortQuantity: { hasNumericalValue: 6, hasUnit: 'hours' },
             },
         ];
-        const index = buildAgentIndex(intents, [], new Map());
+        const index = buildAgentIndex(intents, [], new SpatialThingStore());
         const all = [...index.agent_capacities.values()];
         // No dt → all nodes summed
         expect(getTotalAgentHours(all)).toBe(14);
@@ -839,7 +840,7 @@ describe('getTotalAgentHours — dt guard', () => {
                 effortQuantity: { hasNumericalValue: 6, hasUnit: 'hours' },
             },
         ];
-        const index = buildAgentIndex(intents, [], new Map());
+        const index = buildAgentIndex(intents, [], new SpatialThingStore());
         const all = [...index.agent_capacities.values()];
         const monday = new Date('2026-02-23T10:00:00Z');
         const tuesday = new Date('2026-02-24T10:00:00Z');
@@ -856,7 +857,7 @@ describe('getTotalAgentHours — dt guard', () => {
                 day_schedules: [{ days: ['monday'], time_ranges: [{ start_time: '09:00', end_time: '17:00' }] }],
             },
         };
-        const index = buildAgentIndex([intent], [], new Map());
+        const index = buildAgentIndex([intent], [], new SpatialThingStore());
         const all = [...index.agent_capacities.values()];
         const monday = new Date('2026-02-23T10:00:00Z');  // Monday
         const tuesday = new Date('2026-02-24T10:00:00Z'); // Tuesday
