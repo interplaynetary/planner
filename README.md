@@ -1,6 +1,6 @@
 # Free Association — Composable Social Planner
 
-TypeScript · ValueFlows · federated social planning engine for composable communes
+TypeScript · ValueFlows · federated social planning engine for composable communes · funded as a public good via hypercerts
 
 > **Living design document.** Implementation status is annotated per section:
 > `✓` = implemented, `◐` = partially implemented.
@@ -460,6 +460,41 @@ The buffer-first perspective transforms the planner from a **demand satisfaction
 - **Regenerative planning:** "What buffers must we maintain? What demands can we satisfy given that constraint?"
 
 The architecture implements the full buffer-first inversion: Pass 0 pre-evaluates buffer health before demand allocation, buffer guards on Pass 1 defer demands threatening critical buffers, decoupling points derived from BufferZone existence (not spec-level tags), composite tier×zone priority ordering across buffer types, SNE-based recipe ranking throughout the pipeline, agent capacity ceiling detection, Phase B surplus routing to stressed buffers, aggregated `BufferHealthReport`, and automatic DLT segmentation at buffer boundaries via `computeDecoupledLeadTime()`. Remaining: per-day granular labor limits (constraint 4), OTIF tracker, S&OP aggregation.
+
+---
+
+## 12. Hypercerts — Public Good Funding `✓`
+
+> _Social and ecological planning is a public good. The planner produces plans that maintain ecological buffers, satisfy human needs, and coordinate federated communities — work whose benefits are diffuse, intergenerational, and non-excludable. Hypercerts make this work fundable._
+
+**[Hypercerts](https://hypercerts.org)** are impact certificates that represent claims to positive outcomes. Each hypercert issued by this planner snapshots a federation plan as a cohesive whole — the scopes planned, deficits resolved, lateral trades matched, conservation signals honored — and makes that impact legible and purchasable.
+
+### How it works
+
+1. **Issue:** After a federation plan runs, the planner issues a `PlanHypercert` that captures the plan's impact metadata — coherence score, deficit resolution rate, number of lateral matches, conservation signals emitted, contributing scopes, and work timeframe.
+
+2. **Fund:** Anyone can purchase fractional ownership of a hypercert with ETH via MetaMask. Funds are sent directly to a treasury address that finances the social plan. Price per unit scales with plan coherence and complexity — higher-quality plans with more lateral cooperation are worth more.
+
+3. **Mint:** Hypercerts can be minted on-chain via the `@hypercerts-org/hypercerts-sdk`, making the impact claim permanent, verifiable, and composable with the broader hypercerts ecosystem.
+
+### Why hypercerts for social planning
+
+The planner's work — maintaining soil buffers, coordinating seed banks across scopes, routing surplus medicine to deficit communities — generates impact that markets do not price. Hypercerts bridge this gap:
+
+- **Ecological buffer maintenance** is encoded in the plan as conservation signals and buffer zone targets. When a federation plan keeps an aquifer in the green zone or triggers reforestation via a replenishment signal, that impact is captured in the hypercert's metadata.
+- **Social coordination** — lateral matches between scopes, proportional sacrifice during scarcity, deficit resolution across communities — is measurable and recorded. Funders can see exactly how many inter-scope trades were brokered and what percentage of deficits were resolved.
+- **Intergenerational claims** are inherent. Buffer targets set by previous generations are constraints on current plans. Funding a hypercert is funding the maintenance of those intergenerational commitments.
+
+### Implementation
+
+```
+src/lib/observation/hypercerts.ts     — HypercertStore: issue, buy, mint, query
+src/lib/components/hypercerts/
+  HypercertPanel.svelte               — wallet connection, cert listing, issue button
+  HypercertCard.svelte                — per-cert detail: metrics, buy form, mint, ownership
+```
+
+The `HypercertStore` integrates with MetaMask for wallet connection and ETH transactions, targeting the Sepolia testnet for development. Each `PlanHypercert` carries full `PlanHypercertMetadata` derived from `FederationPlanResult` — coherence, deficit counts, lateral matches, conservation signals, and contributor scopes. Fractional purchases record wallet address, units, ETH paid, and on-chain transaction hash.
 
 ---
 

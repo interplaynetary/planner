@@ -8,6 +8,8 @@ import { PlanStore }             from '$lib/planning/planning';
 import { Observer }              from '$lib/observation/observer';
 import { Commune }               from '$lib/observation/account';
 import type { DemandEntry }      from '$lib/observation/account';
+import { HypercertStore }        from '$lib/observation/hypercerts';
+import type { PlanHypercert }    from '$lib/observation/hypercerts';
 import type { CommuneDemandPolicy, DerivedDependentPolicy } from '$lib/observation/demand-policy';
 import { buildMembershipIndex, type MembershipIndex } from '$lib/indexes/membership';
 import type {
@@ -40,6 +42,7 @@ export let agents                = new AgentStore();
 export let planner               = new PlanStore(registry);
 export let observer              = new Observer(registry);
 export let commune               = new Commune({ observer });
+export let hypercertStore         = new HypercertStore();
 export const resourcePriceSvc    = new Map<string, number>(); // specId → SVC per unit
 
 export const communeState = $state({
@@ -87,6 +90,7 @@ export const capacityBufferList      = $state<CapacityBuffer[]>([]);
 export const locationList            = $state<SpatialThing[]>([]);
 export const adjustmentFactorList    = $state<DemandAdjustmentFactor[]>([]);
 export const bufferProfileList       = $state<BufferProfile[]>([]);
+export const hypercertList           = $state<PlanHypercert[]>([]);
 export const communeDemandState      = $state<DemandEntry[]>([]);
 export const communeDemandPolicies      = $state<CommuneDemandPolicy[]>([]);
 export const derivedDependentPolicies   = $state<DerivedDependentPolicy[]>([]);
@@ -212,6 +216,7 @@ export function refresh() {
     membershipIndex.personToScope = rebuilt.personToScope;
     membershipIndex.scopeParent = rebuilt.scopeParent;
     membershipIndex.scopeToDescendantCitizens = rebuilt.scopeToDescendantCitizens;
+    syncArr(hypercertList,           hypercertStore.allCerts());
     syncArr(bufferZoneList,          bufferZones.allBufferZones());
     syncArr(capacityBufferList,      capacityBuffers.allBuffers());
     syncArr(locationList,            locations.allLocations());
@@ -234,6 +239,7 @@ export function resetStores() {
     observer             = new Observer(registry);
     observer.subscribe(() => refresh());
     commune              = new Commune({ observer });
+    hypercertStore       = new HypercertStore();
     resourcePriceSvc.clear();
     adjustmentFactorList.splice(0, adjustmentFactorList.length);
     bufferProfileList.splice(0, bufferProfileList.length);

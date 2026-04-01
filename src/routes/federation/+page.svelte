@@ -31,6 +31,8 @@
   import { SpatialThingStore } from "$lib/knowledge/spatial-things";
   import type { ExecutionAlert } from "$lib/execution/alerts";
   import { SPEC_NAMES, buildFederationInventory } from "$lib/knowledge/federation-recipes";
+  import HypercertPanel from "$lib/components/hypercerts/HypercertPanel.svelte";
+  import { HypercertStore } from "$lib/observation/hypercerts";
 
   const specNames = SPEC_NAMES;
 
@@ -1287,6 +1289,27 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Hypercerts — plan-level impact certificates with crypto marketplace
+  // ---------------------------------------------------------------------------
+
+  const localHypercertStore = new HypercertStore();
+  let hypercertTick = $state(0);
+
+  function issuePlanCert() {
+    localHypercertStore.issuePlanCert(federationResult, parentOfMap);
+    hypercertTick++;
+  }
+
+  function onHypercertChange() {
+    hypercertTick++;
+  }
+
+  const planHypercerts = $derived.by(() => {
+    void hypercertTick;
+    return localHypercertStore.allCerts();
+  });
+
+  // ---------------------------------------------------------------------------
   // Hub analytics — coherence, self-sufficiency, net flows
   // ---------------------------------------------------------------------------
 
@@ -1837,6 +1860,15 @@
       />
     </div>
   </div>
+
+  <!-- Hypercerts band — plan-level impact certificates & crypto marketplace -->
+  <HypercertPanel
+    hypercerts={planHypercerts}
+    store={localHypercertStore}
+    scopeNames={specNames}
+    onissue={issuePlanCert}
+    onchange={onHypercertChange}
+  />
 
   <!-- Network diagram band — only for leaf communes (hubs have empty plan stores) -->
   {#if selectedScope && selectedResult && !selectedIsHub}

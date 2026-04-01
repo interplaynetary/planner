@@ -23,6 +23,7 @@
 		"vite": "^7.3.1"
 	},
 	"dependencies": {
+		"@hypercerts-org/hypercerts-sdk": "^0.0.32",
 		"@tinyhumansai/neocortex": "^0.1.4",
 		"d3": "^7.9.0",
 		"h3-js": "^4.4.0",
@@ -30,6 +31,7 @@
 		"openai": "^6.29.0",
 		"svelteplot": "^0.11.0",
 		"trystero": "^0.22.0",
+		"viem": "^2.47.6",
 		"zod": "^4.3.6"
 	}
 }
