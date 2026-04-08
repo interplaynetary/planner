@@ -128,6 +128,8 @@ export class Observer {
     private eventsByAgent = new Map<string, string[]>();
     private eventsByAction = new Map<VfAction, string[]>();
     private eventsById = new Map<string, EconomicEvent>();
+    // spec-id → [resource-id]: O(k) lookup instead of O(R) scan for conformingResources / agentsWithSkill
+    private idxBySpec = new Map<string, string[]>();
 
     // Listeners
     private listeners: ObserverListener[] = [];
@@ -172,6 +174,25 @@ export class Observer {
             throw new Error(error);
         }
 
+        // VF pairs-with constraint: if an action pairs with another (e.g. accept↔modify,
+        // pickup↔dropoff), both events in the pair must reference the same resource.
+        const def0 = ACTION_DEFINITIONS[event.action];
+        if (def0.pairsWith && event.resourceInventoriedAs) {
+            const processId = event.inputOf ?? event.outputOf;
+            if (processId) {
+                const processEvents = this.eventsForProcess(processId);
+                const paired = processEvents.find(e => e.action === def0.pairsWith);
+                if (paired && paired.resourceInventoriedAs &&
+                    paired.resourceInventoriedAs !== event.resourceInventoriedAs) {
+                    throw new Error(
+                        `VF pairs-with violation: '${event.action}' references ` +
+                        `'${event.resourceInventoriedAs}' but paired '${def0.pairsWith}' ` +
+                        `in process '${processId}' references '${paired.resourceInventoriedAs}'`,
+                    );
+                }
+            }
+        }
+
         // --- Correction handling ---
         if (event.corrects) {
             this.applyCorrection(event);
@@ -195,6 +216,16 @@ export class Observer {
 
         // Apply action effects to resources
         const affected = this.applyEffects(event);
+
+        // Chain previousEvent for to-resource after effects (so newly-created resources are reachable).
+        // From-resource breadcrumb is above (before effects) so the event.previousEvent field is set
+        // correctly; we chain the to-resource here to enable trace from either end of a transfer.
+        if (event.toResourceInventoriedAs) {
+            const toResource = this.resources.get(event.toResourceInventoriedAs);
+            if (toResource && toResource.previousEvent !== event.id) {
+                toResource.previousEvent = event.id;
+            }
+        }
 
         // Track fulfillment or satisfaction (mutually exclusive)
         if (hasFulfills) {
@@ -285,6 +316,9 @@ export class Observer {
      */
     seedResource(resource: EconomicResource): void {
         this.resources.set(resource.id, { ...resource });
+        if (resource.conformsTo) {
+            this.appendIndex(this.idxBySpec, resource.conformsTo, resource.id);
+        }
     }
 
     /**
@@ -530,8 +564,10 @@ export class Observer {
             state: event.state,
         };
         this.resources.set(id, resource);
-        // Warn when no spec is provided — resource will be unclassifiable (J3)
-        if (!conformsTo) {
+        if (conformsTo) {
+            this.appendIndex(this.idxBySpec, conformsTo, id);
+        } else {
+            // Warn when no spec is provided — resource will be unclassifiable (J3)
             this.emit({ type: 'error', eventId: event.id,
                 error: `auto-created resource '${id}' has no conformsTo; set resourceConformsTo on the event` });
         }
@@ -1122,23 +1158,41 @@ export class Observer {
         const qty = def.eventQuantity === 'effortQuantity'
             ? event.effortQuantity : event.resourceQuantity;
         if (!qty) return;
+        const n = qty.hasNumericalValue;
 
-        // Reverse the quantity effects
-        const accountingEff = direction === 'to' && def.accountingEffect === 'noEffect'
-            ? 'noEffect' : def.accountingEffect;
-        const onhandEff = direction === 'to' && def.onhandEffect === 'noEffect'
-            ? 'noEffect' : def.onhandEffect;
-
-        if (accountingEff === 'increment' && resource.accountingQuantity) {
-            resource.accountingQuantity.hasNumericalValue -= qty.hasNumericalValue;
-        } else if (accountingEff === 'decrement' && resource.accountingQuantity) {
-            resource.accountingQuantity.hasNumericalValue += qty.hasNumericalValue;
+        // Reverse each effect symmetrically (what was increment becomes decrement, etc.)
+        if (resource.accountingQuantity) {
+            switch (def.accountingEffect) {
+                case 'increment':
+                    if (direction === 'from') resource.accountingQuantity.hasNumericalValue -= n;
+                    break;
+                case 'decrement':
+                    if (direction === 'from') resource.accountingQuantity.hasNumericalValue += n;
+                    break;
+                case 'decrementIncrement':
+                    resource.accountingQuantity.hasNumericalValue += direction === 'from' ? n : -n;
+                    break;
+                case 'incrementTo':
+                    if (direction === 'to') resource.accountingQuantity.hasNumericalValue -= n;
+                    break;
+            }
         }
 
-        if (onhandEff === 'increment' && resource.onhandQuantity) {
-            resource.onhandQuantity.hasNumericalValue -= qty.hasNumericalValue;
-        } else if (onhandEff === 'decrement' && resource.onhandQuantity) {
-            resource.onhandQuantity.hasNumericalValue += qty.hasNumericalValue;
+        if (resource.onhandQuantity) {
+            switch (def.onhandEffect) {
+                case 'increment':
+                    if (direction === 'from') resource.onhandQuantity.hasNumericalValue -= n;
+                    break;
+                case 'decrement':
+                    if (direction === 'from') resource.onhandQuantity.hasNumericalValue += n;
+                    break;
+                case 'decrementIncrement':
+                    resource.onhandQuantity.hasNumericalValue += direction === 'from' ? n : -n;
+                    break;
+                case 'incrementTo':
+                    if (direction === 'to') resource.onhandQuantity.hasNumericalValue -= n;
+                    break;
+            }
         }
     }
 
@@ -1209,5 +1263,6 @@ export class Observer {
         this.eventsByAgent.clear();
         this.eventsByAction.clear();
         this.eventsById.clear();
+        this.idxBySpec.clear();
     }
 }
